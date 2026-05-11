@@ -35,8 +35,15 @@ class PathsConfig(BaseModel):
 class ScraperConfig(BaseModel):
     sources: list[str] = ["qqmusic", "netease", "musicbrainz"]
     embed_cover: bool = True
+    cover_max_size: int = 0  # 0=原图, >0=缩略图宽度(px)
+    save_cover_file: bool = True  # 保存 cover.jpg 到专辑目录
     save_lyrics: bool = True
+    save_lyrics_to_tag: bool = True  # 写入歌词到标签
+    save_lyrics_file: bool = True  # 保存 .lrc 文件
     save_nfo: bool = False
+    rename_file: bool = False  # 是否重命名文件
+    rename_template: str = "${track} - ${title}"  # 重命名模板
+    overwrite_tag: bool = False  # 是否覆盖已有标签
 
 
 class SchedulerConfig(BaseModel):

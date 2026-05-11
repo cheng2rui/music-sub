@@ -1,5 +1,13 @@
-"""Music file tagger - write metadata to audio files."""
+"""Music file tagger - write metadata to audio files.
+
+Inspired by music-tag-web's update_ids.py:
+- Variable template support (${title}, ${artist}, ${album}, ${track}, ${filename})
+- Cover embedding with optional resize
+- Lyrics to tag + .lrc file
+- File renaming by template
+"""
 import os
+import re
 import logging
 from pathlib import Path
 from typing import Optional
@@ -9,17 +17,56 @@ from app.config import config
 
 logger = logging.getLogger(__name__)
 
+# Template variable pattern: ${xxx}
+TEMPLATE_PATTERN = re.compile(r"\$\{(\w+)\}")
+
+
+def _resolve_template(template: str, variables: dict) -> str:
+    """Resolve ${var} placeholders in template string."""
+    def replacer(match):
+        key = match.group(1)
+        return str(variables.get(key, ""))
+    result = TEMPLATE_PATTERN.sub(replacer, template)
+    # Clean up invalid filename chars
+    result = re.sub(r'[<>:"/\\|?*]', "", result)
+    return result.strip()
+
+
+def _resize_cover(cover_data: bytes, max_size: int) -> bytes:
+    """Resize cover image to max_size width, keeping aspect ratio."""
+    if not cover_data or max_size <= 0:
+        return cover_data
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(cover_data))
+        if img.width <= max_size:
+            return cover_data
+        ratio = max_size / img.width
+        new_size = (max_size, int(img.height * ratio))
+        img = img.resize(new_size, Image.LANCZOS)
+        buf = io.BytesIO()
+        fmt = "JPEG" if img.mode == "RGB" else "PNG"
+        img.save(buf, format=fmt, quality=90)
+        return buf.getvalue()
+    except ImportError:
+        logger.warning("Pillow not installed, skipping cover resize")
+        return cover_data
+    except Exception as e:
+        logger.warning(f"Cover resize failed: {e}")
+        return cover_data
+
 
 def tag_file(file_path: str, meta: MusicMeta) -> bool:
-    """Write metadata to an audio file using music_tag.
+    """Write metadata to an audio file.
 
-    Args:
-        file_path: Path to audio file
-        meta: Metadata to write
-
-    Returns:
-        True if successful
+    Respects config settings:
+    - overwrite_tag: skip if file already has tags
+    - embed_cover + cover_max_size
+    - save_lyrics_to_tag
+    - rename_file + rename_template
     """
+    cfg = config.scraper
     try:
         f = music_tag.load_file(file_path)
     except Exception as e:
@@ -27,6 +74,15 @@ def tag_file(file_path: str, meta: MusicMeta) -> bool:
         return False
 
     try:
+        # Check if we should skip (already tagged and overwrite disabled)
+        if not cfg.overwrite_tag:
+            existing_title = f["title"].value
+            existing_artist = f["artist"].value
+            if existing_title and existing_artist:
+                logger.debug(f"Skipping already tagged: {file_path}")
+                return True
+
+        # Write tags
         if meta.title:
             f["title"] = meta.title
         if meta.artist:
@@ -45,22 +101,61 @@ def tag_file(file_path: str, meta: MusicMeta) -> bool:
             f["discnumber"] = meta.disc_number
 
         # Embed cover art
-        if config.scraper.embed_cover and meta.cover_data:
-            f["artwork"] = meta.cover_data
+        if cfg.embed_cover and meta.cover_data:
+            cover = meta.cover_data
+            if cfg.cover_max_size > 0:
+                cover = _resize_cover(cover, cfg.cover_max_size)
+            f["artwork"] = cover
+
+        # Write lyrics to tag
+        if cfg.save_lyrics_to_tag and meta.lyrics:
+            f["lyrics"] = meta.lyrics
 
         f.save()
         logger.info(f"Tagged: {file_path} -> {meta.artist} - {meta.title}")
+
+        # Rename file if configured
+        if cfg.rename_file and cfg.rename_template:
+            _rename_file(file_path, meta)
+
         return True
     except Exception as e:
         logger.error(f"Failed to tag {file_path}: {e}")
         return False
 
 
+def _rename_file(file_path: str, meta: MusicMeta):
+    """Rename file using template variables."""
+    cfg = config.scraper
+    p = Path(file_path)
+    variables = {
+        "title": meta.title or "",
+        "artist": meta.artist or "",
+        "album": meta.album or "",
+        "track": str(meta.track_number).zfill(2) if meta.track_number else "00",
+        "filename": p.stem,
+    }
+    new_name = _resolve_template(cfg.rename_template, variables)
+    if not new_name:
+        return
+    new_path = p.parent / f"{new_name}{p.suffix}"
+    if new_path == p or new_path.exists():
+        return
+    try:
+        os.rename(file_path, str(new_path))
+        logger.info(f"Renamed: {p.name} -> {new_path.name}")
+    except Exception as e:
+        logger.error(f"Rename failed: {e}")
+
+
 def save_lyrics(file_path: str, lyrics: str) -> bool:
     """Save lyrics as .lrc file next to the audio file."""
-    if not lyrics or not config.scraper.save_lyrics:
+    cfg = config.scraper
+    if not lyrics or not cfg.save_lyrics_file:
         return False
     lrc_path = Path(file_path).with_suffix(".lrc")
+    if lrc_path.exists() and not cfg.overwrite_tag:
+        return True
     try:
         lrc_path.write_text(lyrics, encoding="utf-8")
         logger.info(f"Saved lyrics: {lrc_path}")
@@ -72,11 +167,15 @@ def save_lyrics(file_path: str, lyrics: str) -> bool:
 
 def save_cover(directory: str, cover_data: bytes) -> bool:
     """Save cover.jpg in the album directory."""
-    if not cover_data:
+    cfg = config.scraper
+    if not cover_data or not cfg.save_cover_file:
         return False
     cover_path = os.path.join(directory, "cover.jpg")
-    if os.path.exists(cover_path):
+    if os.path.exists(cover_path) and not cfg.overwrite_tag:
         return True
+    # Resize if configured
+    if cfg.cover_max_size > 0:
+        cover_data = _resize_cover(cover_data, cfg.cover_max_size)
     try:
         with open(cover_path, "wb") as f:
             f.write(cover_data)

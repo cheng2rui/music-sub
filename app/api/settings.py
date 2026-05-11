@@ -34,8 +34,15 @@ class PathsSettingInput(BaseModel):
 class ScraperSettingInput(BaseModel):
     sources: list[str] = ["qqmusic", "netease", "musicbrainz"]
     embed_cover: bool = True
+    cover_max_size: int = 0
+    save_cover_file: bool = True
     save_lyrics: bool = True
+    save_lyrics_to_tag: bool = True
+    save_lyrics_file: bool = True
     save_nfo: bool = False
+    rename_file: bool = False
+    rename_template: str = "${track} - ${title}"
+    overwrite_tag: bool = False
 
 
 class SchedulerSettingInput(BaseModel):

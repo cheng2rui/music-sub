@@ -230,18 +230,39 @@ input[type="text"] { flex: 1; min-width: 200px; }
 
     <div class="card">
       <div class="card-title">🏷️ 刮削配置</div>
-      <div class="form-row">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px">
         <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
-          <input type="checkbox" v-model="settingsData.scraper.embed_cover"> 嵌入封面
+          <input type="checkbox" v-model="settingsData.scraper.embed_cover"> 嵌入封面到标签
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
-          <input type="checkbox" v-model="settingsData.scraper.save_lyrics"> 保存歌词
+          <input type="checkbox" v-model="settingsData.scraper.save_cover_file"> 保存 cover.jpg
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.save_lyrics_to_tag"> 歌词写入标签
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.save_lyrics_file"> 保存 .lrc 文件
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
           <input type="checkbox" v-model="settingsData.scraper.save_nfo"> 生成 NFO
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.overwrite_tag"> 覆盖已有标签
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.rename_file"> 按模板重命名文件
+        </label>
       </div>
-      <div style="font-size:0.8rem;color:var(--text-dim);margin-top:4px">刮削源优先级：QQ音乐 → 网易云 → MusicBrainz</div>
+      <div class="form-row" style="margin-top:12px">
+        <label style="font-size:0.82rem;color:var(--text-dim);white-space:nowrap">封面最大尺寸(px, 0=原图)</label>
+        <input type="number" v-model.number="settingsData.scraper.cover_max_size" style="width:80px">
+        <label style="font-size:0.82rem;color:var(--text-dim);white-space:nowrap">重命名模板</label>
+        <input type="text" v-model="settingsData.scraper.rename_template" placeholder="${track} - ${title}" style="flex:1">
+      </div>
+      <div style="font-size:0.75rem;color:var(--text-dim);margin-top:8px">
+        刮削源优先级：QQ音乐 → 网易云 → MusicBrainz<br>
+        模板变量：${title} / ${artist} / ${album} / ${track} / ${filename}
+      </div>
     </div>
 
     <div class="card">
