@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  music-sub:
+    build: .
+    container_name: music-sub
+    ports:
+      - "8400:8400"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - /downloads/music:/downloads/music
+      - /music:/music
+    environment:
+      - MUSIC_SUB_CONFIG=/app/config/config.yaml
+      - MUSIC_SUB_DB=/app/data/music_sub.db
+    restart: unless-stopped

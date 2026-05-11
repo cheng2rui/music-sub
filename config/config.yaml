@@ -1,0 +1,44 @@
+sites:
+  mteam:
+    enabled: true
+    url: https://kp.m-team.cc
+    api_key: ""
+    token: ""
+  opencd:
+    enabled: false
+    url: https://open.cd
+    cookie: ""
+  ptclub:
+    enabled: false
+    url: https://pt.sjtu.edu.cn
+    cookie: ""
+  dismusic:
+    enabled: false
+    url: https://dis.music
+    cookie: ""
+
+qbittorrent:
+  host: http://192.168.1.1:8080
+  username: admin
+  password: ""
+  category: music
+  save_path: /downloads/music
+  tag: music-sub
+
+paths:
+  library: /music
+  structure: "{artist}/{album}"
+  downloads: /downloads/music
+
+scraper:
+  sources:
+    - qqmusic
+    - netease
+    - musicbrainz
+  embed_cover: true
+  save_lyrics: true
+  save_nfo: false
+
+scheduler:
+  search_interval_minutes: 30
+  check_complete_interval_minutes: 5
