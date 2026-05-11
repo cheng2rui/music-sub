@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Music Sub",
     description="音乐订阅下载管理系统 - PT站搜索订阅 + QB下载 + 硬链接整理 + 自动刮削",
-    version="0.1.0",
+    version="0.1.1",
     lifespan=lifespan,
 )
 
