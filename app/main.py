@@ -1,9 +1,14 @@
 """FastAPI application entry point."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.db import init_db
 from app.scheduler import start_scheduler, stop_scheduler
 from app.api import subscriptions, search, tasks, library
+
+WEB_DIR = Path(__file__).parent.parent / "web"
 
 
 @asynccontextmanager
@@ -35,8 +40,5 @@ def health():
 
 @app.get("/")
 def root():
-    return {
-        "name": "Music Sub",
-        "version": "0.1.0",
-        "docs": "/docs",
-    }
+    """Serve Web UI."""
+    return FileResponse(WEB_DIR / "index.html")

@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
 COPY config/ config/
+COPY web/ web/
 
 RUN mkdir -p /app/data /app/logs
 
