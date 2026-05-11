@@ -14,8 +14,8 @@
 }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 .app { max-width: 1200px; margin: 0 auto; padding: 16px; }
-.nav { display: flex; gap: 4px; margin-bottom: 24px; background: var(--surface); padding: 6px; border-radius: 12px; }
-.nav-btn { padding: 10px 20px; border: none; background: transparent; color: var(--text-dim); font-size: 0.9rem; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+.nav { display: flex; gap: 4px; margin-bottom: 24px; background: var(--surface); padding: 6px; border-radius: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.nav-btn { padding: 10px 20px; border: none; background: transparent; color: var(--text-dim); font-size: 0.9rem; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0; }
 .nav-btn.active { background: var(--blue); color: #fff; }
 .nav-btn:hover:not(.active) { background: var(--surface-2); color: var(--text); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
@@ -32,6 +32,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
 .btn-sm { padding: 5px 10px; font-size: 0.78rem; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.table tbody tr:hover { background: var(--surface-2); }
 .table th { color: var(--text-dim); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; }
 .badge-green { background: rgba(34,197,94,0.12); color: var(--green); }
@@ -39,8 +40,9 @@ input[type="text"] { flex: 1; min-width: 200px; }
 .badge-orange { background: rgba(245,158,11,0.12); color: var(--orange); }
 .badge-red { background: rgba(239,68,68,0.12); color: var(--red); }
 .empty { text-align: center; padding: 40px; color: var(--text-dim); }
-.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-.music-card { cursor: default; }
+.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.music-card { cursor: default; transition: transform 0.15s; }
+.music-card:hover { transform: translateY(-2px); }
 .music-cover { width: 100%; aspect-ratio: 1; border-radius: 10px; background: var(--surface-2); background-size: cover; background-position: center; position: relative; overflow: hidden; }
 .music-cover:hover .cover-btn { opacity: 1; }
 .cover-btn { position: absolute; bottom: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; background: var(--blue); color: #fff; border: none; font-size: 1.1rem; font-weight: 700; cursor: pointer; opacity: 0; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; }
@@ -57,13 +59,16 @@ input[type="text"] { flex: 1; min-width: 200px; }
 @media (max-width: 640px) {
   .form-row { flex-direction: column; }
   .nav-btn { padding: 8px 12px; font-size: 0.82rem; }
+  .grid-cards { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+  .card { padding: 14px; }
+  .card-title { font-size: 1rem; }
 }
 </style>
 </head>
 <body>
 <div id="app" class="app">
   <h1 style="font-size:1.3rem;margin-bottom:16px;display:flex;align-items:center;gap:8px">
-    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.1.0</span>
+    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.2.0</span>
   </h1>
 
   <div class="nav">
@@ -119,7 +124,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
       <table v-else class="table">
         <tbody>
           <tr v-for="song in toplist" :key="song.rank">
-            <td style="width:30px;font-weight:700;color:var(--text-dim)">{{ song.rank }}</td>
+            <td style="width:30px;font-weight:700" :style="{color: song.rank<=3 ? 'var(--orange)' : 'var(--text-dim)'}">{{ song.rank }}</td>
             <td>
               <div style="font-weight:600">{{ song.title }}</div>
               <div style="font-size:0.78rem;color:var(--text-dim)">{{ song.artist }} · {{ song.album }}</div>
@@ -153,7 +158,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
     </div>
     <div class="card">
       <div class="card-title">订阅列表</div>
-      <div v-if="subs.length===0" class="empty">暂无订阅，添加一个开始吧</div>
+      <div v-if="subs.length===0" class="empty">暂无订阅，添加一个开始吧 🎵</div>
       <table v-else class="table">
         <thead><tr><th>关键词</th><th>类型</th><th>品质</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
@@ -191,7 +196,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
             <td><span class="badge badge-blue">{{ r.site }}</span></td>
             <td>{{ formatSize(r.size) }}</td>
             <td>{{ r.seeders }}</td>
-            <td><button class="btn btn-sm btn-success" @click="downloadTorrent(r)">⬇️ 下载</button></td>
+            <td><button class="btn btn-sm btn-success" @click="downloadTorrent(r)" :disabled="r._downloading">{{ r._downloading ? '⏳' : '⬇️' }} {{ r._downloading ? '下载中' : '下载' }}</button></td>
           </tr>
         </tbody>
       </table>
@@ -441,10 +446,14 @@ createApp({
       searching.value = false; searchDone.value = true;
     }
     async function downloadTorrent(r) {
-      const resp = await fetch(`${API}/api/search/download?site=${r.site}&torrent_id=${r.torrent_id}&title=${encodeURIComponent(r.title)}`, { method: 'POST' });
-      const data = await resp.json();
-      if (data.ok) alert('✅ 已推送到 QB 下载');
-      else alert('❌ 下载失败: ' + (data.detail || ''));
+      r._downloading = true;
+      try {
+        const resp = await fetch(`${API}/api/search/download?site=${r.site}&torrent_id=${r.torrent_id}&title=${encodeURIComponent(r.title)}`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) alert('✅ 已推送到 QB 下载');
+        else alert('❌ 下载失败: ' + (data.detail || ''));
+      } catch(e) { alert('❌ 请求失败: ' + e.message); }
+      r._downloading = false;
     }
 
     // Tasks
