@@ -61,6 +61,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
     <button class="nav-btn" :class="{active: tab==='search'}" @click="tab='search'">🔍 搜索</button>
     <button class="nav-btn" :class="{active: tab==='tasks'}" @click="tab='tasks';loadTasks()">⬇️ 任务</button>
     <button class="nav-btn" :class="{active: tab==='library'}" @click="tab='library';loadLibrary()">🎶 音乐库</button>
+    <button class="nav-btn" :class="{active: tab==='settings'}" @click="tab='settings';loadSettings()">⚙️ 设置</button>
   </div>
 
   <!-- 订阅页 -->
@@ -182,6 +183,83 @@ input[type="text"] { flex: 1; min-width: 200px; }
   </div>
 </div>
 
+  <!-- 设置页 -->
+  <div v-if="tab==='settings'">
+    <div class="card">
+      <div class="card-title">📡 PT 站配置</div>
+      <div v-for="(site, name) in settingsData.sites" :key="name" style="margin-bottom:16px;padding:12px;background:var(--surface-2);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="font-weight:700;min-width:80px">{{ name }}</span>
+          <label style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:4px">
+            <input type="checkbox" v-model="site.enabled"> 启用
+          </label>
+        </div>
+        <div class="form-row">
+          <input type="text" v-model="site.url" placeholder="URL" style="flex:2">
+          <input type="text" v-model="site.api_key" placeholder="API Key" v-if="name==='mteam'">
+          <input type="text" v-model="site.token" placeholder="Token" v-if="name==='mteam'">
+          <input type="text" v-model="site.cookie" placeholder="Cookie" v-if="name!=='mteam'">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⬇️ qBittorrent</div>
+      <div class="form-row">
+        <input type="text" v-model="settingsData.qbittorrent.host" placeholder="地址 (http://ip:port)" style="flex:2">
+        <input type="text" v-model="settingsData.qbittorrent.username" placeholder="用户名">
+        <input type="password" v-model="settingsData.qbittorrent.password" placeholder="密码">
+      </div>
+      <div class="form-row">
+        <input type="text" v-model="settingsData.qbittorrent.category" placeholder="分类">
+        <input type="text" v-model="settingsData.qbittorrent.save_path" placeholder="保存路径">
+        <input type="text" v-model="settingsData.qbittorrent.tag" placeholder="标签">
+        <button class="btn btn-sm btn-primary" @click="testQB">🔌 测试连接</button>
+      </div>
+      <div v-if="qbTestResult" style="margin-top:8px;font-size:0.82rem" :style="{color: qbTestOk?'var(--green)':'var(--red)'}">{{ qbTestResult }}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📁 路径配置</div>
+      <div class="form-row">
+        <input type="text" v-model="settingsData.paths.library" placeholder="音乐库路径">
+        <input type="text" v-model="settingsData.paths.structure" placeholder="目录结构 ({artist}/{album})">
+        <input type="text" v-model="settingsData.paths.downloads" placeholder="下载路径">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🏷️ 刮削配置</div>
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.embed_cover"> 嵌入封面
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.save_lyrics"> 保存歌词
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+          <input type="checkbox" v-model="settingsData.scraper.save_nfo"> 生成 NFO
+        </label>
+      </div>
+      <div style="font-size:0.8rem;color:var(--text-dim);margin-top:4px">刮削源优先级：QQ音乐 → 网易云 → MusicBrainz</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⏰ 定时任务</div>
+      <div class="form-row">
+        <label style="font-size:0.85rem;color:var(--text-dim)">搜索间隔(分钟)</label>
+        <input type="number" v-model.number="settingsData.scheduler.search_interval_minutes" style="width:80px">
+        <label style="font-size:0.85rem;color:var(--text-dim)">完成检查间隔(分钟)</label>
+        <input type="number" v-model.number="settingsData.scheduler.check_complete_interval_minutes" style="width:80px">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn btn-primary" @click="saveSettings" :disabled="saving">💾 {{ saving?'保存中...':'保存配置' }}</button>
+      <span v-if="saveMsg" style="font-size:0.85rem;color:var(--green);align-self:center">{{ saveMsg }}</span>
+    </div>
+  </div>
+
 <script>
 const { createApp, ref, onMounted } = Vue;
 
@@ -266,6 +344,43 @@ createApp({
     }
 
     // Helpers
+
+    // Settings
+    const settingsData = ref({
+      sites: {}, qbittorrent: {}, paths: {}, scraper: {}, scheduler: {}
+    });
+    const saving = ref(false);
+    const saveMsg = ref('');
+    const qbTestResult = ref('');
+    const qbTestOk = ref(false);
+
+    async function loadSettings() {
+      const r = await fetch(`${API}/api/settings/`);
+      settingsData.value = await r.json();
+    }
+    async function saveSettings() {
+      saving.value = true; saveMsg.value = '';
+      try {
+        const r = await fetch(`${API}/api/settings/`, {
+          method: 'PUT', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(settingsData.value)
+        });
+        const data = await r.json();
+        saveMsg.value = data.ok ? '✅ 已保存' : '❌ 保存失败';
+        setTimeout(() => saveMsg.value = '', 3000);
+      } catch(e) { saveMsg.value = '❌ ' + e.message; }
+      saving.value = false;
+    }
+    async function testQB() {
+      qbTestResult.value = '测试中...'; qbTestOk.value = false;
+      try {
+        const r = await fetch(`${API}/api/settings/test_qb`, { method: 'POST' });
+        const data = await r.json();
+        qbTestOk.value = data.ok;
+        qbTestResult.value = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
+      } catch(e) { qbTestResult.value = '❌ ' + e.message; }
+    }
+
     function formatSize(bytes) {
       if (!bytes) return '-';
       const units = ['B','KB','MB','GB','TB'];
@@ -291,6 +406,7 @@ createApp({
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks,
       libStats, libFiles, loadLibrary,
+      settingsData, saving, saveMsg, qbTestResult, qbTestOk, loadSettings, saveSettings, testQB,
       formatSize, formatDate, statusClass,
     };
   }
