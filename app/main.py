@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.db import init_db
 from app.scheduler import start_scheduler, stop_scheduler
-from app.api import subscriptions, search, tasks, library, settings
+from app.api import subscriptions, search, tasks, library, settings, discover
 
 WEB_DIR = Path(__file__).parent.parent / "web"
 
@@ -32,6 +32,7 @@ app.include_router(search.router, prefix="/api/search", tags=["search"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(library.router, prefix="/api/library", tags=["library"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(discover.router, prefix="/api/discover", tags=["discover"])
 
 
 @app.get("/api/health")
