@@ -9,6 +9,7 @@ from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
 from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo
 from app.scrapers.base import MusicMeta
+from app.services.notify import notify_download_complete, notify_scrape_complete, notify_error
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ def _process_completed_torrent(torrent: dict):
         logger.warning(f"No audio files found in {content_path}")
         mark_processed(torrent_hash)
         return
+
+    notify_download_complete(torrent_name, len(linked_files))
 
     # Step 2: Scrape and tag each file
     db = SessionLocal()
@@ -144,6 +147,11 @@ def _process_completed_torrent(torrent: dict):
         if task:
             task.status = "scraped"
         db.commit()
+
+        # Notify scrape complete
+        scraped_count = sum(1 for t in nfo_tracks)
+        total_count = sum(1 for f in linked_files if is_audio_file(f))
+        notify_scrape_complete(torrent_name, scraped_count, total_count)
     finally:
         db.close()
 
@@ -163,4 +171,5 @@ def check_completed_downloads():
             _process_completed_torrent(torrent)
         except Exception as e:
             logger.error(f"Failed to process {torrent.get('name')}: {e}")
+            notify_error(f"处理种子: {torrent.get('name', '?')}", str(e))
             mark_processed(torrent.get("hash", ""))

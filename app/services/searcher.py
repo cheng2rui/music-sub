@@ -1,13 +1,14 @@
 """Multi-site search aggregator."""
 import logging
 from typing import Optional
-from app.config import config
+import app.config as cfg_module
 from app.sites.base import BaseSite, TorrentInfo
 from app.sites.mteam import MTeamSite
 from app.sites.opencd import OpenCDSite
 from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
 from app.services.subscription import get_all_subscriptions, update_last_search
+from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client
 from app.models import DownloadTask
 from app.db import SessionLocal
@@ -24,7 +25,7 @@ SITE_CLASSES = {
 
 def _get_site_instance(name: str) -> Optional[BaseSite]:
     """Create a site instance from config."""
-    site_cfg = config.sites.get(name)
+    site_cfg = cfg_module.config.sites.get(name)
     if not site_cfg or not site_cfg.enabled:
         return None
     cls = SITE_CLASSES.get(name)
@@ -43,7 +44,7 @@ def _get_site_instance(name: str) -> Optional[BaseSite]:
 def search_sites(keyword: str, site_names: list[str] = None) -> list[TorrentInfo]:
     """Search multiple PT sites for a keyword."""
     results = []
-    sites_to_search = site_names or list(config.sites.keys())
+    sites_to_search = site_names or list(cfg_module.config.sites.keys())
 
     for name in sites_to_search:
         site = _get_site_instance(name)
@@ -79,6 +80,7 @@ def download_from_site(site_name: str, torrent_id: str) -> Optional[str]:
     torrent_hash = qb_client.add_torrent(torrent_content)
     if torrent_hash:
         logger.info(f"Added torrent to QB: {torrent_hash}")
+        notify_download_added(torrent_id, site_name)
     return torrent_hash
 
 
@@ -91,9 +93,31 @@ def search_all_subscriptions():
     db = SessionLocal()
     try:
         for sub in subscriptions:
-            logger.info(f"Searching subscription: {sub.keyword}")
+            logger.info(f"Searching subscription [{sub.type}]: {sub.keyword}")
             sites = sub.sites.split(",") if sub.sites != "all" else None
             results = search_sites(sub.keyword, sites)
+
+            # Filter results based on subscription type
+            if sub.type == "artist":
+                # Artist subscription: match artist name in title
+                keyword_lower = sub.keyword.lower()
+                results = [r for r in results if keyword_lower in r.title.lower()]
+            elif sub.type == "song":
+                # Song subscription: keyword should contain both song+artist
+                # More strict matching - all words must appear
+                words = sub.keyword.lower().split()
+                results = [r for r in results if all(w in r.title.lower() for w in words)]
+            elif sub.type == "album":
+                # Album subscription: match album name
+                keyword_lower = sub.keyword.lower()
+                results = [r for r in results if keyword_lower in r.title.lower()]
+            # type == "keyword": no filtering, use all results
+
+            # Quality filter
+            if sub.quality == "flac":
+                results = [r for r in results if "flac" in r.title.lower()]
+            elif sub.quality == "mp3":
+                results = [r for r in results if "mp3" in r.title.lower() or "320" in r.title.lower()]
 
             # Check for new results not already downloaded
             existing_names = {
@@ -121,6 +145,7 @@ def search_all_subscriptions():
                     db.add(task)
                     db.commit()
                     logger.info(f"Auto-downloaded: {torrent.title}")
+                    notify_download_added(torrent.title, torrent.site)
 
             update_last_search(sub.id)
     finally:
