@@ -201,3 +201,17 @@ def run_scheduler_job(job_id: str):
     job.modify(next_run_time=__import__("datetime").datetime.now())
     return {"ok": True, "message": f"已触发: {job_id}"}
 
+
+@router.post("/test_site/{site_name}")
+def test_site_connection(site_name: str):
+    """Test PT site connection by attempting a search."""
+    from app.services.searcher import _get_site_instance
+    site = _get_site_instance(site_name)
+    if not site:
+        return {"ok": False, "message": f"站点 {site_name} 未启用或未配置 URL"}
+    try:
+        results = site.search("test")
+        return {"ok": True, "message": f"连接成功，搜索返回 {len(results)} 条结果"}
+    except Exception as e:
+        return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
+

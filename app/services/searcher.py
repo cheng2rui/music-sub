@@ -28,6 +28,8 @@ def _get_site_instance(name: str) -> Optional[BaseSite]:
     site_cfg = cfg_module.config.sites.get(name)
     if not site_cfg or not site_cfg.enabled:
         return None
+    if not site_cfg.url:
+        return None
     cls = SITE_CLASSES.get(name)
     if not cls:
         return None

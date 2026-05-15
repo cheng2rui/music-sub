@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, getScheduler, runScheduler, changePasswordApi } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testSite, getScheduler, runScheduler, changePasswordApi } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -21,6 +21,7 @@ const loading = ref(false)
 const saving = ref(false)
 const testingQb = ref(false)
 const testingTg = ref(false)
+const testingSite = ref('')
 const scheduler = ref([])
 
 // Password change
@@ -56,9 +57,18 @@ async function handleTestQb() {
   testingQb.value = true
   try {
     const res = await testQb()
-    alert(res.ok ? 'qBittorrent 连接成功' : '连接失败: ' + (res.error || ''))
-  } catch (e) { alert('连接失败: ' + e.message) }
+    alert(res.ok ? '✅ qBittorrent 连接成功' : '❌ 连接失败: ' + (res.message || ''))
+  } catch (e) { alert('❌ 连接失败: ' + e.message) }
   finally { testingQb.value = false }
+}
+
+async function handleTestSite(name) {
+  testingSite.value = name
+  try {
+    const res = await testSite(name)
+    alert(res.ok ? `✅ ${name}: ${res.message}` : `❌ ${name}: ${res.message}`)
+  } catch (e) { alert(`❌ ${name}: ` + e.message) }
+  finally { testingSite.value = '' }
 }
 
 async function handleTestTg() {
@@ -113,6 +123,7 @@ onMounted(loadAll)
               <input v-model="settings.sites.mteam.url" placeholder="站点地址 (https://kp.m-team.cc)" />
               <input v-model="settings.sites.mteam.api_key" placeholder="API Key" />
               <input v-model="settings.sites.mteam.token" placeholder="Token (JWT)" />
+              <AppButton variant="ghost" size="sm" :loading="testingSite==='mteam'" @click="handleTestSite('mteam')">测试连接</AppButton>
             </div>
           </div>
           <!-- Open.CD -->
@@ -124,6 +135,7 @@ onMounted(loadAll)
             <div v-if="settings.sites.opencd.enabled" class="site-fields">
               <input v-model="settings.sites.opencd.url" placeholder="站点地址 (https://open.cd)" />
               <input v-model="settings.sites.opencd.cookie" placeholder="Cookie (F12 复制)" />
+              <AppButton variant="ghost" size="sm" :loading="testingSite==='opencd'" @click="handleTestSite('opencd')">测试连接</AppButton>
             </div>
           </div>
           <!-- PTClub -->
@@ -135,6 +147,7 @@ onMounted(loadAll)
             <div v-if="settings.sites.ptclub.enabled" class="site-fields">
               <input v-model="settings.sites.ptclub.url" placeholder="站点地址" />
               <input v-model="settings.sites.ptclub.cookie" placeholder="Cookie (F12 复制)" />
+              <AppButton variant="ghost" size="sm" :loading="testingSite==='ptclub'" @click="handleTestSite('ptclub')">测试连接</AppButton>
             </div>
           </div>
           <!-- Dis.Music -->
@@ -146,6 +159,7 @@ onMounted(loadAll)
             <div v-if="settings.sites.dismusic.enabled" class="site-fields">
               <input v-model="settings.sites.dismusic.url" placeholder="站点地址" />
               <input v-model="settings.sites.dismusic.cookie" placeholder="Cookie (F12 复制)" />
+              <AppButton variant="ghost" size="sm" :loading="testingSite==='dismusic'" @click="handleTestSite('dismusic')">测试连接</AppButton>
             </div>
           </div>
         </div>
