@@ -83,4 +83,30 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .log-error { color: var(--danger); }
 .log-warn { color: var(--warning); }
 .log-info { color: var(--text); }
+
+@media (max-width: 768px) {
+  .logs-view {
+    padding: 0;
+    gap: 12px;
+  }
+  .logs-toolbar {
+    align-items: flex-start;
+    gap: 10px;
+    flex-direction: column;
+  }
+  .logs-actions {
+    width: 100%;
+    gap: 6px;
+  }
+  .level-select {
+    min-width: 0;
+    flex: 1;
+  }
+  .log-output {
+    padding: 10px;
+    font-size: 11px;
+    line-height: 1.6;
+    border-radius: var(--radius-md);
+  }
+}
 </style>

@@ -66,12 +66,13 @@ function handleLogout() {
 
     <!-- Bottom tab bar (mobile) -->
     <nav class="bottom-tabs">
-      <router-link to="/discover">🏠</router-link>
-      <router-link to="/subs">📡</router-link>
-      <router-link to="/search">🔍</router-link>
-      <router-link to="/tasks">⬇️</router-link>
-      <router-link to="/library">🎶</router-link>
-      <router-link to="/settings">⚙️</router-link>
+      <router-link to="/discover" title="发现">🏠</router-link>
+      <router-link to="/subs" title="订阅">📡</router-link>
+      <router-link to="/search" title="搜索">🔍</router-link>
+      <router-link to="/tasks" title="任务">⬇️</router-link>
+      <router-link to="/library" title="音乐库">🎶</router-link>
+      <router-link to="/logs" title="日志">📜</router-link>
+      <router-link to="/settings" title="设置">⚙️</router-link>
     </nav>
   </div>
 </template>
@@ -227,10 +228,10 @@ function handleLogout() {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
+    width: 40px;
     height: 44px;
     border-radius: var(--radius-md);
-    font-size: 20px;
+    font-size: 19px;
     color: var(--text-dim);
     transition: all 0.15s;
   }
