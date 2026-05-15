@@ -1,5 +1,6 @@
 """Discover API - fetch recommendations from QQ Music / NetEase."""
 import logging
+import random
 import requests
 from fastapi import APIRouter
 
@@ -27,8 +28,13 @@ def get_recommendations():
         )
         data = resp.json()
         songs = data.get("new_song", {}).get("data", {}).get("songlist", [])
+        # Shuffle and pick 12 random songs so each refresh feels different
+        if len(songs) > 12:
+            songs = random.sample(songs, 12)
+        else:
+            songs = songs[:12]
         results = []
-        for s in songs[:12]:
+        for s in songs:
             singers = s.get("singer", [])
             artist = "/".join(x.get("name", "") for x in singers) if singers else ""
             album = s.get("album", {})

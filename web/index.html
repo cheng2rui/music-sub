@@ -98,8 +98,8 @@ input[type="text"] { flex: 1; min-width: 200px; }
     <!-- 今日推荐 -->
     <div class="card">
       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-        🔥 今日推荐
-        <button class="btn btn-sm btn-primary" @click="loadDiscover">🔄 刷新</button>
+        🔥 今日推荐 <span v-if="discoverRefreshed" style="font-size:0.75rem;color:var(--green);margin-left:8px">✓ 已刷新</span>
+        <button class="btn btn-sm btn-primary" @click="loadDiscover" :disabled="discoverLoading">🔄 {{ discoverLoading ? '加载中' : '换一批' }}</button>
       </div>
       <div v-if="discoverLoading" class="loading">加载中...</div>
       <div v-else class="grid-cards">
@@ -535,6 +535,7 @@ createApp({
     const playlists = ref([]);
     const toplist = ref([]);
     const discoverLoading = ref(false);
+    const discoverRefreshed = ref(false);
 
     async function loadDiscover() {
       discoverLoading.value = true;
@@ -549,6 +550,8 @@ createApp({
         toplist.value = top.items || [];
       } catch(e) { console.error('Discover load failed', e); }
       discoverLoading.value = false;
+      discoverRefreshed.value = true;
+      setTimeout(() => discoverRefreshed.value = false, 2000);
     }
 
     async function quickSubscribe(keyword, type) {
@@ -764,7 +767,7 @@ createApp({
     onMounted(() => { loadDiscover(); loadSubs(); });
 
     return {
-      tab, recommendSongs, playlists, toplist, discoverLoading, loadDiscover, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
+      tab, recommendSongs, playlists, toplist, discoverLoading, discoverRefreshed, loadDiscover, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks,
