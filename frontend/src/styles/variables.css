@@ -1,0 +1,100 @@
+/* ===== dark (Spotify-style) ===== */
+:root,
+[data-theme="dark"] {
+  --bg: #121212;
+  --bg-elevated: #181818;
+  --surface: #282828;
+  --surface-hover: #3d3d3d;
+  --border: #404040;
+  --text: #ffffff;
+  --text-dim: #b3b3b3;
+  --text-muted: #727272;
+  --accent: #1db954;
+  --accent-hover: #1ed760;
+  --success: #1db954;
+  --warning: #e6a700;
+  --danger: #e91429;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* ===== light ===== */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elevated: #f8f8f8;
+  --surface: #efefef;
+  --surface-hover: #e8e8e8;
+  --border: #d4d4d4;
+  --text: #000000;
+  --text-dim: #444444;
+  --text-muted: #888888;
+  --accent: #1db954;
+  --accent-hover: #1ed760;
+  --success: #1db954;
+  --warning: #e6a700;
+  --danger: #e91429;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* ===== dark-glass ===== */
+[data-theme="dark-glass"] {
+  --bg: rgba(18, 18, 18, 0.75);
+  --bg-elevated: rgba(24, 24, 24, 0.85);
+  --surface: rgba(40, 40, 40, 0.7);
+  --surface-hover: rgba(61, 61, 61, 0.8);
+  --border: rgba(64, 64, 64, 0.6);
+  --text: #ffffff;
+  --text-dim: #b3b3b3;
+  --text-muted: #727272;
+  --accent: #1db954;
+  --accent-hover: #1ed760;
+  --success: #1db954;
+  --warning: #e6a700;
+  --danger: #e91429;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* ===== light-glass ===== */
+[data-theme="light-glass"] {
+  --bg: rgba(255, 255, 255, 0.75);
+  --bg-elevated: rgba(248, 248, 248, 0.85);
+  --surface: rgba(239, 239, 239, 0.7);
+  --surface-hover: rgba(232, 232, 232, 0.8);
+  --border: rgba(212, 212, 212, 0.6);
+  --text: #000000;
+  --text-dim: #444444;
+  --text-muted: #888888;
+  --accent: #1db954;
+  --accent-hover: #1ed760;
+  --success: #1db954;
+  --warning: #e6a700;
+  --danger: #e91429;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* glass blur effect on body */
+body.glass-bg {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+[data-theme="dark-glass"] body,
+[data-theme="light-glass"] body {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* ===== CSS transitions for theme switching ===== */
+*,
+*::before,
+*::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}

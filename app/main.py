@@ -14,6 +14,7 @@ from app.api import auth as auth_api
 from app.api import logs as logs_api
 
 WEB_DIR = Path(__file__).parent.parent / "web"
+WEB_DIST_DIR = WEB_DIR / "dist"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -63,6 +64,9 @@ async def auth_middleware(request: Request, call_next):
     # Allow cover image endpoints (used as CSS background-image, no auth header)
     if path.startswith("/api/library/album-cover") or path.startswith("/api/library/cover/"):
         return await call_next(request)
+    # Allow health check
+    if path == "/api/health":
+        return await call_next(request)
 
     # Check Authorization header
     auth_header = request.headers.get("Authorization", "")
@@ -89,10 +93,27 @@ app.include_router(logs_api.router, prefix="/api/logs", tags=["logs"])
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.3.2"}
+    return {"status": "ok", "version": "0.4.0"}
 
 
-@app.get("/")
-def root():
-    """Serve Web UI."""
+# Serve new Vue SPA (web/dist/) with fallback to legacy (web/index.html)
+from fastapi.staticfiles import StaticFiles
+
+if WEB_DIST_DIR.exists():
+    # Serve static assets from dist
+    app.mount("/assets", StaticFiles(directory=WEB_DIST_DIR / "assets"), name="dist-assets")
+
+
+@app.get("/{full_path:path}")
+def serve_frontend(full_path: str):
+    """Serve Vue SPA. Fallback to legacy index.html if dist not available."""
+    # Try new frontend first
+    if WEB_DIST_DIR.exists():
+        # Check if specific file exists in dist
+        file_path = WEB_DIST_DIR / full_path
+        if full_path and file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        # SPA fallback: serve index.html for all routes
+        return FileResponse(WEB_DIST_DIR / "index.html")
+    # Legacy fallback
     return FileResponse(WEB_DIR / "index.html")

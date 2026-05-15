@@ -10,3 +10,7 @@ logs/
 
 # Real config contains secrets; only the example template is tracked
 config/config.yaml
+
+# Frontend build artifacts and deps
+frontend/node_modules/
+web/dist/
