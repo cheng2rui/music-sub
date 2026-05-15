@@ -38,6 +38,7 @@ export const getRecommend = () => authFetch('/api/discover/recommend').then(r =>
 export const getPlaylists = () => authFetch('/api/discover/playlists').then(r => r.json())
 export const getToplist = (topid) => authFetch(`/api/discover/toplist${topid ? `?topid=${topid}` : ''}`).then(r => r.json())
 export const getPlaylist = (id) => authFetch(`/api/discover/playlist/${id}`).then(r => r.json())
+export const parsePlaylistUrl = (url) => authFetch('/api/discover/parse-playlist-url?url=' + encodeURIComponent(url), { method: 'POST' }).then(r => r.json())
 
 // ============ Subscriptions ============
 export const getSubs = () => authFetch('/api/subscriptions/').then(r => r.json())

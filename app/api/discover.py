@@ -276,3 +276,80 @@ def get_toplist():
     except Exception as e:
         logger.warning(f"NetEase toplist failed: {e}")
         return {"source": "none", "items": []}
+
+
+@router.post("/parse-playlist-url")
+def parse_playlist_url(url: str = ""):
+    """Parse a QQ Music or NetEase playlist URL and return song list."""
+    import re
+    import json as _json
+
+    if not url:
+        return {"ok": False, "message": "请输入歌单链接"}
+
+    songs = []
+    title = ""
+    source = ""
+
+    # QQ Music playlist: y.qq.com/n/ryqq/playlist/XXXXXXX
+    qq_match = re.search(r"playlist[/=](\d+)", url)
+    if qq_match or "y.qq.com" in url or "qq.com" in url:
+        playlist_id = qq_match.group(1) if qq_match else re.search(r"(\d{6,})", url)
+        if playlist_id:
+            pid = playlist_id if isinstance(playlist_id, str) else playlist_id.group(1)
+            try:
+                resp = _session.get(
+                    "https://u.y.qq.com/cgi-bin/musicu.fcg",
+                    params={
+                        "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(pid), "onlysonglist": 0, "song_num": 50, "song_begin": 0}}})
+                    },
+                    timeout=15,
+                )
+                data = resp.json()
+                detail = data.get("detail", {}).get("data", {})
+                dirinfo = detail.get("dirinfo", {})
+                title = dirinfo.get("title", "")
+                source = "qqmusic"
+                for s in detail.get("songlist", []):
+                    singers = s.get("singer", [])
+                    artist = "/".join(x.get("name", "") for x in singers) if singers else ""
+                    songs.append({"title": s.get("name", ""), "artist": artist})
+            except Exception as e:
+                logger.warning(f"QQ playlist parse failed: {e}")
+
+    # NetEase playlist: music.163.com/playlist?id=XXXXXXX or #/playlist?id=
+    if not songs:
+        ne_match = re.search(r"(?:playlist[?/].*id=|playlist/)(\d+)", url)
+        if ne_match or "163.com" in url:
+            pid = ne_match.group(1) if ne_match else re.search(r"(\d{6,})", url)
+            if pid:
+                pid_str = pid if isinstance(pid, str) else pid.group(1)
+                try:
+                    resp = _session.get(
+                        "https://music.163.com/api/playlist/detail",
+                        params={"id": pid_str},
+                        headers={"Referer": "https://music.163.com/"},
+                        timeout=15,
+                    )
+                    data = resp.json()
+                    result = data.get("result", {})
+                    title = result.get("name", "")
+                    source = "netease"
+                    for t in result.get("tracks", [])[:50]:
+                        artists = t.get("artists", [])
+                        artist = "/".join(a.get("name", "") for a in artists) if artists else ""
+                        songs.append({"title": t.get("name", ""), "artist": artist})
+                except Exception as e:
+                    logger.warning(f"NetEase playlist parse failed: {e}")
+
+    if not songs:
+        return {"ok": False, "message": "无法解析该链接，请确认是 QQ音乐 或 网易云 歌单链接"}
+
+    return {
+        "ok": True,
+        "source": source,
+        "title": title,
+        "songs": songs,
+        "count": len(songs),
+    }
+

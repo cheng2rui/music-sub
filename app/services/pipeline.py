@@ -24,6 +24,12 @@ def _get_scraper_chain():
         elif source == "netease":
             from app.scrapers.netease import NetEaseScraper
             scrapers.append(NetEaseScraper())
+        elif source == "kugou":
+            from app.scrapers.kugou import KugouScraper
+            scrapers.append(KugouScraper())
+        elif source == "migu":
+            from app.scrapers.migu import MiguScraper
+            scrapers.append(MiguScraper())
         elif source == "musicbrainz":
             from app.scrapers.musicbrainz import MusicBrainzScraper
             scrapers.append(MusicBrainzScraper())
