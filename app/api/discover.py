@@ -16,12 +16,12 @@ _session.headers.update({
 @router.get("/recommend")
 def get_recommendations():
     """Get personalized/hot song recommendations."""
-    # QQ Music new songs API
+    # QQ Music new songs API (type=0 for all regions, updates more frequently)
     try:
         resp = _session.get(
             "https://u.y.qq.com/cgi-bin/musicu.fcg",
             params={
-                "data": '{"new_song":{"module":"newsong.NewSongServer","method":"get_new_song_info","param":{"type":5}}}'
+                "data": '{"new_song":{"module":"newsong.NewSongServer","method":"get_new_song_info","param":{"type":0}}}'
             },
             timeout=10,
         )
@@ -121,34 +121,55 @@ def get_playlists():
 
 @router.get("/toplist")
 def get_toplist():
-    """Get music chart/ranking."""
-    # QQ Music top list (热歌榜)
-    try:
-        resp = _session.get(
-            "https://u.y.qq.com/cgi-bin/musicu.fcg",
-            params={
-                "data": '{"toplist":{"module":"musicToplist.ToplistInfoServer","method":"GetDetail","param":{"topid":26,"num":20,"period":""}}}'
-            },
-            timeout=10,
-        )
-        data = resp.json()
-        songs = data.get("toplist", {}).get("data", {}).get("songInfoList", [])
-        results = []
-        for i, s in enumerate(songs[:20], 1):
-            singers = s.get("singer", [])
-            artist = "/".join(x.get("name", "") for x in singers) if singers else ""
-            album = s.get("album", {})
-            mid = album.get("mid", "")
-            results.append({
-                "rank": i,
-                "title": s.get("name", ""),
-                "artist": artist,
-                "album": album.get("name", ""),
-                "cover": f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
-            })
-        return {"source": "qqmusic", "items": results}
-    except Exception as e:
-        logger.warning(f"QQ Music toplist failed: {e}")
+    """Get music chart/ranking (daily updated)."""
+    # QQ Music 飙升榜 (topid=62, daily update) with fallback to 热歌榜 (topid=26)
+    for topid in (62, 26):
+        try:
+            resp = _session.get(
+                "https://u.y.qq.com/cgi-bin/musicu.fcg",
+                params={
+                    "data": '{"toplist":{"module":"musicToplist.ToplistInfoServer","method":"GetDetail","param":{"topid":' + str(topid) + ',"num":50,"period":""}}}'
+                },
+                timeout=10,
+            )
+            data = resp.json()
+            tl_data = data.get("toplist", {}).get("data", {})
+            # Prefer data.data.song (richer, has cover) over songInfoList
+            songs_rich = tl_data.get("data", {}).get("song", []) if isinstance(tl_data.get("data"), dict) else tl_data.get("song", [])
+            if not songs_rich:
+                songs_rich = tl_data.get("song", [])
+            if songs_rich:
+                results = []
+                for s in songs_rich[:20]:
+                    results.append({
+                        "rank": s.get("rank", 0),
+                        "title": s.get("title", ""),
+                        "artist": s.get("singerName", ""),
+                        "album": "",
+                        "cover": s.get("cover", ""),
+                    })
+                return {"source": "qqmusic", "topid": topid, "period": tl_data.get("data", {}).get("period", "") if isinstance(tl_data.get("data"), dict) else tl_data.get("period", ""), "items": results}
+
+            # Fallback: songInfoList (old format)
+            songs = tl_data.get("songInfoList", [])
+            if songs:
+                results = []
+                for i, s in enumerate(songs[:20], 1):
+                    singers = s.get("singer", [])
+                    artist = "/".join(x.get("name", "") for x in singers) if singers else ""
+                    album = s.get("album", {})
+                    mid = album.get("mid", "")
+                    results.append({
+                        "rank": i,
+                        "title": s.get("name", ""),
+                        "artist": artist,
+                        "album": album.get("name", ""),
+                        "cover": f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
+                    })
+                return {"source": "qqmusic", "topid": topid, "period": tl_data.get("period", ""), "items": results}
+        except Exception as e:
+            logger.warning(f"QQ Music toplist (topid={topid}) failed: {e}")
+            continue
 
     # Fallback NetEase (飙升榜 id=19723756)
     try:
