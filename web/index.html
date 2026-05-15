@@ -79,8 +79,31 @@ input[type="text"] { flex: 1; min-width: 200px; }
 </head>
 <body>
 <div id="app" class="app">
+
+  <!-- 登录页 -->
+  <div v-if="!loggedIn" style="display:flex;align-items:center;justify-content:center;min-height:80vh">
+    <div class="card" style="width:340px;max-width:90vw">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:2.5rem">🎵</div>
+        <h2 style="font-size:1.2rem;margin-top:8px">Music Sub</h2>
+        <div style="font-size:0.8rem;color:var(--text-dim)">音乐订阅管理系统</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <input type="text" v-model="loginUser" placeholder="用户名" @keyup.enter="doLogin" style="width:100%">
+        <input type="password" v-model="loginPass" placeholder="密码" @keyup.enter="doLogin" style="width:100%">
+        <button class="btn btn-primary" @click="doLogin" :disabled="loginLoading" style="width:100%;padding:12px">
+          {{ loginLoading ? '登录中...' : '登录' }}
+        </button>
+        <div v-if="loginError" style="color:var(--red);font-size:0.85rem;text-align:center">{{ loginError }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主内容 -->
+  <div v-if="loggedIn">
   <h1 style="font-size:1.3rem;margin-bottom:16px;display:flex;align-items:center;gap:8px">
-    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.3.1</span>
+    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.3.2</span>
+    <span style="margin-left:auto;font-size:0.78rem;color:var(--text-dim);cursor:pointer" @click="doLogout">🚪 退出</span>
   </h1>
 
   <div class="nav">
@@ -545,11 +568,30 @@ input[type="text"] { flex: 1; min-width: 200px; }
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-title">🔒 账号安全</div>
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:12px">修改登录用户名和密码</div>
+      <div class="form-row">
+        <input type="password" v-model="pwdForm.old_password" placeholder="当前密码" style="flex:1">
+      </div>
+      <div class="form-row">
+        <input type="text" v-model="pwdForm.new_username" placeholder="新用户名（留空不改）" style="flex:1">
+        <input type="password" v-model="pwdForm.new_password" placeholder="新密码（留空不改）" style="flex:1">
+      </div>
+      <div class="form-row">
+        <button class="btn btn-primary btn-sm" @click="changePassword">修改账号</button>
+        <span v-if="pwdMsg" style="font-size:0.85rem" :style="{color: pwdOk?'var(--green)':'var(--red)'}">{{ pwdMsg }}</span>
+      </div>
+    </div>
+
     <div style="position:sticky;bottom:0;background:var(--bg);padding:16px 0 8px;margin-top:16px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center">
       <button class="btn btn-primary" @click="saveSettings" :disabled="saving">💾 {{ saving?'保存中...':'保存配置' }}</button>
       <span v-if="saveMsg" style="font-size:0.9rem;font-weight:600" :style="{color: saveOk ? 'var(--green)' : 'var(--red)'}">{{ saveMsg }}</span>
     </div>
   </div>
+
+  </div><!-- /v-if loggedIn -->
+</div><!-- /app -->
 
 <script>
 const { createApp, ref, onMounted } = Vue;
@@ -558,6 +600,51 @@ createApp({
   setup() {
     const API = window.location.origin;
     const tab = ref('discover');
+
+    // Auth state
+    const loggedIn = ref(!!localStorage.getItem('ms_token'));
+    const loginUser = ref('');
+    const loginPass = ref('');
+    const loginError = ref('');
+    const loginLoading = ref(false);
+
+    function getToken() { return localStorage.getItem('ms_token') || ''; }
+
+    function authFetch(url, opts = {}) {
+      opts.headers = opts.headers || {};
+      opts.headers['Authorization'] = 'Bearer ' + getToken();
+      return fetch(url, opts).then(r => {
+        if (r.status === 401) { loggedIn.value = false; localStorage.removeItem('ms_token'); }
+        return r;
+      });
+    }
+
+    async function doLogin() {
+      loginError.value = ''; loginLoading.value = true;
+      try {
+        const r = await fetch(`${API}/api/auth/login`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ username: loginUser.value, password: loginPass.value })
+        });
+        if (!r.ok) {
+          const d = await r.json();
+          loginError.value = d.detail || '登录失败';
+          loginLoading.value = false;
+          return;
+        }
+        const d = await r.json();
+        localStorage.setItem('ms_token', d.token);
+        loggedIn.value = true;
+        loginError.value = '';
+        loadDiscover(); loadSubs();
+      } catch(e) { loginError.value = '网络错误'; }
+      loginLoading.value = false;
+    }
+
+    function doLogout() {
+      localStorage.removeItem('ms_token');
+      loggedIn.value = false;
+    }
 
     // Discover
     const recommendSongs = ref([]);
@@ -572,9 +659,9 @@ createApp({
       discoverLoading.value = true;
       try {
         const [rec, pl, top] = await Promise.all([
-          fetch(`${API}/api/discover/recommend`).then(r=>r.json()),
-          fetch(`${API}/api/discover/playlists`).then(r=>r.json()),
-          fetch(`${API}/api/discover/toplist`).then(r=>r.json()),
+          authFetch(`${API}/api/discover/recommend`).then(r=>r.json()),
+          authFetch(`${API}/api/discover/playlists`).then(r=>r.json()),
+          authFetch(`${API}/api/discover/toplist`).then(r=>r.json()),
         ]);
         recommendSongs.value = rec.items || [];
         playlists.value = pl.items || [];
@@ -591,7 +678,7 @@ createApp({
       const labelMap = { artist: '艺人', song: '歌曲', album: '专辑', keyword: '关键词' };
       const label = labelMap[t] || '订阅';
       if (!confirm(`订阅${label}: ${keyword}?`)) return;
-      await fetch(`${API}/api/subscriptions/`, {
+      await authFetch(`${API}/api/subscriptions/`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ keyword: keyword, type: t, quality: 'any', sites: 'all' })
       });
@@ -615,7 +702,7 @@ createApp({
       playlistDetail.value = { title: pl.title, cover: pl.cover, desc: '', songs: [] };
       playlistLoading.value = true;
       try {
-        const r = await fetch(`${API}/api/discover/playlist/${pl.id}`);
+        const r = await authFetch(`${API}/api/discover/playlist/${pl.id}`);
         const data = await r.json();
         playlistDetail.value = {
           title: data.title || pl.title,
@@ -638,12 +725,12 @@ createApp({
     const newSub = ref({ keyword: '', type: 'artist', quality: 'any' });
 
     async function loadSubs() {
-      const r = await fetch(`${API}/api/subscriptions/`);
+      const r = await authFetch(`${API}/api/subscriptions/`);
       subs.value = await r.json();
     }
     async function addSub() {
       if (!newSub.value.keyword.trim()) return;
-      await fetch(`${API}/api/subscriptions/`, {
+      await authFetch(`${API}/api/subscriptions/`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify(newSub.value)
       });
@@ -652,11 +739,11 @@ createApp({
     }
     async function deleteSub(id) {
       if (!confirm('确认删除？')) return;
-      await fetch(`${API}/api/subscriptions/${id}`, { method: 'DELETE' });
+      await authFetch(`${API}/api/subscriptions/${id}`, { method: 'DELETE' });
       loadSubs();
     }
     async function toggleSub(id) {
-      await fetch(`${API}/api/subscriptions/${id}/toggle`, { method: 'PUT' });
+      await authFetch(`${API}/api/subscriptions/${id}/toggle`, { method: 'PUT' });
       loadSubs();
     }
 
@@ -670,7 +757,7 @@ createApp({
       if (!searchKeyword.value.trim()) return;
       searching.value = true; searchDone.value = false;
       try {
-        const r = await fetch(`${API}/api/search/`, {
+        const r = await authFetch(`${API}/api/search/`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ keyword: searchKeyword.value })
         });
@@ -681,7 +768,7 @@ createApp({
     async function downloadTorrent(r) {
       r._downloading = true;
       try {
-        const resp = await fetch(`${API}/api/search/download?site=${r.site}&torrent_id=${r.torrent_id}&title=${encodeURIComponent(r.title)}`, { method: 'POST' });
+        const resp = await authFetch(`${API}/api/search/download?site=${r.site}&torrent_id=${r.torrent_id}&title=${encodeURIComponent(r.title)}`, { method: 'POST' });
         const data = await resp.json();
         if (data.ok) alert('✅ 已推送到 QB 下载');
         else alert('❌ 下载失败: ' + (data.detail || ''));
@@ -692,11 +779,11 @@ createApp({
     // Tasks
     const tasks = ref([]);
     async function loadTasks() {
-      const r = await fetch(`${API}/api/tasks/`);
+      const r = await authFetch(`${API}/api/tasks/`);
       tasks.value = await r.json();
     }
     async function checkTasks() {
-      await fetch(`${API}/api/tasks/check`, { method: 'POST' });
+      await authFetch(`${API}/api/tasks/check`, { method: 'POST' });
       loadTasks();
     }
 
@@ -712,9 +799,9 @@ createApp({
       const q = libSearch.value.trim();
       const qs = q ? `?q=${encodeURIComponent(q)}` : '';
       const [s, f, a] = await Promise.all([
-        fetch(`${API}/api/library/stats`).then(r=>r.json()),
-        fetch(`${API}/api/library/${q ? '?artist=' + encodeURIComponent(q) : ''}`).then(r=>r.json()),
-        fetch(`${API}/api/library/albums${qs}`).then(r=>r.json()),
+        authFetch(`${API}/api/library/stats`).then(r=>r.json()),
+        authFetch(`${API}/api/library/${q ? '?artist=' + encodeURIComponent(q) : ''}`).then(r=>r.json()),
+        authFetch(`${API}/api/library/albums${qs}`).then(r=>r.json()),
       ]);
       libStats.value = s;
       libFiles.value = f;
@@ -722,7 +809,7 @@ createApp({
     }
 
     async function openAlbum(album) {
-      const r = await fetch(`${API}/api/library/album-tracks?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.album)}`);
+      const r = await authFetch(`${API}/api/library/album-tracks?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.album)}`);
       const tracks = await r.json();
       albumDetail.value = { album, tracks };
     }
@@ -741,15 +828,18 @@ createApp({
     const qbTestOk = ref(false);
     const tgTestResult = ref('');
     const tgTestOk = ref(false);
+    const pwdForm = ref({ old_password: '', new_username: '', new_password: '' });
+    const pwdMsg = ref('');
+    const pwdOk = ref(false);
 
     async function loadSettings() {
-      const r = await fetch(`${API}/api/settings/`);
+      const r = await authFetch(`${API}/api/settings/`);
       settingsData.value = await r.json();
     }
     async function saveSettings() {
       saving.value = true; saveMsg.value = '';
       try {
-        const r = await fetch(`${API}/api/settings/`, {
+        const r = await authFetch(`${API}/api/settings/`, {
           method: 'PUT', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(settingsData.value)
         });
@@ -777,7 +867,7 @@ createApp({
     async function testQB() {
       qbTestResult.value = '测试中...'; qbTestOk.value = false;
       try {
-        const r = await fetch(`${API}/api/settings/test_qb`, { method: 'POST' });
+        const r = await authFetch(`${API}/api/settings/test_qb`, { method: 'POST' });
         const data = await r.json();
         qbTestOk.value = data.ok;
         qbTestResult.value = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
@@ -786,11 +876,31 @@ createApp({
     async function testTelegram() {
       tgTestResult.value = '测试中...'; tgTestOk.value = false;
       try {
-        const r = await fetch(`${API}/api/settings/test_telegram`, { method: 'POST' });
+        const r = await authFetch(`${API}/api/settings/test_telegram`, { method: 'POST' });
         const data = await r.json();
         tgTestOk.value = data.ok;
         tgTestResult.value = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
       } catch(e) { tgTestResult.value = '❌ ' + e.message; }
+    }
+
+    async function changePassword() {
+      pwdMsg.value = ''; pwdOk.value = false;
+      if (!pwdForm.value.old_password) { pwdMsg.value = '请输入当前密码'; return; }
+      if (!pwdForm.value.new_username && !pwdForm.value.new_password) { pwdMsg.value = '请输入新用户名或新密码'; return; }
+      try {
+        const r = await authFetch(`${API}/api/auth/password`, {
+          method: 'PUT', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(pwdForm.value)
+        });
+        const data = await r.json();
+        if (r.ok && data.ok) {
+          pwdOk.value = true;
+          pwdMsg.value = '✅ ' + data.message;
+          pwdForm.value = { old_password: '', new_username: '', new_password: '' };
+        } else {
+          pwdMsg.value = '❌ ' + (data.detail || data.message || '修改失败');
+        }
+      } catch(e) { pwdMsg.value = '❌ ' + e.message; }
     }
 
     function formatSize(bytes) {
@@ -811,15 +921,17 @@ createApp({
       return 'badge-red';
     }
 
-    onMounted(() => { loadDiscover(); loadSubs(); });
+    onMounted(() => { if (loggedIn.value) { loadDiscover(); loadSubs(); } });
 
     return {
+      loggedIn, loginUser, loginPass, loginError, loginLoading, doLogin, doLogout,
       tab, recommendSongs, playlists, toplist, discoverLoading, discoverRefreshed, playlistDetail, playlistLoading, loadDiscover, openPlaylist, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks,
       libStats, libFiles, libAlbums, libView, libSearch, albumDetail, loadLibrary, openAlbum,
       settingsData, saving, saveMsg, saveOk, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
+      pwdForm, pwdMsg, pwdOk, changePassword,
       formatSize, formatDate, statusClass,
     };
   }

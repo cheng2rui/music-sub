@@ -72,3 +72,8 @@ notify:
     on_download_complete: true
     on_scrape_complete: true
     on_error: true
+
+auth:
+  username: "888"
+  # password_hash is SHA-256 of the password. Default password: 888
+  password_hash: "5e968ce47ce4a17e3823c29332a39d049a8d0afb08d157eb6224625f92671a51"

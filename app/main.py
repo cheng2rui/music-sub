@@ -1,14 +1,18 @@
 """FastAPI application entry point."""
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from app.db import init_db
 from app.scheduler import start_scheduler, stop_scheduler
+from app.auth import verify_token
 from app.api import subscriptions, search, tasks, library, settings, discover
+from app.api import auth as auth_api
 
 WEB_DIR = Path(__file__).parent.parent / "web"
+
+# Paths that don't require authentication
+PUBLIC_PATHS = {"/api/auth/login", "/api/health", "/"}
 
 
 @asynccontextmanager
@@ -23,10 +27,33 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Music Sub",
     description="音乐订阅下载管理系统 - PT站搜索订阅 + QB下载 + 硬链接整理 + 自动刮削",
-    version="0.3.1",
+    version="0.3.2",
     lifespan=lifespan,
 )
 
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Check JWT token for protected routes."""
+    path = request.url.path
+    # Allow public paths and static assets
+    if path in PUBLIC_PATHS or not path.startswith("/api/"):
+        return await call_next(request)
+
+    # Check Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"detail": "未登录"})
+
+    token = auth_header[7:]
+    username = verify_token(token)
+    if not username:
+        return JSONResponse(status_code=401, content={"detail": "登录已过期"})
+
+    return await call_next(request)
+
+
+app.include_router(auth_api.router, prefix="/api/auth", tags=["auth"])
 app.include_router(subscriptions.router, prefix="/api/subscriptions", tags=["subscriptions"])
 app.include_router(search.router, prefix="/api/search", tags=["search"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
@@ -37,7 +64,7 @@ app.include_router(discover.router, prefix="/api/discover", tags=["discover"])
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.3.1"}
+    return {"status": "ok", "version": "0.3.2"}
 
 
 @app.get("/")

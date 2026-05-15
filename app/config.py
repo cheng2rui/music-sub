@@ -66,6 +66,12 @@ class NotifyConfig(BaseModel):
     telegram: TelegramNotifyConfig = TelegramNotifyConfig()
 
 
+class AuthConfig(BaseModel):
+    username: str = "888"
+    # Default password "888" sha256 hash
+    password_hash: str = "5e968ce47ce4a17e3823c29332a39d049a8d0afb08d157eb6224625f92671a51"
+
+
 class AppConfig(BaseModel):
     sites: dict[str, SiteConfig] = {}
     qbittorrent: QBConfig = QBConfig()
@@ -73,6 +79,7 @@ class AppConfig(BaseModel):
     scraper: ScraperConfig = ScraperConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     notify: NotifyConfig = NotifyConfig()
+    auth: AuthConfig = AuthConfig()
 
 
 def load_config(path: str = None) -> AppConfig:

@@ -11,3 +11,4 @@ requests==2.32.0
 pycryptodome==3.20.0
 aiohttp==3.10.0
 pyyaml==6.0.2
+PyJWT==2.9.0
