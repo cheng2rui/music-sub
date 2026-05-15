@@ -2,38 +2,36 @@
 import { useThemeStore } from '@/stores/theme.js'
 
 const theme = useThemeStore()
-const labels = { dark: '🌙 深色', light: '☀️ 浅色', 'dark-glass': '🔮 深色毛玻璃', 'light-glass': '☁️ 浅色毛玻璃' }
+const options = [
+  { value: 'dark', label: '🌙 深色' },
+  { value: 'light', label: '☀️ 浅色' },
+  { value: 'dark-glass', label: '🔮 深色毛玻璃' },
+  { value: 'light-glass', label: '☁️ 浅色毛玻璃' }
+]
 </script>
 
 <template>
   <div class="theme-switcher">
-    <span class="theme-label">主题</span>
-    <div class="theme-options">
-      <button
-        v-for="t in theme.THEMES"
-        :key="t"
-        class="theme-btn"
-        :class="{ active: theme.current === t }"
-        @click="theme.setTheme(t)"
-      >{{ labels[t] }}</button>
-    </div>
+    <select :value="theme.current" @change="theme.setTheme($event.target.value)" class="theme-select">
+      <option v-for="opt in options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+    </select>
   </div>
 </template>
 
 <style scoped>
-.theme-switcher { display: flex; flex-direction: column; gap: 6px; }
-.theme-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.theme-options { display: flex; flex-wrap: wrap; gap: 4px; }
-.theme-btn {
+.theme-switcher { display: flex; align-items: center; }
+.theme-select {
+  width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
-  color: var(--text-dim);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
-  font-size: 11px;
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  outline: none;
+  transition: border-color 0.2s;
+  appearance: auto;
 }
-.theme-btn:hover { background: var(--surface-hover); color: var(--text); }
-.theme-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+.theme-select:focus { border-color: var(--accent); }
 </style>

@@ -46,6 +46,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
+        <div class="version-tag">v0.4.2</div>
       </div>
     </aside>
 
@@ -145,6 +146,12 @@ function handleLogout() {
   padding: 4px 8px;
 }
 .btn-logout:hover { color: var(--danger); }
+.version-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 4px;
+}
 .main-wrapper {
   flex: 1;
   display: flex;
