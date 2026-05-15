@@ -36,6 +36,13 @@ async function openPlaylist(id) {
   showPlaylistModal.value = true
 }
 
+function formatPlayCount(n) {
+  if (!n) return '0'
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿'
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return String(n)
+}
+
 async function quickSubscribe(keyword, type) {
   if (!keyword) return
   const labels = { artist: '艺人', song: '歌曲', album: '专辑' }
@@ -93,7 +100,7 @@ onMounted(loadAll)
           <MusicCover :src="item.cover" show-play />
           <div class="cover-info">
             <div class="cover-title">{{ item.title }}</div>
-            <div class="cover-sub">{{ item.play_count }} 播放</div>
+            <div class="cover-sub">{{ formatPlayCount(item.play_count) }} 播放</div>
           </div>
         </div>
       </div>

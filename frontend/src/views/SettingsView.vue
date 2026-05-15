@@ -219,12 +219,22 @@ onMounted(loadAll)
 
       <!-- 定时任务 -->
       <div class="settings-section">
-        <h3>定时任务</h3>
+        <h3>⏰ 定时任务</h3>
+        <div class="fields-row" style="margin-bottom:16px">
+          <div class="field">
+            <label>搜索间隔(分钟)</label>
+            <input type="number" v-model.number="settings.scheduler.search_interval_minutes" style="width:100px" />
+          </div>
+          <div class="field">
+            <label>完成检查间隔(分钟)</label>
+            <input type="number" v-model.number="settings.scheduler.check_complete_interval_minutes" style="width:100px" />
+          </div>
+        </div>
         <div class="scheduler-list">
           <div v-for="s in scheduler" :key="s.id" class="scheduler-row">
             <div class="scheduler-info">
               <span class="scheduler-name">{{ s.name }}</span>
-              <span class="scheduler-meta text-dim">间隔: {{ s.interval }}min | 下次: {{ s.next_run ? new Date(s.next_run).toLocaleString() : '-' }}</span>
+              <span class="scheduler-meta text-dim">下次: {{ s.next_run ? new Date(s.next_run).toLocaleString() : '-' }}</span>
             </div>
             <AppBadge :color="schedulerStatus(s).color">{{ schedulerStatus(s).label }}</AppBadge>
             <AppButton variant="ghost" size="sm" @click="handleRunScheduler(s.id)">立即执行</AppButton>
