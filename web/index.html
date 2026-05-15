@@ -113,6 +113,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
     <button class="nav-btn" :class="{active: tab==='tasks'}" @click="tab='tasks';loadTasks();startTasksAutoRefresh()">⬇️ 任务</button>
     <button class="nav-btn" :class="{active: tab==='library'}" @click="tab='library';stopTasksAutoRefresh();loadLibrary()">🎶 音乐库</button>
     <button class="nav-btn" :class="{active: tab==='settings'}" @click="tab='settings';stopTasksAutoRefresh();loadSettings()">⚙️ 设置</button>
+    <button class="nav-btn" :class="{active: tab==='logs'}" @click="tab='logs';stopTasksAutoRefresh();loadLogs()">📜 日志</button>
   </div>
 
   <!-- 订阅页 -->
@@ -581,12 +582,35 @@ input[type="text"] { flex: 1; min-width: 200px; }
     </div>
 
     <div class="card">
-      <div class="card-title">⏰ 定时任务</div>
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        ⏰ 定时任务
+        <button class="btn btn-sm btn-primary" @click="loadScheduler">🔄 刷新状态</button>
+      </div>
       <div class="form-row">
         <label style="font-size:0.85rem;color:var(--text-dim)">搜索间隔(分钟)</label>
         <input type="number" v-model.number="settingsData.scheduler.search_interval_minutes" style="width:80px">
         <label style="font-size:0.85rem;color:var(--text-dim)">完成检查间隔(分钟)</label>
         <input type="number" v-model.number="settingsData.scheduler.check_complete_interval_minutes" style="width:80px">
+      </div>
+      <!-- 任务状态 -->
+      <div v-if="schedulerJobs.length > 0" style="margin-top:12px">
+        <table class="table">
+          <thead><tr><th>任务</th><th>间隔</th><th>下次运行</th><th>上次结果</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="j in schedulerJobs" :key="j.id">
+              <td style="font-weight:600">{{ j.name }}</td>
+              <td style="font-size:0.78rem;color:var(--text-dim)">{{ j.interval }}</td>
+              <td style="font-size:0.78rem">{{ j.next_run ? formatDate(j.next_run) : '-' }}</td>
+              <td>
+                <span v-if="j.last_run" :class="j.last_success ? 'badge badge-green' : 'badge badge-red'">
+                  {{ j.last_success ? '✓' : '✗' }} {{ formatDate(j.last_run) }}
+                </span>
+                <span v-else style="font-size:0.78rem;color:var(--text-dim)">未运行</span>
+              </td>
+              <td><button class="btn btn-sm btn-success" @click="runJob(j.id)">▶ 立即执行</button></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
@@ -642,6 +666,30 @@ input[type="text"] { flex: 1; min-width: 200px; }
     <div style="position:sticky;bottom:0;background:var(--bg);padding:16px 0 8px;margin-top:16px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center">
       <button class="btn btn-primary" @click="saveSettings" :disabled="saving">💾 {{ saving?'保存中...':'保存配置' }}</button>
       <span v-if="saveMsg" style="font-size:0.9rem;font-weight:600" :style="{color: saveOk ? 'var(--green)' : 'var(--red)'}">{{ saveMsg }}</span>
+    </div>
+  </div>
+
+  <!-- 日志页 -->
+  <div v-if="tab==='logs'">
+    <div class="card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        📜 运行日志
+        <div style="display:flex;gap:8px;align-items:center">
+          <select v-model="logLevel" @change="loadLogs()" style="font-size:0.82rem">
+            <option value="">全部</option>
+            <option value="ERROR">错误</option>
+            <option value="WARNING">警告</option>
+            <option value="INFO">信息</option>
+          </select>
+          <button class="btn btn-sm btn-primary" @click="loadLogs()">🔄 刷新</button>
+          <button class="btn btn-sm btn-danger" @click="clearLogs()">🗑️ 清空</button>
+        </div>
+      </div>
+      <div v-if="logLines.length===0" class="empty">暂无日志</div>
+      <div v-else style="background:var(--surface-2);border-radius:8px;padding:12px;max-height:70vh;overflow-y:auto;font-family:monospace;font-size:0.75rem;line-height:1.6">
+        <div v-for="(line, i) in logLines" :key="i" :style="{color: line.includes('[ERROR]') ? 'var(--red)' : line.includes('[WARNING]') ? 'var(--orange)' : 'var(--text-dim)'}">{{ line }}</div>
+      </div>
+      <div v-if="logTotal > 0" style="margin-top:8px;font-size:0.75rem;color:var(--text-dim)">显示最近 {{ logLines.length }} 条，共 {{ logTotal }} 条</div>
     </div>
   </div>
 
@@ -966,6 +1014,26 @@ createApp({
 
     // Helpers
 
+    // Logs
+    const logLines = ref([]);
+    const logTotal = ref(0);
+    const logLevel = ref('');
+    async function loadLogs() {
+      const params = new URLSearchParams({ lines: 200 });
+      if (logLevel.value) params.set('level', logLevel.value);
+      try {
+        const r = await authFetch(`${API}/api/logs/?${params}`);
+        const data = await r.json();
+        logLines.value = data.lines || [];
+        logTotal.value = data.total || 0;
+      } catch(e) { logLines.value = []; }
+    }
+    async function clearLogs() {
+      if (!confirm('确认清空所有日志？')) return;
+      await authFetch(`${API}/api/logs/`, { method: 'DELETE' });
+      loadLogs();
+    }
+
     // Settings
     const settingsData = ref({
       sites: {}, qbittorrent: {}, paths: {}, scraper: {}, scheduler: {},
@@ -982,9 +1050,26 @@ createApp({
     const pwdMsg = ref('');
     const pwdOk = ref(false);
 
+    const schedulerJobs = ref([]);
+    async function loadScheduler() {
+      try {
+        const r = await authFetch(`${API}/api/settings/scheduler`);
+        schedulerJobs.value = await r.json();
+      } catch(e) { schedulerJobs.value = []; }
+    }
+    async function runJob(jobId) {
+      try {
+        const r = await authFetch(`${API}/api/settings/scheduler/${jobId}/run`, { method: 'POST' });
+        const data = await r.json();
+        alert(data.message || '已触发');
+        setTimeout(loadScheduler, 2000);
+      } catch(e) { alert('触发失败: ' + e.message); }
+    }
+
     async function loadSettings() {
       const r = await authFetch(`${API}/api/settings/`);
       settingsData.value = await r.json();
+      loadScheduler();
     }
     async function saveSettings() {
       saving.value = true; saveMsg.value = '';
@@ -1084,6 +1169,8 @@ createApp({
       tasks, loadTasks, checkTasks, startTasksAutoRefresh, stopTasksAutoRefresh,
       libStats, libFiles, libAlbums, libView, libSearch, albumDetail, fileDetail, fileDetailLoading, rescraping, fileEditing, fileEditForm, fileEditMsg, loadLibrary, openAlbum, openFileDetail, rescrapeAlbum, rescrapeUnscraped, startEditFile, saveFileEdit, rescrapeOne,
       settingsData, saving, saveMsg, saveOk, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
+      schedulerJobs, loadScheduler, runJob,
+      logLines, logTotal, logLevel, loadLogs, clearLogs,
       pwdForm, pwdMsg, pwdOk, changePassword,
       formatSize, formatDate, statusClass, statusLabel,
     };

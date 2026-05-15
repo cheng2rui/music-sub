@@ -182,3 +182,22 @@ def test_telegram_notify():
         return {"ok": False, "message": f"Telegram API 返回：{data.get('description', resp.text)}"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+@router.get("/scheduler")
+def get_scheduler_status():
+    """Get status of all scheduled jobs."""
+    from app.scheduler import get_scheduler_status
+    return get_scheduler_status()
+
+
+@router.post("/scheduler/{job_id}/run")
+def run_scheduler_job(job_id: str):
+    """Manually trigger a scheduled job."""
+    from app.scheduler import scheduler
+    job = scheduler.get_job(job_id)
+    if not job:
+        return {"ok": False, "message": "任务不存在"}
+    job.modify(next_run_time=__import__("datetime").datetime.now())
+    return {"ok": True, "message": f"已触发: {job_id}"}
+

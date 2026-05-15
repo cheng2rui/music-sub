@@ -1,5 +1,8 @@
 """FastAPI application entry point."""
+import logging
+import os
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -8,8 +11,26 @@ from app.scheduler import start_scheduler, stop_scheduler
 from app.auth import verify_token
 from app.api import subscriptions, search, tasks, library, settings, discover
 from app.api import auth as auth_api
+from app.api import logs as logs_api
 
 WEB_DIR = Path(__file__).parent.parent / "web"
+LOG_DIR = Path(__file__).parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+# Configure logging
+log_file = LOG_DIR / "music_sub.log"
+file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+file_handler.setLevel(logging.INFO)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(file_handler)
+
+# Also log to stdout
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"))
+root_logger.addHandler(stream_handler)
 
 # Paths that don't require authentication
 PUBLIC_PATHS = {"/api/auth/login", "/api/health", "/"}
@@ -63,6 +84,7 @@ app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(library.router, prefix="/api/library", tags=["library"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(discover.router, prefix="/api/discover", tags=["discover"])
+app.include_router(logs_api.router, prefix="/api/logs", tags=["logs"])
 
 
 @app.get("/api/health")
