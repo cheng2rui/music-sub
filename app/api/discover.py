@@ -197,6 +197,9 @@ def get_playlist_detail(playlist_id: str):
         logger.warning(f"NetEase playlist detail failed: {e}")
         return {"source": "none", "title": "", "songs": []}
 
+
+@router.get("/toplist")
+def get_toplist():
     """Get music chart/ranking (daily updated)."""
     # QQ Music 飙升榜 (topid=62, daily update) with fallback to 热歌榜 (topid=26)
     for topid in (62, 26):
