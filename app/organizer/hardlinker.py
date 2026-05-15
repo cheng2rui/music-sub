@@ -15,10 +15,13 @@ def is_audio_file(path: str) -> bool:
     return Path(path).suffix.lower() in AUDIO_EXTENSIONS
 
 
-def get_audio_files(directory: str) -> list[str]:
-    """Recursively find all audio files in a directory."""
+def get_audio_files(path: str) -> list[str]:
+    """Find audio files from a file or recursively from a directory."""
+    if os.path.isfile(path):
+        return [path] if is_audio_file(path) else []
+
     files = []
-    for root, _, filenames in os.walk(directory):
+    for root, _, filenames in os.walk(path):
         for f in filenames:
             full_path = os.path.join(root, f)
             if is_audio_file(full_path):
@@ -40,11 +43,14 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
     library_base = config.paths.library
     structure = config.paths.structure
 
-    # If artist/album not provided, try to infer from directory name
+    source_path = Path(source_dir)
+    source_label = source_path.stem if source_path.is_file() else source_path.name
+
+    # If artist/album not provided, try to infer from directory/file name
     if not artist:
-        artist = Path(source_dir).name
+        artist = source_label
     if not album:
-        album = Path(source_dir).name
+        album = source_label
 
     rel_path = build_library_path(artist, album, structure)
     target_dir = os.path.join(library_base, rel_path)
@@ -75,18 +81,19 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
             else:
                 logger.error(f"Failed to hardlink {src_file}: {e}")
 
-    # Also link cover images
-    for root, _, filenames in os.walk(source_dir):
-        for f in filenames:
-            if f.lower() in ("cover.jpg", "cover.png", "folder.jpg", "front.jpg", "album.jpg"):
-                src = os.path.join(root, f)
-                dst = os.path.join(target_dir, f)
-                if not os.path.exists(dst):
-                    try:
-                        os.link(src, dst)
-                    except OSError:
-                        import shutil
-                        shutil.copy2(src, dst)
+    # Also link cover images when source is a directory
+    if os.path.isdir(source_dir):
+        for root, _, filenames in os.walk(source_dir):
+            for f in filenames:
+                if f.lower() in ("cover.jpg", "cover.png", "folder.jpg", "front.jpg", "album.jpg"):
+                    src = os.path.join(root, f)
+                    dst = os.path.join(target_dir, f)
+                    if not os.path.exists(dst):
+                        try:
+                            os.link(src, dst)
+                        except OSError:
+                            import shutil
+                            shutil.copy2(src, dst)
 
     logger.info(f"Organized {len(linked)} files to {target_dir}")
     return linked

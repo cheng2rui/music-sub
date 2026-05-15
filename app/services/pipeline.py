@@ -1,5 +1,6 @@
 """Pipeline: download complete → hardlink → scrape."""
 import os
+import datetime
 import logging
 from pathlib import Path
 from app.config import config
@@ -74,16 +75,30 @@ def _process_completed_torrent(torrent: dict):
 
     logger.info(f"Processing completed torrent: {torrent_name}")
 
-    # Step 1: Hardlink to library
-    linked_files = hardlink_to_library(content_path)
-    if not linked_files:
+    # Step 1: inspect audio files and scrape one representative track first,
+    # so the hardlink target can use real artist/album instead of raw torrent folder name.
+    source_audio_files = get_audio_files(content_path)
+    if not source_audio_files:
         logger.warning(f"No audio files found in {content_path}")
+        mark_processed(torrent_hash)
+        return
+
+    meta_cache: dict[str, MusicMeta | None] = {}
+    first_meta = _scrape_file(source_audio_files[0])
+    meta_cache[os.path.basename(source_audio_files[0])] = first_meta
+    organize_artist = (first_meta.album_artist or first_meta.artist) if first_meta else ""
+    organize_album = first_meta.album if first_meta else ""
+
+    # Step 2: Hardlink to library
+    linked_files = hardlink_to_library(content_path, artist=organize_artist, album=organize_album)
+    if not linked_files:
+        logger.warning(f"No audio files linked from {content_path}")
         mark_processed(torrent_hash)
         return
 
     notify_download_complete(torrent_name, len(linked_files))
 
-    # Step 2: Scrape and tag each file
+    # Step 3: Scrape and tag each linked file
     db = SessionLocal()
     try:
         # Update task status
@@ -102,7 +117,10 @@ def _process_completed_torrent(torrent: dict):
             if not is_audio_file(file_path):
                 continue
 
-            meta = _scrape_file(file_path)
+            meta = meta_cache.get(os.path.basename(file_path))
+            if os.path.basename(file_path) not in meta_cache:
+                meta = _scrape_file(file_path)
+                meta_cache[os.path.basename(file_path)] = meta
             if meta:
                 tag_file(file_path, meta)
                 if meta.lyrics:
@@ -152,6 +170,7 @@ def _process_completed_torrent(torrent: dict):
 
         if task:
             task.status = "scraped"
+            task.completed_at = datetime.datetime.utcnow()
         db.commit()
 
         # Notify scrape complete

@@ -10,8 +10,8 @@ services:
       - ./config:/app/config
       - ./data:/app/data
       - ./logs:/app/logs
-      - /downloads/music:/downloads/music
-      - /music:/music
+      - ./data/downloads:/downloads/music
+      - ./data/library:/music
     environment:
       - MUSIC_SUB_CONFIG=/app/config/config.yaml
       - MUSIC_SUB_DB=/app/data/music_sub.db
@@ -20,4 +20,23 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    depends_on:
+      - qbittorrent
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: music-sub-qb
+    ports:
+      - "8401:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    volumes:
+      - ./data/qb-config:/config
+      - ./data/downloads:/downloads/music
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      - WEBUI_PORT=8080
     restart: unless-stopped
