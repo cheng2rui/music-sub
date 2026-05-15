@@ -88,6 +88,7 @@ class NetEaseScraper(BaseScraper):
                 album_artist=artist_name,
                 year=year,
                 cover_url=album.get("picUrl", ""),
+                song_id=str(song.get("id", "")),
                 source=self.name,
             ))
         return results

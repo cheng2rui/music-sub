@@ -53,9 +53,11 @@ def _scrape_file(file_path: str) -> MusicMeta | None:
             results = scraper.search(title_hint, artist_hint)
             if results:
                 meta = results[0]
-                # Try to get cover
+                # Try to get cover and lyrics
                 if meta.cover_url and not meta.cover_data:
                     meta.cover_data = scraper.get_cover(meta.cover_url)
+                if meta.song_id and not meta.lyrics:
+                    meta.lyrics = scraper.get_lyrics(meta.song_id)
                 return meta
         except Exception as e:
             logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")

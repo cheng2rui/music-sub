@@ -58,6 +58,7 @@ class QQMusicScraper(BaseScraper):
                 genre="",
                 track_number=song.get("index_album", 0),
                 cover_url=self.COVER_URL.format(mid=album_mid) if album_mid else "",
+                song_id=song.get("mid", "") or song.get("songmid", ""),
                 source=self.name,
             ))
         return results

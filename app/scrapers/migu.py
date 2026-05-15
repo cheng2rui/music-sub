@@ -37,6 +37,7 @@ class MiguScraper(BaseScraper):
                     title=s.get("songName", ""),
                     artist=s.get("singerName", ""),
                     album=s.get("albumName", ""),
+                    song_id="",
                     source="migu",
                 )
                 # Cover
@@ -48,6 +49,7 @@ class MiguScraper(BaseScraper):
                 lyric_url = s.get("lyricUrl", "")
                 if lyric_url and not lyric_url.startswith("http"):
                     lyric_url = "https:" + lyric_url
+                meta.song_id = lyric_url
                 meta._lyric_url = lyric_url
                 results.append(meta)
             return results

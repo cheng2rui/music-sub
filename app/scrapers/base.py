@@ -17,6 +17,7 @@ class MusicMeta:
     disc_number: int = 1
     cover_url: str = ""
     cover_data: Optional[bytes] = None
+    song_id: str = ""       # provider-specific song id, used for lyrics
     lyrics: str = ""
     source: str = ""
 
