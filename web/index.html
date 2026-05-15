@@ -80,7 +80,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
 <body>
 <div id="app" class="app">
   <h1 style="font-size:1.3rem;margin-bottom:16px;display:flex;align-items:center;gap:8px">
-    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.3.0</span>
+    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.3.1</span>
   </h1>
 
   <div class="nav">
@@ -106,10 +106,13 @@ input[type="text"] { flex: 1; min-width: 200px; }
         <div v-for="item in recommendSongs" :key="item.title" class="music-card">
           <div class="music-cover" :style="{backgroundImage: item.cover ? 'url('+item.cover+')' : 'none'}">
             <div v-if="!item.cover" class="cover-placeholder">🎵</div>
-            <button class="cover-btn" @click="quickSubscribe(item.artist)" title="订阅该艺术家">+</button>
+            <button class="cover-btn" @click="quickSubscribe(item.title + ' ' + item.artist, 'song')" title="订阅该歌曲">+</button>
           </div>
           <div class="music-title">{{ item.title }}</div>
-          <div class="music-artist">{{ item.artist }}</div>
+          <div class="music-artist">
+            {{ item.artist }}
+            <a href="#" @click.prevent="quickSubscribe(item.artist, 'artist')" style="font-size:0.7rem;color:var(--blue);margin-left:4px" title="订阅该艺人">订艺人</a>
+          </div>
         </div>
       </div>
     </div>
@@ -141,8 +144,9 @@ input[type="text"] { flex: 1; min-width: 200px; }
               <div style="font-weight:600">{{ song.title }}</div>
               <div style="font-size:0.78rem;color:var(--text-dim)">{{ song.artist }} · {{ song.album }}</div>
             </td>
-            <td style="width:80px;text-align:right">
-              <button class="btn btn-sm btn-success" @click="quickSubscribe(song.artist)">+ 订阅</button>
+            <td style="width:170px;text-align:right;white-space:nowrap">
+              <button class="btn btn-sm btn-success" @click="quickSubscribe(song.title + ' ' + song.artist, 'song')" title="订阅该歌曲">+ 订歌</button>
+              <button class="btn btn-sm" @click="quickSubscribe(song.artist, 'artist')" title="订阅该艺人">+ 订艺人</button>
             </td>
           </tr>
         </tbody>
@@ -154,9 +158,10 @@ input[type="text"] { flex: 1; min-width: 200px; }
     <div class="card">
       <div class="card-title">新增订阅</div>
       <div class="form-row">
-        <input type="text" v-model="newSub.keyword" placeholder="艺术家/专辑/关键词" @keyup.enter="addSub">
+        <input type="text" v-model="newSub.keyword" placeholder="艺人 / 专辑 / 歌曲 / 其他关键词" @keyup.enter="addSub">
         <select v-model="newSub.type">
-          <option value="artist">艺术家</option>
+          <option value="artist">艺人</option>
+          <option value="song">歌曲</option>
           <option value="album">专辑</option>
           <option value="keyword">关键词</option>
         </select>
@@ -172,11 +177,11 @@ input[type="text"] { flex: 1; min-width: 200px; }
       <div class="card-title">订阅列表</div>
       <div v-if="subs.length===0" class="empty">暂无订阅，添加一个开始吧 🎵</div>
       <table v-else class="table">
-        <thead><tr><th>关键词</th><th>类型</th><th>品质</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th style="width:90px">类型</th><th>订阅内容</th><th style="width:90px">品质</th><th style="width:70px">状态</th><th style="width:160px">操作</th></tr></thead>
         <tbody>
           <tr v-for="s in subs" :key="s.id">
+            <td><span class="badge" :class="subTypeClass(s.type)">{{ subTypeLabel(s.type) }}</span></td>
             <td style="font-weight:600">{{ s.keyword }}</td>
-            <td><span class="badge badge-blue">{{ s.type }}</span></td>
             <td>{{ s.quality }}</td>
             <td><span :class="s.enabled?'badge badge-green':'badge badge-red'">{{ s.enabled?'启用':'禁用' }}</span></td>
             <td>
@@ -511,9 +516,9 @@ input[type="text"] { flex: 1; min-width: 200px; }
       </div>
     </div>
 
-    <div style="display:flex;gap:10px;margin-top:16px">
+    <div style="position:sticky;bottom:0;background:var(--bg);padding:16px 0 8px;margin-top:16px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center">
       <button class="btn btn-primary" @click="saveSettings" :disabled="saving">💾 {{ saving?'保存中...':'保存配置' }}</button>
-      <span v-if="saveMsg" style="font-size:0.85rem;color:var(--green);align-self:center">{{ saveMsg }}</span>
+      <span v-if="saveMsg" style="font-size:0.9rem;font-weight:600" :style="{color: saveOk ? 'var(--green)' : 'var(--red)'}">{{ saveMsg }}</span>
     </div>
   </div>
 
@@ -546,15 +551,30 @@ createApp({
       discoverLoading.value = false;
     }
 
-    async function quickSubscribe(artist) {
-      if (!artist) return;
-      if (!confirm(`订阅艺术家: ${artist}?`)) return;
+    async function quickSubscribe(keyword, type) {
+      if (!keyword) return;
+      const t = type || 'artist';
+      const labelMap = { artist: '艺人', song: '歌曲', album: '专辑', keyword: '关键词' };
+      const label = labelMap[t] || '订阅';
+      if (!confirm(`订阅${label}: ${keyword}?`)) return;
       await fetch(`${API}/api/subscriptions/`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ keyword: artist, type: 'artist', quality: 'any', sites: 'all' })
+        body: JSON.stringify({ keyword: keyword, type: t, quality: 'any', sites: 'all' })
       });
-      alert('✅ 已添加订阅: ' + artist);
+      alert(`✅ 已添加${label}订阅: ${keyword}`);
       loadSubs();
+    }
+
+    function subTypeLabel(t) {
+      return ({ artist: '艺人', song: '歌曲', album: '专辑', keyword: '关键词' })[t] || t;
+    }
+    function subTypeClass(t) {
+      return ({
+        artist: 'badge badge-blue',
+        song: 'badge badge-green',
+        album: 'badge badge-orange',
+        keyword: 'badge badge-red',
+      })[t] || 'badge badge-blue';
     }
 
     function formatPlayCount(n) {
@@ -666,6 +686,7 @@ createApp({
     });
     const saving = ref(false);
     const saveMsg = ref('');
+    const saveOk = ref(true);
     const qbTestResult = ref('');
     const qbTestOk = ref(false);
     const tgTestResult = ref('');
@@ -682,10 +703,25 @@ createApp({
           method: 'PUT', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(settingsData.value)
         });
+        if (!r.ok) {
+          const errText = await r.text();
+          saveOk.value = false;
+          saveMsg.value = `❌ HTTP ${r.status}: ${errText.slice(0, 200)}`;
+          saving.value = false;
+          return;
+        }
         const data = await r.json();
-        saveMsg.value = data.ok ? '✅ 已保存' : '❌ 保存失败';
-        setTimeout(() => saveMsg.value = '', 3000);
-      } catch(e) { saveMsg.value = '❌ ' + e.message; }
+        saveOk.value = !!data.ok;
+        saveMsg.value = data.ok ? '✅ 已保存 · 配置已热加载' : '❌ ' + (data.message || '保存失败');
+        // 重新拉取以同步 server 实际存储值（比如 mask 后的秘密）
+        if (data.ok) {
+          await loadSettings();
+        }
+        setTimeout(() => saveMsg.value = '', 4000);
+      } catch(e) {
+        saveOk.value = false;
+        saveMsg.value = '❌ ' + e.message;
+      }
       saving.value = false;
     }
     async function testQB() {
@@ -728,12 +764,12 @@ createApp({
     onMounted(() => { loadDiscover(); loadSubs(); });
 
     return {
-      tab, recommendSongs, playlists, toplist, discoverLoading, loadDiscover, quickSubscribe, formatPlayCount,
+      tab, recommendSongs, playlists, toplist, discoverLoading, loadDiscover, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks,
       libStats, libFiles, libAlbums, libView, libSearch, albumDetail, loadLibrary, openAlbum,
-      settingsData, saving, saveMsg, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
+      settingsData, saving, saveMsg, saveOk, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
       formatSize, formatDate, statusClass,
     };
   }
