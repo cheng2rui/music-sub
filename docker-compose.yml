@@ -9,9 +9,12 @@ services:
     volumes:
       - ./config:/app/config
       - ./data:/app/data
+      - ./logs:/app/logs
       - /downloads/music:/downloads/music
       - /music:/music
     environment:
       - MUSIC_SUB_CONFIG=/app/config/config.yaml
       - MUSIC_SUB_DB=/app/data/music_sub.db
+      - no_proxy=*
+      - NO_PROXY=*
     restart: unless-stopped
