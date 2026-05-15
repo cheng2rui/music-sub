@@ -317,6 +317,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
         </div>
         <input type="text" v-model="libSearch" placeholder="搜索艺术家 / 专辑..." @keyup.enter="loadLibrary()" style="flex:1">
         <button class="btn btn-primary btn-sm" @click="loadLibrary()">刷新</button>
+        <button v-if="libStats.unscraped > 0" class="btn btn-sm btn-success" @click="rescrapeUnscraped()" :disabled="rescraping">🔄 刮削未完成({{ libStats.unscraped }})</button>
       </div>
     </div>
 
@@ -367,6 +368,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <span class="badge badge-blue">{{ albumDetail.album.track_count }} 首</span>
               <span class="badge badge-green">刮削 {{ albumDetail.album.scraped_count }}/{{ albumDetail.album.track_count }}</span>
+              <button class="btn btn-sm btn-primary" @click="rescrapeAlbum(albumDetail.album)" :disabled="rescraping">🔄 {{ rescraping ? '刮削中...' : '重新刮削' }}</button>
             </div>
           </div>
           <button class="btn btn-sm" @click="albumDetail=null" style="align-self:flex-start">✕</button>
@@ -374,7 +376,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
         <table class="table">
           <thead><tr><th style="width:40px">#</th><th>标题</th><th style="width:80px">格式</th><th style="width:60px">刮削</th></tr></thead>
           <tbody>
-            <tr v-for="(t, idx) in albumDetail.tracks" :key="t.id">
+            <tr v-for="(t, idx) in albumDetail.tracks" :key="t.id" @click="openFileDetail(t.id)" style="cursor:pointer">
               <td style="color:var(--text-dim)">{{ idx + 1 }}</td>
               <td>{{ t.title }}</td>
               <td><span class="badge badge-orange">{{ t.format || '?' }}</span></td>
@@ -382,6 +384,56 @@ input[type="text"] { flex: 1; min-width: 200px; }
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- 文件详情弹窗 -->
+    <div v-if="fileDetail" class="modal-mask" @click.self="fileDetail=null" style="z-index:1100">
+      <div class="modal-box" style="max-width:560px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:1.1rem;font-weight:700">🎵 {{ fileDetail.title || '未知曲目' }}</div>
+          <button class="btn btn-sm" @click="fileDetail=null">✕</button>
+        </div>
+        <div v-if="fileDetailLoading" class="loading">加载中...</div>
+        <div v-else>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:0.85rem;margin-bottom:16px">
+            <div><span style="color:var(--text-dim)">艺人：</span>{{ fileDetail.artist || '-' }}</div>
+            <div><span style="color:var(--text-dim)">专辑：</span>{{ fileDetail.album || '-' }}</div>
+            <div><span style="color:var(--text-dim)">年份：</span>{{ fileDetail.year || '-' }}</div>
+            <div><span style="color:var(--text-dim)">流派：</span>{{ fileDetail.genre || '-' }}</div>
+            <div><span style="color:var(--text-dim)">格式：</span>{{ fileDetail.format || '-' }}</div>
+            <div><span style="color:var(--text-dim)">比特率：</span>{{ fileDetail.bitrate ? Math.round(fileDetail.bitrate/1000) + ' kbps' : '-' }}</div>
+            <div><span style="color:var(--text-dim)">采样率：</span>{{ fileDetail.sample_rate ? (fileDetail.sample_rate/1000).toFixed(1) + ' kHz' : '-' }}</div>
+            <div><span style="color:var(--text-dim)">时长：</span>{{ fileDetail.duration ? Math.floor(fileDetail.duration/60) + ':' + String(Math.round(fileDetail.duration%60)).padStart(2,'0') : '-' }}</div>
+            <div><span style="color:var(--text-dim)">声道：</span>{{ fileDetail.channels || '-' }}</div>
+            <div><span style="color:var(--text-dim)">刮削：</span><span :class="fileDetail.scraped?'badge badge-green':'badge badge-red'">{{ fileDetail.scraped?'已刮削':'未刮削' }}</span></div>
+          </div>
+          <div v-if="fileDetail.file_path" style="font-size:0.75rem;color:var(--text-dim);word-break:break-all;margin-bottom:12px">📁 {{ fileDetail.file_path }}</div>
+          <div v-if="fileDetail.lyrics" style="margin-top:12px">
+            <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">📝 歌词</div>
+            <pre style="font-size:0.78rem;color:var(--text-dim);background:var(--surface-2);padding:12px;border-radius:8px;max-height:200px;overflow-y:auto;white-space:pre-wrap">{{ fileDetail.lyrics }}</pre>
+          </div>
+          <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+            <div v-if="!fileEditing" style="display:flex;gap:8px">
+              <button class="btn btn-sm btn-primary" @click="startEditFile">✏️ 编辑标签</button>
+              <button class="btn btn-sm btn-success" @click="rescrapeOne(fileDetail.id)" :disabled="rescraping">🔄 重新刮削</button>
+            </div>
+            <div v-else>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                <input type="text" v-model="fileEditForm.title" placeholder="标题">
+                <input type="text" v-model="fileEditForm.artist" placeholder="艺人">
+                <input type="text" v-model="fileEditForm.album" placeholder="专辑">
+                <input type="text" v-model="fileEditForm.genre" placeholder="流派">
+                <input type="number" v-model.number="fileEditForm.year" placeholder="年份">
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-sm btn-primary" @click="saveFileEdit">保存</button>
+                <button class="btn btn-sm" @click="fileEditing=false">取消</button>
+                <span v-if="fileEditMsg" style="font-size:0.82rem;color:var(--green);align-self:center">{{ fileEditMsg }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -805,6 +857,13 @@ createApp({
     const libView = ref('albums');
     const libSearch = ref('');
     const albumDetail = ref(null);
+    const fileDetail = ref(null);
+    const fileDetailLoading = ref(false);
+    const rescraping = ref(false);
+    const rescrapeMsg = ref('');
+    const fileEditing = ref(false);
+    const fileEditForm = ref({ title: '', artist: '', album: '', year: 0, genre: '' });
+    const fileEditMsg = ref('');
 
     async function loadLibrary() {
       const q = libSearch.value.trim();
@@ -823,6 +882,86 @@ createApp({
       const r = await authFetch(`${API}/api/library/album-tracks?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.album)}`);
       const tracks = await r.json();
       albumDetail.value = { album, tracks };
+    }
+
+    async function openFileDetail(fileId) {
+      if (!fileId) return;
+      fileDetail.value = {};
+      fileDetailLoading.value = true;
+      try {
+        const r = await authFetch(`${API}/api/library/file/${fileId}`);
+        fileDetail.value = await r.json();
+      } catch(e) { console.error('File detail failed', e); }
+      fileDetailLoading.value = false;
+    }
+
+    async function rescrapeAlbum(album) {
+      rescraping.value = true;
+      try {
+        const r = await authFetch(`${API}/api/library/rescrape?album_artist=${encodeURIComponent(album.artist)}&album_name=${encodeURIComponent(album.album)}`, { method: 'POST' });
+        const data = await r.json();
+        alert(data.message || '刮削完成');
+        // Refresh album detail
+        openAlbum(album);
+        loadLibrary();
+      } catch(e) { alert('刮削失败: ' + e.message); }
+      rescraping.value = false;
+    }
+
+    async function rescrapeUnscraped() {
+      rescraping.value = true;
+      try {
+        const r = await authFetch(`${API}/api/library/rescrape`, { method: 'POST' });
+        const data = await r.json();
+        alert(data.message || '刮削完成');
+        loadLibrary();
+      } catch(e) { alert('刮削失败: ' + e.message); }
+      rescraping.value = false;
+    }
+
+    function startEditFile() {
+      fileEditing.value = true;
+      fileEditMsg.value = '';
+      fileEditForm.value = {
+        title: fileDetail.value.title || '',
+        artist: fileDetail.value.artist || '',
+        album: fileDetail.value.album || '',
+        year: fileDetail.value.year || 0,
+        genre: fileDetail.value.genre || '',
+      };
+    }
+
+    async function saveFileEdit() {
+      const params = new URLSearchParams();
+      if (fileEditForm.value.title) params.set('title', fileEditForm.value.title);
+      if (fileEditForm.value.artist) params.set('artist', fileEditForm.value.artist);
+      if (fileEditForm.value.album) params.set('album', fileEditForm.value.album);
+      if (fileEditForm.value.year) params.set('year', fileEditForm.value.year);
+      if (fileEditForm.value.genre) params.set('genre', fileEditForm.value.genre);
+      try {
+        const r = await authFetch(`${API}/api/library/file/${fileDetail.value.id}?${params}`, { method: 'PUT' });
+        const data = await r.json();
+        fileEditMsg.value = data.ok ? '✅ ' + data.message : '❌ ' + (data.message || '失败');
+        if (data.ok) {
+          fileEditing.value = false;
+          openFileDetail(fileDetail.value.id);
+        }
+      } catch(e) { fileEditMsg.value = '❌ ' + e.message; }
+    }
+
+    async function rescrapeOne(fileId) {
+      rescraping.value = true;
+      try {
+        const r = await authFetch(`${API}/api/library/rescrape`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ file_ids: [fileId] })
+        });
+        const data = await r.json();
+        alert(data.message || '刮削完成');
+        openFileDetail(fileId);
+      } catch(e) { alert('刮削失败: ' + e.message); }
+      rescraping.value = false;
     }
 
     // Helpers
@@ -943,7 +1082,7 @@ createApp({
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks, startTasksAutoRefresh, stopTasksAutoRefresh,
-      libStats, libFiles, libAlbums, libView, libSearch, albumDetail, loadLibrary, openAlbum,
+      libStats, libFiles, libAlbums, libView, libSearch, albumDetail, fileDetail, fileDetailLoading, rescraping, fileEditing, fileEditForm, fileEditMsg, loadLibrary, openAlbum, openFileDetail, rescrapeAlbum, rescrapeUnscraped, startEditFile, saveFileEdit, rescrapeOne,
       settingsData, saving, saveMsg, saveOk, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
       pwdForm, pwdMsg, pwdOk, changePassword,
       formatSize, formatDate, statusClass, statusLabel,
