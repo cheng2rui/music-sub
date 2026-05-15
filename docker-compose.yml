@@ -17,4 +17,7 @@ services:
       - MUSIC_SUB_DB=/app/data/music_sub.db
       - no_proxy=*
       - NO_PROXY=*
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     restart: unless-stopped

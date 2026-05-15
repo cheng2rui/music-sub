@@ -19,7 +19,14 @@ class MTeamSite(BaseSite):
         self.api_key = api_key
         self.token = token
         domain = urlparse(self.url).netloc
-        self._api_base = f"https://api.{domain}"
+        # M-Team main site is usually kp.m-team.cc, API host is api.m-team.cc.
+        # Do not blindly prepend api. to kp.m-team.cc (api.kp.m-team.cc is invalid/unstable).
+        if domain.startswith("kp.m-team.cc"):
+            self._api_base = "https://api.m-team.cc"
+        elif domain.startswith("api."):
+            self._api_base = f"https://{domain}"
+        else:
+            self._api_base = f"https://api.{domain}"
 
     def _get_headers(self) -> dict:
         headers = {}
@@ -49,12 +56,13 @@ class MTeamSite(BaseSite):
 
         results = []
         for item in data.get("data", {}).get("data", []):
-            torrent = item.get("torrent", {})
+            # New M-Team API returns torrent fields at top-level; older wrappers may use {torrent, status}.
+            torrent = item.get("torrent") or item
             status = item.get("status", {})
             results.append(TorrentInfo(
                 site=self.name,
                 torrent_id=str(torrent.get("id", "")),
-                title=torrent.get("name", ""),
+                title=torrent.get("name", "") or torrent.get("smallDescr", ""),
                 size=float(torrent.get("size", 0)),
                 seeders=int(status.get("seeders", 0)),
                 leechers=int(status.get("leechers", 0)),
