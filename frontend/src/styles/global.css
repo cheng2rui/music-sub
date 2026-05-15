@@ -44,3 +44,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .text-success { color: var(--success); }
 .text-warning { color: var(--warning); }
 .text-danger { color: var(--danger); }
+
+/* Tables responsive */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile breakpoint */
+@media (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px; /* prevent iOS zoom */
+  }
+}

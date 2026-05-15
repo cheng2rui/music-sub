@@ -243,4 +243,11 @@ onMounted(loadAll)
 .pwd-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .pwd-form input { flex: 1; min-width: 160px; }
 .save-bar { position: sticky; bottom: 0; background: var(--bg); padding: 16px 0; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+
+@media (max-width: 768px) {
+  .site-grid { grid-template-columns: 1fr; }
+  .pwd-form { flex-direction: column; align-items: stretch; }
+  .pwd-form input { min-width: unset; }
+  .scheduler-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+}
 </style>

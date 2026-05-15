@@ -28,22 +28,22 @@ function handleLogout() {
 
   <!-- Main layout with sidebar -->
   <div v-else class="app-layout" :class="{ 'glass-active': isGlass }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
-    <!-- Sidebar -->
+    <!-- Sidebar (desktop) -->
     <aside class="sidebar">
       <div class="sidebar-logo">🎵 音乐订阅</div>
       <nav class="sidebar-nav">
-        <router-link to="/discover">发现</router-link>
-        <router-link to="/subs">订阅管理</router-link>
-        <router-link to="/search">搜索</router-link>
-        <router-link to="/tasks">任务列表</router-link>
-        <router-link to="/library">音乐库</router-link>
-        <router-link to="/logs">日志</router-link>
-        <router-link to="/settings">设置</router-link>
+        <router-link to="/discover">🏠 发现</router-link>
+        <router-link to="/subs">📡 订阅管理</router-link>
+        <router-link to="/search">🔍 搜索</router-link>
+        <router-link to="/tasks">⬇️ 任务列表</router-link>
+        <router-link to="/library">🎶 音乐库</router-link>
+        <router-link to="/logs">📜 日志</router-link>
+        <router-link to="/settings">⚙️ 设置</router-link>
       </nav>
       <div class="sidebar-bottom">
         <ThemeSwitcher />
         <div class="user-info">
-          <span>{{ auth.token ? '已登录' : '' }}</span>
+          <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
       </div>
@@ -54,13 +54,24 @@ function handleLogout() {
       <header class="topbar">
         <h1 class="page-title">{{ pageTitle }}</h1>
         <div class="topbar-right">
-          <span class="text-dim">{{ auth.token ? '已登录' : '' }}</span>
+          <ThemeSwitcher class="mobile-theme" />
+          <button @click="handleLogout" class="btn-logout mobile-logout">退出</button>
         </div>
       </header>
       <main class="main-content">
         <router-view />
       </main>
     </div>
+
+    <!-- Bottom tab bar (mobile) -->
+    <nav class="bottom-tabs">
+      <router-link to="/discover">🏠</router-link>
+      <router-link to="/subs">📡</router-link>
+      <router-link to="/search">🔍</router-link>
+      <router-link to="/tasks">⬇️</router-link>
+      <router-link to="/library">🎶</router-link>
+      <router-link to="/settings">⚙️</router-link>
+    </nav>
   </div>
 </template>
 
@@ -95,9 +106,10 @@ function handleLogout() {
   flex-direction: column;
   gap: 2px;
   flex: 1;
+  padding: 0 8px;
 }
 .sidebar-nav a {
-  padding: 10px 20px;
+  padding: 10px 12px;
   color: var(--text-dim);
   border-radius: var(--radius-md);
   transition: all 0.15s;
@@ -130,7 +142,7 @@ function handleLogout() {
   color: var(--text-muted);
   cursor: pointer;
   font-size: 12px;
-  padding: 0;
+  padding: 4px 8px;
 }
 .btn-logout:hover { color: var(--danger); }
 .main-wrapper {
@@ -138,6 +150,7 @@ function handleLogout() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 .topbar {
   height: 56px;
@@ -159,5 +172,64 @@ function handleLogout() {
 .login-wrapper {
   min-height: 100vh;
   background: var(--bg);
+}
+
+/* Bottom tab bar - hidden on desktop */
+.bottom-tabs {
+  display: none;
+}
+
+/* Mobile theme/logout in topbar - hidden on desktop */
+.mobile-theme, .mobile-logout {
+  display: none;
+}
+
+/* ===== Mobile ===== */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+  .topbar {
+    padding: 0 16px;
+    height: 48px;
+    min-height: 48px;
+  }
+  .page-title { font-size: 16px; }
+  .main-content {
+    padding: 16px;
+    padding-bottom: 72px; /* space for bottom tabs */
+  }
+  .mobile-theme, .mobile-logout {
+    display: flex;
+  }
+  .bottom-tabs {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border);
+    align-items: center;
+    justify-content: space-around;
+    z-index: 100;
+    padding: 0 8px;
+  }
+  .bottom-tabs a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    font-size: 20px;
+    color: var(--text-dim);
+    transition: all 0.15s;
+  }
+  .bottom-tabs a.router-link-active {
+    color: var(--accent);
+    background: var(--surface);
+  }
 }
 </style>

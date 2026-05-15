@@ -309,4 +309,12 @@ onMounted(() => { loadStats(); loadAlbums() })
 .tag-row label { font-size: 13px; color: var(--text-dim); min-width: 50px; }
 .tag-row input { flex: 1; }
 .tag-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+@media (max-width: 768px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .album-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .track-modal { min-width: unset; width: 100%; }
+  .tag-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .tag-row label { min-width: unset; }
+}
 </style>
