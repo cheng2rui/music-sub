@@ -122,7 +122,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
       <div class="card-title">📋 推荐歌单</div>
       <div v-if="playlists.length===0" class="loading">加载中...</div>
       <div v-else class="grid-cards">
-        <div v-for="pl in playlists" :key="pl.id" class="music-card">
+        <div v-for="pl in playlists" :key="pl.id" class="music-card" @click="openPlaylist(pl)" style="cursor:pointer">
           <div class="music-cover" :style="{backgroundImage: pl.cover ? 'url('+pl.cover+')' : 'none'}">
             <div v-if="!pl.cover" class="cover-placeholder">📋</div>
             <span class="play-count" v-if="pl.play_count">{{ formatPlayCount(pl.play_count) }}</span>
@@ -151,6 +151,35 @@ input[type="text"] { flex: 1; min-width: 200px; }
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 歌单详情弹窗 -->
+    <div v-if="playlistDetail" class="modal-mask" @click.self="playlistDetail=null">
+      <div class="modal-box">
+        <div style="display:flex;gap:16px;margin-bottom:16px">
+          <div class="music-cover" style="width:120px;height:120px;flex-shrink:0" :style="playlistDetail.cover ? `background-image:url(${playlistDetail.cover})` : ''">
+            <div v-if="!playlistDetail.cover" class="cover-placeholder">📋</div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:1.1rem;font-weight:700;margin-bottom:4px">{{ playlistDetail.title }}</div>
+            <div v-if="playlistDetail.desc" style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px;max-height:60px;overflow:hidden">{{ playlistDetail.desc }}</div>
+            <span class="badge badge-blue">{{ playlistDetail.songs.length }} 首</span>
+          </div>
+          <button class="btn btn-sm" @click="playlistDetail=null" style="align-self:flex-start">✕</button>
+        </div>
+        <div v-if="playlistLoading" class="loading">加载中...</div>
+        <table v-else class="table">
+          <thead><tr><th style="width:40px">#</th><th>歌曲</th><th>艺人</th><th style="width:80px">操作</th></tr></thead>
+          <tbody>
+            <tr v-for="(s, idx) in playlistDetail.songs" :key="idx">
+              <td style="color:var(--text-dim)">{{ idx + 1 }}</td>
+              <td style="font-weight:600">{{ s.title }}</td>
+              <td style="color:var(--text-dim)">{{ s.artist }}</td>
+              <td><button class="btn btn-sm btn-success" @click="quickSubscribe(s.title + ' ' + s.artist, 'song')">+ 订</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -536,6 +565,8 @@ createApp({
     const toplist = ref([]);
     const discoverLoading = ref(false);
     const discoverRefreshed = ref(false);
+    const playlistDetail = ref(null);
+    const playlistLoading = ref(false);
 
     async function loadDiscover() {
       discoverLoading.value = true;
@@ -578,6 +609,22 @@ createApp({
         album: 'badge badge-orange',
         keyword: 'badge badge-red',
       })[t] || 'badge badge-blue';
+    }
+
+    async function openPlaylist(pl) {
+      playlistDetail.value = { title: pl.title, cover: pl.cover, desc: '', songs: [] };
+      playlistLoading.value = true;
+      try {
+        const r = await fetch(`${API}/api/discover/playlist/${pl.id}`);
+        const data = await r.json();
+        playlistDetail.value = {
+          title: data.title || pl.title,
+          cover: data.cover || pl.cover,
+          desc: data.desc || '',
+          songs: data.songs || [],
+        };
+      } catch(e) { console.error('Playlist detail failed', e); }
+      playlistLoading.value = false;
     }
 
     function formatPlayCount(n) {
@@ -767,7 +814,7 @@ createApp({
     onMounted(() => { loadDiscover(); loadSubs(); });
 
     return {
-      tab, recommendSongs, playlists, toplist, discoverLoading, discoverRefreshed, loadDiscover, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
+      tab, recommendSongs, playlists, toplist, discoverLoading, discoverRefreshed, playlistDetail, playlistLoading, loadDiscover, openPlaylist, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks,

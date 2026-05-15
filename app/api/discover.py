@@ -125,8 +125,78 @@ def get_playlists():
         return {"source": "none", "items": []}
 
 
-@router.get("/toplist")
-def get_toplist():
+@router.get("/playlist/{playlist_id}")
+def get_playlist_detail(playlist_id: str):
+    """Get playlist detail with song list."""
+    # QQ Music playlist detail
+    try:
+        import json as _json
+        resp = _session.get(
+            "https://u.y.qq.com/cgi-bin/musicu.fcg",
+            params={
+                "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(playlist_id), "onlysonglist": 0, "song_num": 30, "song_begin": 0}}})
+            },
+            timeout=10,
+        )
+        data = resp.json()
+        detail = data.get("detail", {}).get("data", {})
+        dirinfo = detail.get("dirinfo", {})
+        songs = detail.get("songlist", [])
+        results = []
+        for s in songs:
+            singers = s.get("singer", [])
+            artist = "/".join(x.get("name", "") for x in singers) if singers else ""
+            album = s.get("album", {})
+            mid = album.get("mid", "") if isinstance(album, dict) else ""
+            results.append({
+                "title": s.get("name", ""),
+                "artist": artist,
+                "album": album.get("name", "") if isinstance(album, dict) else "",
+                "cover": f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
+            })
+        return {
+            "source": "qqmusic",
+            "title": dirinfo.get("title", ""),
+            "cover": dirinfo.get("picurl", ""),
+            "desc": dirinfo.get("desc", ""),
+            "songs": results,
+        }
+    except Exception as e:
+        logger.warning(f"QQ Music playlist detail failed: {e}")
+
+    # Fallback NetEase
+    try:
+        resp = _session.get(
+            "https://music.163.com/api/playlist/detail",
+            params={"id": playlist_id},
+            headers={"Referer": "https://music.163.com/"},
+            timeout=10,
+        )
+        data = resp.json()
+        result = data.get("result", {})
+        tracks = result.get("tracks", [])
+        results = []
+        for t in tracks[:30]:
+            artists = t.get("artists", [])
+            artist = "/".join(a.get("name", "") for a in artists) if artists else ""
+            album = t.get("album", {})
+            results.append({
+                "title": t.get("name", ""),
+                "artist": artist,
+                "album": album.get("name", ""),
+                "cover": album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
+            })
+        return {
+            "source": "netease",
+            "title": result.get("name", ""),
+            "cover": result.get("coverImgUrl", ""),
+            "desc": result.get("description", ""),
+            "songs": results,
+        }
+    except Exception as e:
+        logger.warning(f"NetEase playlist detail failed: {e}")
+        return {"source": "none", "title": "", "songs": []}
+
     """Get music chart/ranking (daily updated)."""
     # QQ Music 飙升榜 (topid=62, daily update) with fallback to 热歌榜 (topid=26)
     for topid in (62, 26):
