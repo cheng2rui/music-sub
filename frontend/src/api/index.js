@@ -2,11 +2,12 @@ import { useAuthStore } from '@/stores/auth.js'
 
 async function authFetch(url, options = {}) {
   const auth = useAuthStore()
-  const headers = {
-    ...(options.headers || {}),
-    'Content-Type': 'application/json'
-  }
+  const headers = { ...(options.headers || {}) }
   if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`
+  // Only set Content-Type for requests with body
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
+  }
 
   const res = await fetch(url, { ...options, headers })
 

@@ -13,8 +13,8 @@ export const useAuthStore = defineStore('auth', () => {
       body: JSON.stringify({ username, password })
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: '登录失败' }))
-      throw new Error(err.message)
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || err.message || '登录失败')
     }
     const data = await res.json()
     token.value = data.token

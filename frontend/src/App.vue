@@ -12,6 +12,7 @@ const auth = useAuthStore()
 
 const pageTitle = computed(() => route.meta?.title || '音乐订阅管理')
 const isGlass = computed(() => theme.current.includes('glass'))
+const isLoginPage = computed(() => route.name === 'login')
 
 function handleLogout() {
   auth.logout()
@@ -20,7 +21,13 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="app-layout" :class="{ 'glass-active': isGlass }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
+  <!-- Login page: no sidebar -->
+  <div v-if="isLoginPage" class="login-wrapper">
+    <router-view />
+  </div>
+
+  <!-- Main layout with sidebar -->
+  <div v-else class="app-layout" :class="{ 'glass-active': isGlass }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-logo">🎵 音乐订阅</div>
@@ -148,5 +155,9 @@ function handleLogout() {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+}
+.login-wrapper {
+  min-height: 100vh;
+  background: var(--bg);
 }
 </style>

@@ -3,14 +3,54 @@ import { useAuthStore } from '@/stores/auth.js'
 
 const routes = [
   { path: '/', redirect: '/discover' },
-  { path: '/discover', name: 'discover', meta: { title: '发现' } },
-  { path: '/subs', name: 'subs', meta: { title: '订阅管理' } },
-  { path: '/search', name: 'search', meta: { title: '搜索' } },
-  { path: '/tasks', name: 'tasks', meta: { title: '任务列表' } },
-  { path: '/library', name: 'library', meta: { title: '音乐库' } },
-  { path: '/settings', name: 'settings', meta: { title: '设置' } },
-  { path: '/logs', name: 'logs', meta: { title: '日志' } },
-  { path: '/login', name: 'login', meta: { title: '登录' } }
+  {
+    path: '/discover',
+    name: 'discover',
+    meta: { title: '发现' },
+    component: () => import('@/views/DiscoverView.vue')
+  },
+  {
+    path: '/subs',
+    name: 'subs',
+    meta: { title: '订阅管理' },
+    component: () => import('@/views/SubsView.vue')
+  },
+  {
+    path: '/search',
+    name: 'search',
+    meta: { title: '搜索' },
+    component: () => import('@/views/SearchView.vue')
+  },
+  {
+    path: '/tasks',
+    name: 'tasks',
+    meta: { title: '任务列表' },
+    component: () => import('@/views/TasksView.vue')
+  },
+  {
+    path: '/library',
+    name: 'library',
+    meta: { title: '音乐库' },
+    component: () => import('@/views/LibraryView.vue')
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    meta: { title: '设置' },
+    component: () => import('@/views/SettingsView.vue')
+  },
+  {
+    path: '/logs',
+    name: 'logs',
+    meta: { title: '日志' },
+    component: () => import('@/views/LogsView.vue')
+  },
+  {
+    path: '/login',
+    name: 'login',
+    meta: { title: '登录', noAuth: true },
+    component: () => import('@/views/LoginView.vue')
+  }
 ]
 
 const router = createRouter({
