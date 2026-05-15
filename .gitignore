@@ -1,4 +1,12 @@
 __pycache__/
 *.pyc
+*.pyo
 data/*.db
+data/
 logs/
+.env
+.venv/
+.DS_Store
+
+# Real config contains secrets; only the example template is tracked
+config/config.yaml

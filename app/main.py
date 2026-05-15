@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Music Sub",
     description="音乐订阅下载管理系统 - PT站搜索订阅 + QB下载 + 硬链接整理 + 自动刮削",
-    version="0.2.1",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -37,7 +37,7 @@ app.include_router(discover.router, prefix="/api/discover", tags=["discover"])
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.2.1"}
+    return {"status": "ok", "version": "0.3.0"}
 
 
 @app.get("/")

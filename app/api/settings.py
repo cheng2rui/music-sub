@@ -50,12 +50,27 @@ class SchedulerSettingInput(BaseModel):
     check_complete_interval_minutes: int = 5
 
 
+class TelegramNotifyInput(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+    on_download_added: bool = False
+    on_download_complete: bool = True
+    on_scrape_complete: bool = True
+    on_error: bool = True
+
+
+class NotifySettingInput(BaseModel):
+    telegram: TelegramNotifyInput = TelegramNotifyInput()
+
+
 class AllSettings(BaseModel):
     sites: dict[str, SiteSettingInput] = {}
     qbittorrent: QBSettingInput = QBSettingInput()
     paths: PathsSettingInput = PathsSettingInput()
     scraper: ScraperSettingInput = ScraperSettingInput()
     scheduler: SchedulerSettingInput = SchedulerSettingInput()
+    notify: NotifySettingInput = NotifySettingInput()
 
 
 @router.get("/", response_model=AllSettings)
@@ -67,6 +82,9 @@ def get_settings():
         paths=PathsSettingInput(**config.paths.model_dump()),
         scraper=ScraperSettingInput(**config.scraper.model_dump()),
         scheduler=SchedulerSettingInput(**config.scheduler.model_dump()),
+        notify=NotifySettingInput(
+            telegram=TelegramNotifyInput(**config.notify.telegram.model_dump()),
+        ),
     )
     # Mask sensitive fields
     for s in data.sites.values():
@@ -78,6 +96,8 @@ def get_settings():
             s.token = s.token[:6] + "***"
     if data.qbittorrent.password:
         data.qbittorrent.password = "***"
+    if data.notify.telegram.bot_token:
+        data.notify.telegram.bot_token = data.notify.telegram.bot_token[:6] + "***"
     return data
 
 
@@ -93,6 +113,7 @@ def save_settings(settings: AllSettings):
         "paths": settings.paths.model_dump(),
         "scraper": settings.scraper.model_dump(),
         "scheduler": settings.scheduler.model_dump(),
+        "notify": settings.notify.model_dump(),
     }
 
     # For sites, merge with existing to preserve unmasked secrets
@@ -113,6 +134,10 @@ def save_settings(settings: AllSettings):
     if raw["qbittorrent"]["password"] == "***":
         raw["qbittorrent"]["password"] = config.qbittorrent.password
 
+    # Preserve telegram bot_token if masked
+    if raw["notify"]["telegram"]["bot_token"].endswith("***"):
+        raw["notify"]["telegram"]["bot_token"] = config.notify.telegram.bot_token
+
     # Write YAML
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
@@ -131,3 +156,29 @@ def test_qb_connection():
     client = QBClient()
     ok, msg = client.test_connection()
     return {"ok": ok, "message": msg}
+
+
+@router.post("/test_telegram")
+def test_telegram_notify():
+    """Send a test message via Telegram bot using current saved config."""
+    import requests
+    tg = config.notify.telegram
+    if not tg.bot_token or not tg.chat_id:
+        return {"ok": False, "message": "请先填写 bot_token 和 chat_id 并保存"}
+    url = f"https://api.telegram.org/bot{tg.bot_token}/sendMessage"
+    try:
+        resp = requests.post(
+            url,
+            json={
+                "chat_id": tg.chat_id,
+                "text": "🎵 Music Sub Telegram 通知渠道测试成功",
+                "disable_notification": False,
+            },
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("ok"):
+            return {"ok": True, "message": "发送成功。"}
+        return {"ok": False, "message": f"Telegram API 返回：{data.get('description', resp.text)}"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}

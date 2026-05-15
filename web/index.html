@@ -41,6 +41,8 @@ input[type="text"] { flex: 1; min-width: 200px; }
 .badge-red { background: rgba(239,68,68,0.12); color: var(--red); }
 .empty { text-align: center; padding: 40px; color: var(--text-dim); }
 .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+.modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; max-width: 720px; width: 100%; max-height: 85vh; overflow-y: auto; }
 .music-card { cursor: default; transition: transform 0.15s; }
 .music-card:hover { transform: translateY(-2px); }
 .music-cover { width: 100%; aspect-ratio: 1; border-radius: 10px; background: var(--surface-2); background-size: cover; background-position: center; position: relative; overflow: hidden; }
@@ -78,7 +80,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
 <body>
 <div id="app" class="app">
   <h1 style="font-size:1.3rem;margin-bottom:16px;display:flex;align-items:center;gap:8px">
-    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.2.1</span>
+    🎵 Music Sub <span style="font-size:0.7rem;color:var(--text-dim);background:var(--surface-2);padding:2px 6px;border-radius:4px">v0.3.0</span>
   </h1>
 
   <div class="nav">
@@ -248,6 +250,34 @@ input[type="text"] { flex: 1; min-width: 200px; }
       <div class="stat-card"><div class="stat-label">专辑</div><div class="stat-value">{{ libStats.albums || 0 }}</div></div>
     </div>
     <div class="card">
+      <div class="form-row" style="align-items:center">
+        <div style="display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:8px">
+          <button class="btn btn-sm" :class="libView==='albums'?'btn-primary':''" @click="libView='albums'">📀 专辑</button>
+          <button class="btn btn-sm" :class="libView==='recent'?'btn-primary':''" @click="libView='recent'">🕛 最近添加</button>
+        </div>
+        <input type="text" v-model="libSearch" placeholder="搜索艺术家 / 专辑..." @keyup.enter="loadLibrary()" style="flex:1">
+        <button class="btn btn-primary btn-sm" @click="loadLibrary()">刷新</button>
+      </div>
+    </div>
+
+    <!-- 专辑卡片视图 -->
+    <div v-if="libView==='albums'" class="card">
+      <div class="card-title">专辑库 ({{ libAlbums.length }})</div>
+      <div v-if="libAlbums.length===0" class="empty">还没有专辑，先去订阅或搜索下载吧</div>
+      <div v-else class="grid-cards">
+        <div v-for="al in libAlbums" :key="al.artist + '|' + al.album" class="music-card" @click="openAlbum(al)" style="cursor:pointer">
+          <div class="music-cover" :style="al.has_cover ? `background-image:url(${API}/api/library/album-cover?artist=${encodeURIComponent(al.artist)}&album=${encodeURIComponent(al.album)})` : ''">
+            <div v-if="!al.has_cover" class="cover-placeholder">🎵</div>
+            <span class="play-count">{{ al.track_count }}首</span>
+          </div>
+          <div style="margin-top:8px;font-size:0.85rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="al.album">{{ al.album }}</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="al.artist">{{ al.artist }} <span v-if="al.year">· {{ al.year }}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 最近添加表格视图 -->
+    <div v-if="libView==='recent'" class="card">
       <div class="card-title">最近添加</div>
       <div v-if="libFiles.length===0" class="empty">音乐库为空</div>
       <table v-else class="table">
@@ -262,6 +292,37 @@ input[type="text"] { flex: 1; min-width: 200px; }
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 专辑详情弹窗 -->
+    <div v-if="albumDetail" class="modal-mask" @click.self="albumDetail=null">
+      <div class="modal-box">
+        <div style="display:flex;gap:16px;margin-bottom:16px">
+          <div class="music-cover" style="width:140px;height:140px;flex-shrink:0" :style="albumDetail.album.has_cover ? `background-image:url(${API}/api/library/album-cover?artist=${encodeURIComponent(albumDetail.album.artist)}&album=${encodeURIComponent(albumDetail.album.album)})` : ''">
+            <div v-if="!albumDetail.album.has_cover" class="cover-placeholder">🎵</div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:1.2rem;font-weight:700;margin-bottom:4px">{{ albumDetail.album.album }}</div>
+            <div style="color:var(--text-dim);margin-bottom:8px">{{ albumDetail.album.artist }} <span v-if="albumDetail.album.year">· {{ albumDetail.album.year }}</span></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span class="badge badge-blue">{{ albumDetail.album.track_count }} 首</span>
+              <span class="badge badge-green">刮削 {{ albumDetail.album.scraped_count }}/{{ albumDetail.album.track_count }}</span>
+            </div>
+          </div>
+          <button class="btn btn-sm" @click="albumDetail=null" style="align-self:flex-start">✕</button>
+        </div>
+        <table class="table">
+          <thead><tr><th style="width:40px">#</th><th>标题</th><th style="width:80px">格式</th><th style="width:60px">刮削</th></tr></thead>
+          <tbody>
+            <tr v-for="(t, idx) in albumDetail.tracks" :key="t.id">
+              <td style="color:var(--text-dim)">{{ idx + 1 }}</td>
+              <td>{{ t.title }}</td>
+              <td><span class="badge badge-orange">{{ t.format || '?' }}</span></td>
+              <td><span :class="t.scraped?'badge badge-green':'badge badge-red'">{{ t.scraped?'✓':'✗' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -417,6 +478,39 @@ input[type="text"] { flex: 1; min-width: 200px; }
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-title">📢 通知渠道</div>
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:12px">配置下载/刮削完成后的推送通知</div>
+
+      <div class="site-config-item">
+        <div class="site-header">
+          <div class="site-info">
+            <span class="site-icon">✈️</span>
+            <div>
+              <div class="site-name">Telegram</div>
+              <div class="site-desc">使用 Bot 发送消息到指定聊天/频道。查 chat_id：@userinfobot 或 https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</div>
+            </div>
+          </div>
+          <label class="site-toggle"><input type="checkbox" v-model="settingsData.notify.telegram.enabled"> <span>{{ settingsData.notify.telegram.enabled ? '已启用' : '未启用' }}</span></label>
+        </div>
+        <div v-if="settingsData.notify.telegram.enabled">
+          <div class="form-row">
+            <input type="text" v-model="settingsData.notify.telegram.bot_token" placeholder="Bot Token (123456:ABC...)" style="flex:2">
+            <input type="text" v-model="settingsData.notify.telegram.chat_id" placeholder="Chat ID (-100... 或 user id)" style="flex:1">
+            <button class="btn btn-sm btn-primary" @click="testTelegram">📨 发送测试</button>
+          </div>
+          <div class="form-row" style="gap:16px;margin-top:4px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem"><input type="checkbox" v-model="settingsData.notify.telegram.on_download_added"> 开始下载</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem"><input type="checkbox" v-model="settingsData.notify.telegram.on_download_complete"> 下载完成</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem"><input type="checkbox" v-model="settingsData.notify.telegram.on_scrape_complete"> 刮削完成</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem"><input type="checkbox" v-model="settingsData.notify.telegram.on_error"> 错误告警</label>
+          </div>
+          <div v-if="tgTestResult" style="margin-top:8px;font-size:0.82rem" :style="{color: tgTestOk?'var(--green)':'var(--red)'}">{{ tgTestResult }}</div>
+          <div style="margin-top:6px;font-size:0.75rem;color:var(--text-dim)">提示：修改后请先“保存配置”，再点“发送测试”。发送逻辑未接入事件。</div>
+        </div>
+      </div>
+    </div>
+
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn btn-primary" @click="saveSettings" :disabled="saving">💾 {{ saving?'保存中...':'保存配置' }}</button>
       <span v-if="saveMsg" style="font-size:0.85rem;color:var(--green);align-self:center">{{ saveMsg }}</span>
@@ -539,25 +633,43 @@ createApp({
     // Library
     const libStats = ref({});
     const libFiles = ref([]);
+    const libAlbums = ref([]);
+    const libView = ref('albums');
+    const libSearch = ref('');
+    const albumDetail = ref(null);
+
     async function loadLibrary() {
-      const [s, f] = await Promise.all([
+      const q = libSearch.value.trim();
+      const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+      const [s, f, a] = await Promise.all([
         fetch(`${API}/api/library/stats`).then(r=>r.json()),
-        fetch(`${API}/api/library/`).then(r=>r.json()),
+        fetch(`${API}/api/library/${q ? '?artist=' + encodeURIComponent(q) : ''}`).then(r=>r.json()),
+        fetch(`${API}/api/library/albums${qs}`).then(r=>r.json()),
       ]);
       libStats.value = s;
       libFiles.value = f;
+      libAlbums.value = a;
+    }
+
+    async function openAlbum(album) {
+      const r = await fetch(`${API}/api/library/album-tracks?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.album)}`);
+      const tracks = await r.json();
+      albumDetail.value = { album, tracks };
     }
 
     // Helpers
 
     // Settings
     const settingsData = ref({
-      sites: {}, qbittorrent: {}, paths: {}, scraper: {}, scheduler: {}
+      sites: {}, qbittorrent: {}, paths: {}, scraper: {}, scheduler: {},
+      notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true } }
     });
     const saving = ref(false);
     const saveMsg = ref('');
     const qbTestResult = ref('');
     const qbTestOk = ref(false);
+    const tgTestResult = ref('');
+    const tgTestOk = ref(false);
 
     async function loadSettings() {
       const r = await fetch(`${API}/api/settings/`);
@@ -585,6 +697,15 @@ createApp({
         qbTestResult.value = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
       } catch(e) { qbTestResult.value = '❌ ' + e.message; }
     }
+    async function testTelegram() {
+      tgTestResult.value = '测试中...'; tgTestOk.value = false;
+      try {
+        const r = await fetch(`${API}/api/settings/test_telegram`, { method: 'POST' });
+        const data = await r.json();
+        tgTestOk.value = data.ok;
+        tgTestResult.value = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
+      } catch(e) { tgTestResult.value = '❌ ' + e.message; }
+    }
 
     function formatSize(bytes) {
       if (!bytes) return '-';
@@ -611,8 +732,8 @@ createApp({
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
       tasks, loadTasks, checkTasks,
-      libStats, libFiles, loadLibrary,
-      settingsData, saving, saveMsg, qbTestResult, qbTestOk, loadSettings, saveSettings, testQB,
+      libStats, libFiles, libAlbums, libView, libSearch, albumDetail, loadLibrary, openAlbum,
+      settingsData, saving, saveMsg, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
       formatSize, formatDate, statusClass,
     };
   }

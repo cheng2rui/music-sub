@@ -184,3 +184,58 @@ def save_cover(directory: str, cover_data: bytes) -> bool:
     except Exception as e:
         logger.error(f"Failed to save cover: {e}")
         return False
+
+
+def _xml_escape(s: str) -> str:
+    """Escape XML special characters."""
+    if not s:
+        return ""
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+def save_album_nfo(directory: str, meta: MusicMeta, tracks: list = None) -> bool:
+    """Save album.nfo (Kodi/Jellyfin compatible) in album directory.
+
+    Schema reference: https://kodi.wiki/view/NFO_files/Music
+    """
+    cfg = config.scraper
+    if not cfg.save_nfo:
+        return False
+    nfo_path = os.path.join(directory, "album.nfo")
+    if os.path.exists(nfo_path) and not cfg.overwrite_tag:
+        return True
+    try:
+        lines = ['<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>', "<album>"]
+        lines.append(f"  <title>{_xml_escape(meta.album)}</title>")
+        if meta.album_artist or meta.artist:
+            lines.append(f"  <artist>{_xml_escape(meta.album_artist or meta.artist)}</artist>")
+            lines.append(f"  <albumartist>{_xml_escape(meta.album_artist or meta.artist)}</albumartist>")
+        if meta.year:
+            lines.append(f"  <year>{meta.year}</year>")
+        if meta.genre:
+            lines.append(f"  <genre>{_xml_escape(meta.genre)}</genre>")
+        if meta.source:
+            lines.append(f"  <source>{_xml_escape(meta.source)}</source>")
+        for t in tracks or []:
+            lines.append("  <track>")
+            if t.get("track_number"):
+                lines.append(f"    <position>{t['track_number']}</position>")
+            lines.append(f"    <title>{_xml_escape(t.get('title', ''))}</title>")
+            if t.get("duration"):
+                lines.append(f"    <duration>{t['duration']}</duration>")
+            lines.append("  </track>")
+        lines.append("</album>")
+        with open(nfo_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info(f"Saved NFO: {nfo_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save NFO: {e}")
+        return False

@@ -1,0 +1,74 @@
+# music-sub config template
+# Copy to config.yaml and fill in your own credentials.
+
+sites:
+  mteam:
+    enabled: false
+    url: "https://kp.m-team.cc"
+    api_key: ""        # M-Team API key (Profile → Security → API Key)
+    token: ""          # JWT token (optional)
+    cookie: ""
+
+  opencd:
+    enabled: false
+    url: "https://open.cd"
+    api_key: ""
+    token: ""
+    cookie: ""         # browser Cookie header
+
+  ptclub:
+    enabled: false
+    url: "https://pt.sjtu.edu.cn"
+    api_key: ""
+    token: ""
+    cookie: ""
+
+  dismusic:
+    enabled: false
+    url: "https://dis.music"
+    api_key: ""
+    token: ""
+    cookie: ""
+
+qbittorrent:
+  host: "http://localhost:8080"
+  username: "admin"
+  password: ""
+  category: "music"
+  save_path: "/downloads/music"
+  tag: "music-sub"
+
+paths:
+  library: "/music"
+  structure: "{artist}/{album}"
+  downloads: "/downloads/music"
+
+scraper:
+  sources:
+    - qqmusic
+    - netease
+    - musicbrainz
+  embed_cover: true
+  cover_max_size: 0          # 0 = original size; >0 px = resize to this width
+  save_cover_file: true      # write cover.jpg to album dir
+  save_lyrics: true
+  save_lyrics_to_tag: true
+  save_lyrics_file: true     # write .lrc next to audio
+  save_nfo: false            # write album.nfo for Kodi/Jellyfin
+  rename_file: false
+  rename_template: "${track} - ${title}"
+  overwrite_tag: false       # skip already-tagged files when false
+
+scheduler:
+  search_interval_minutes: 30
+  check_complete_interval_minutes: 5
+
+notify:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+    on_download_added: false
+    on_download_complete: true
+    on_scrape_complete: true
+    on_error: true

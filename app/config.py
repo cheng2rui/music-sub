@@ -51,12 +51,28 @@ class SchedulerConfig(BaseModel):
     check_complete_interval_minutes: int = 5
 
 
+class TelegramNotifyConfig(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+    # 事件开关
+    on_download_added: bool = False
+    on_download_complete: bool = True
+    on_scrape_complete: bool = True
+    on_error: bool = True
+
+
+class NotifyConfig(BaseModel):
+    telegram: TelegramNotifyConfig = TelegramNotifyConfig()
+
+
 class AppConfig(BaseModel):
     sites: dict[str, SiteConfig] = {}
     qbittorrent: QBConfig = QBConfig()
     paths: PathsConfig = PathsConfig()
     scraper: ScraperConfig = ScraperConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
+    notify: NotifyConfig = NotifyConfig()
 
 
 def load_config(path: str = None) -> AppConfig:

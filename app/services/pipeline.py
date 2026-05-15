@@ -7,7 +7,7 @@ from app.db import SessionLocal
 from app.models import DownloadTask, MusicFile
 from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
-from app.scrapers.tagger import tag_file, save_lyrics, save_cover
+from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo
 from app.scrapers.base import MusicMeta
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,8 @@ def _process_completed_torrent(torrent: dict):
             db.commit()
 
         album_cover_saved = False
+        album_meta_for_nfo: MusicMeta | None = None
+        nfo_tracks: list[dict] = []
         for file_path in linked_files:
             if not is_audio_file(file_path):
                 continue
@@ -99,6 +101,12 @@ def _process_completed_torrent(torrent: dict):
                 if meta.cover_data and not album_cover_saved:
                     save_cover(str(Path(file_path).parent), meta.cover_data)
                     album_cover_saved = True
+                if album_meta_for_nfo is None:
+                    album_meta_for_nfo = meta
+                nfo_tracks.append({
+                    "track_number": meta.track_number,
+                    "title": meta.title,
+                })
 
                 # Record in DB
                 music_file = MusicFile(
@@ -124,6 +132,14 @@ def _process_completed_torrent(torrent: dict):
                     scraped=False,
                 )
                 db.add(music_file)
+
+        # Write album NFO if we have any scraped meta
+        if album_meta_for_nfo and linked_files:
+            save_album_nfo(
+                str(Path(linked_files[0]).parent),
+                album_meta_for_nfo,
+                tracks=nfo_tracks,
+            )
 
         if task:
             task.status = "scraped"
