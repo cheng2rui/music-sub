@@ -34,7 +34,8 @@ function handleLogout() {
       <nav class="sidebar-nav">
         <router-link to="/discover">🏠 发现</router-link>
         <router-link to="/subs">📡 订阅管理</router-link>
-        <router-link to="/search">🔍 搜索</router-link>
+        <router-link to="/search">🔍 PT搜索</router-link>
+        <router-link to="/online">🎧 在线下载</router-link>
         <router-link to="/tasks">⬇️ 任务列表</router-link>
         <router-link to="/library">🎶 音乐库</router-link>
         <router-link to="/logs">📜 日志</router-link>
@@ -68,7 +69,8 @@ function handleLogout() {
     <nav class="bottom-tabs">
       <router-link to="/discover" title="发现">🏠</router-link>
       <router-link to="/subs" title="订阅">📡</router-link>
-      <router-link to="/search" title="搜索">🔍</router-link>
+      <router-link to="/search" title="PT搜索">🔍</router-link>
+      <router-link to="/online" title="在线下载">🎧</router-link>
       <router-link to="/tasks" title="任务">⬇️</router-link>
       <router-link to="/library" title="音乐库">🎶</router-link>
       <router-link to="/logs" title="日志">📜</router-link>
@@ -228,10 +230,10 @@ function handleLogout() {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
+    width: 36px;
     height: 44px;
     border-radius: var(--radius-md);
-    font-size: 19px;
+    font-size: 18px;
     color: var(--text-dim);
     transition: all 0.15s;
   }

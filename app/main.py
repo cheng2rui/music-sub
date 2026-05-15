@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.db import init_db
 from app.scheduler import start_scheduler, stop_scheduler
 from app.auth import verify_token
-from app.api import subscriptions, search, tasks, library, settings, discover
+from app.api import subscriptions, search, tasks, library, settings, discover, online
 from app.api import auth as auth_api
 from app.api import logs as logs_api
 
@@ -89,6 +89,7 @@ app.include_router(library.router, prefix="/api/library", tags=["library"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(discover.router, prefix="/api/discover", tags=["discover"])
 app.include_router(logs_api.router, prefix="/api/logs", tags=["logs"])
+app.include_router(online.router, prefix="/api/online", tags=["online"])
 
 
 @app.get("/api/health")

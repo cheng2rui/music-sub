@@ -22,6 +22,12 @@ const routes = [
     component: () => import('@/views/SearchView.vue')
   },
   {
+    path: '/online',
+    name: 'online',
+    meta: { title: '在线下载' },
+    component: () => import('@/views/OnlineView.vue')
+  },
+  {
     path: '/tasks',
     name: 'tasks',
     meta: { title: '任务列表' },

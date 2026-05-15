@@ -14,5 +14,10 @@ def get_newly_completed() -> list[dict]:
 
 
 def mark_processed(torrent_hash: str):
-    """Mark a torrent as processed."""
+    """Mark a torrent as processed.
+
+    Online/direct downloads use synthetic hashes and are not present in qB.
+    """
+    if not torrent_hash or str(torrent_hash).startswith("online:") or str(torrent_hash).startswith("SIMULATED_"):
+        return
     qb_client.add_tag(torrent_hash, PROCESSED_TAG)

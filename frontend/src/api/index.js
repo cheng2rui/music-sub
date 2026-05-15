@@ -60,6 +60,17 @@ export const downloadTorrent = (site, torrentId, title) =>
     method: 'POST'
   }).then(r => r.json())
 
+// ============ Online Download ============
+export const searchOnlineMusic = (keyword, sources = ['migu', 'kugou', 'netease'], limit = 20) => authFetch('/api/online/search', {
+  method: 'POST',
+  body: JSON.stringify({ keyword, sources, limit })
+}).then(r => r.json())
+
+export const downloadOnlineSong = (song, organize = true) => authFetch('/api/online/download', {
+  method: 'POST',
+  body: JSON.stringify({ song, organize })
+}).then(r => r.json())
+
 // ============ Tasks ============
 export const getTasks = () => authFetch('/api/tasks/').then(r => r.json())
 export const checkTasks = () => authFetch('/api/tasks/check', { method: 'POST' }).then(r => r.json())
