@@ -25,9 +25,15 @@ class QBClient:
                 self._client.auth_log_in()
                 logger.info(f"Connected to qBittorrent at {cfg.host}")
             except Exception as e:
-                logger.error(f"Failed to connect to qBittorrent: {e}")
-                self._client = None
-                raise
+                # qBittorrent can be configured with WebUI auth bypass for trusted subnets.
+                # In that mode /api/v2/auth/login may fail, but other APIs still work.
+                try:
+                    _ = self._client.app.version
+                    logger.info(f"Connected to qBittorrent at {cfg.host} (auth bypass)")
+                except Exception:
+                    logger.error(f"Failed to connect to qBittorrent: {e}")
+                    self._client = None
+                    raise
         return self._client
 
     @property
@@ -46,15 +52,21 @@ class QBClient:
                 tags=",".join(tags) if tags else cfg.tag,
                 is_paused=False,
             )
-            if result == "Ok.":
-                torrents = self.client.torrents_info(
-                    category=category or cfg.category,
-                    sort="added_on",
-                    reverse=True,
-                    limit=5,
-                )
-                if torrents:
-                    return torrents[0].hash
+            # qBittorrent/qbittorrentapi return value is not stable across versions
+            # (commonly "Ok.", sometimes None/empty), while the torrent may already be added.
+            if result not in (None, "", "Ok", "Ok."):
+                logger.warning(f"qBittorrent add_torrent returned: {result}")
+
+            torrents = self.client.torrents_info(
+                category=category or cfg.category,
+                sort="added_on",
+                reverse=True,
+                limit=5,
+            )
+            if not torrents:
+                torrents = self.client.torrents_info(sort="added_on", reverse=True, limit=5)
+            if torrents:
+                return torrents[0].hash
             return None
         except Exception as e:
             logger.error(f"Failed to add torrent: {e}")

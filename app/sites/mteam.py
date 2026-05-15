@@ -76,9 +76,14 @@ class MTeamSite(BaseSite):
         url = f"{self._api_base}/api/torrent/genDlToken"
         payload = {"id": torrent_id}
         try:
-            resp = self._post(url, json=payload, headers=self._get_headers())
+            # M-Team expects form/query params here, not JSON body.
+            # JSON body returns {code:1, message:"參數錯誤"}.
+            resp = self._post(url, data=payload, headers=self._get_headers())
             resp.raise_for_status()
             data = resp.json()
+            if str(data.get("code")) not in ("0", "200"):
+                logger.error(f"[mteam] Download token failed: {data.get('message', data)}")
+                return None
             dl_url = data.get("data", "")
             if not dl_url:
                 return None
