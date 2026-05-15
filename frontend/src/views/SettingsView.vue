@@ -5,12 +5,17 @@ import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
 const settings = ref({
-  sites: { mteam: { enabled: false, username: '', password: '' }, opencd: { enabled: false, username: '', password: '' }, ptclub: { enabled: false, username: '', password: '' }, dismusic: { enabled: false, username: '', password: '' } },
-  qbittorrent: { url: '', username: '', password: '' },
-  paths: { download: '', music: '' },
-  scraper: { auto: true, force: false },
-  scheduler: { enabled: true, interval: 60 },
-  notify: { telegram_bot_token: '', telegram_chat_id: '' }
+  sites: {
+    mteam: { enabled: false, url: '', api_key: '', token: '', cookie: '' },
+    opencd: { enabled: false, url: '', api_key: '', token: '', cookie: '' },
+    ptclub: { enabled: false, url: '', api_key: '', token: '', cookie: '' },
+    dismusic: { enabled: false, url: '', api_key: '', token: '', cookie: '' }
+  },
+  qbittorrent: { host: '', username: '', password: '', category: 'music', save_path: '/downloads/music', tag: 'music-sub' },
+  paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
+  scraper: { sources: ['qqmusic', 'netease', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false },
+  scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5 },
+  notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true } }
 })
 const loading = ref(false)
 const saving = ref(false)
@@ -96,19 +101,51 @@ onMounted(loadAll)
 
       <!-- PT站配置 -->
       <div class="settings-section">
-        <h3>PT站配置</h3>
+        <h3>📡 PT站配置</h3>
         <div class="site-grid">
-          <div v-for="(cfg, key) in settings.sites" :key="key" class="site-card">
+          <!-- M-Team -->
+          <div class="site-card">
             <div class="site-header">
-              <span class="site-name">{{ key.toUpperCase() }}</span>
-              <label class="toggle-label">
-                <input type="checkbox" v-model="cfg.enabled" />
-                <span>启用</span>
-              </label>
+              <span class="site-name">🍚 M-Team 馒头</span>
+              <label class="toggle-label"><input type="checkbox" v-model="settings.sites.mteam.enabled" /><span>启用</span></label>
             </div>
-            <div class="site-fields">
-              <input v-model="cfg.username" placeholder="用户名" />
-              <input v-model="cfg.password" type="password" placeholder="密码" />
+            <div v-if="settings.sites.mteam.enabled" class="site-fields">
+              <input v-model="settings.sites.mteam.url" placeholder="站点地址 (https://kp.m-team.cc)" />
+              <input v-model="settings.sites.mteam.api_key" placeholder="API Key" />
+              <input v-model="settings.sites.mteam.token" placeholder="Token (JWT)" />
+            </div>
+          </div>
+          <!-- Open.CD -->
+          <div class="site-card">
+            <div class="site-header">
+              <span class="site-name">👑 Open.CD 皇后</span>
+              <label class="toggle-label"><input type="checkbox" v-model="settings.sites.opencd.enabled" /><span>启用</span></label>
+            </div>
+            <div v-if="settings.sites.opencd.enabled" class="site-fields">
+              <input v-model="settings.sites.opencd.url" placeholder="站点地址 (https://open.cd)" />
+              <input v-model="settings.sites.opencd.cookie" placeholder="Cookie (F12 复制)" />
+            </div>
+          </div>
+          <!-- PTClub -->
+          <div class="site-card">
+            <div class="site-header">
+              <span class="site-name">🐱 PTClub 猫站</span>
+              <label class="toggle-label"><input type="checkbox" v-model="settings.sites.ptclub.enabled" /><span>启用</span></label>
+            </div>
+            <div v-if="settings.sites.ptclub.enabled" class="site-fields">
+              <input v-model="settings.sites.ptclub.url" placeholder="站点地址" />
+              <input v-model="settings.sites.ptclub.cookie" placeholder="Cookie (F12 复制)" />
+            </div>
+          </div>
+          <!-- Dis.Music -->
+          <div class="site-card">
+            <div class="site-header">
+              <span class="site-name">🐬 Dis.Music 海豚</span>
+              <label class="toggle-label"><input type="checkbox" v-model="settings.sites.dismusic.enabled" /><span>启用</span></label>
+            </div>
+            <div v-if="settings.sites.dismusic.enabled" class="site-fields">
+              <input v-model="settings.sites.dismusic.url" placeholder="站点地址" />
+              <input v-model="settings.sites.dismusic.cookie" placeholder="Cookie (F12 复制)" />
             </div>
           </div>
         </div>
@@ -116,11 +153,11 @@ onMounted(loadAll)
 
       <!-- qBittorrent -->
       <div class="settings-section">
-        <h3>qBittorrent</h3>
+        <h3>⬇️ qBittorrent</h3>
         <div class="fields-row">
-          <div class="field">
-            <label>URL</label>
-            <input v-model="settings.qbittorrent.url" placeholder="http://localhost:8080" />
+          <div class="field flex-1">
+            <label>地址</label>
+            <input v-model="settings.qbittorrent.host" placeholder="http://localhost:8080" />
           </div>
           <div class="field">
             <label>用户名</label>
@@ -130,37 +167,53 @@ onMounted(loadAll)
             <label>密码</label>
             <input v-model="settings.qbittorrent.password" type="password" />
           </div>
+        </div>
+        <div class="fields-row">
+          <div class="field">
+            <label>分类</label>
+            <input v-model="settings.qbittorrent.category" placeholder="music" />
+          </div>
+          <div class="field flex-1">
+            <label>保存路径</label>
+            <input v-model="settings.qbittorrent.save_path" placeholder="/downloads/music" />
+          </div>
+          <div class="field">
+            <label>Tag</label>
+            <input v-model="settings.qbittorrent.tag" placeholder="music-sub" />
+          </div>
           <AppButton variant="ghost" size="sm" :loading="testingQb" @click="handleTestQb">测试连接</AppButton>
         </div>
       </div>
 
       <!-- 路径配置 -->
       <div class="settings-section">
-        <h3>路径配置</h3>
+        <h3>📁 路径配置</h3>
         <div class="fields-row">
           <div class="field flex-1">
-            <label>下载目录</label>
-            <input v-model="settings.paths.download" placeholder="/path/to/downloads" />
+            <label>音乐库目录</label>
+            <input v-model="settings.paths.library" placeholder="/music" />
           </div>
           <div class="field flex-1">
-            <label>音乐目录</label>
-            <input v-model="settings.paths.music" placeholder="/path/to/music" />
+            <label>下载目录</label>
+            <input v-model="settings.paths.downloads" placeholder="/downloads/music" />
+          </div>
+          <div class="field flex-1">
+            <label>目录结构</label>
+            <input v-model="settings.paths.structure" placeholder="{artist}/{album}" />
           </div>
         </div>
       </div>
 
       <!-- 刮削配置 -->
       <div class="settings-section">
-        <h3>刮削配置</h3>
+        <h3>🎵 刮削配置</h3>
         <div class="toggle-list">
-          <label class="toggle-item">
-            <input type="checkbox" v-model="settings.scraper.auto" />
-            <span>自动刮削新文件</span>
-          </label>
-          <label class="toggle-item">
-            <input type="checkbox" v-model="settings.scraper.force" />
-            <span>强制重新刮削（覆盖已有信息）</span>
-          </label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.embed_cover" /><span>嵌入封面到音频标签</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.save_cover_file" /><span>保存 cover.jpg 到专辑目录</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.save_lyrics" /><span>保存歌词</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.save_nfo" /><span>生成 album.nfo (Kodi/Jellyfin)</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.rename_file" /><span>按模板重命名文件</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.overwrite_tag" /><span>覆盖已有标签</span></label>
         </div>
       </div>
 
@@ -181,17 +234,26 @@ onMounted(loadAll)
 
       <!-- Telegram 通知 -->
       <div class="settings-section">
-        <h3>Telegram 通知</h3>
-        <div class="fields-row">
-          <div class="field flex-1">
-            <label>Bot Token</label>
-            <input v-model="settings.notify.telegram_bot_token" placeholder="123456:ABC-DEF..." />
+        <h3>📢 Telegram 通知</h3>
+        <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.notify.telegram.enabled" /><span>启用 Telegram 通知</span></label>
+        <div v-if="settings.notify.telegram.enabled">
+          <div class="fields-row">
+            <div class="field flex-1">
+              <label>Bot Token</label>
+              <input v-model="settings.notify.telegram.bot_token" placeholder="123456:ABC-DEF..." />
+            </div>
+            <div class="field flex-1">
+              <label>Chat ID</label>
+              <input v-model="settings.notify.telegram.chat_id" placeholder="-100... 或 user id" />
+            </div>
+            <AppButton variant="ghost" size="sm" :loading="testingTg" @click="handleTestTg">测试发送</AppButton>
           </div>
-          <div class="field flex-1">
-            <label>Chat ID</label>
-            <input v-model="settings.notify.telegram_chat_id" placeholder="-1001234567890" />
+          <div class="toggle-list" style="margin-top:12px">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_download_added" /><span>开始下载</span></label>
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_download_complete" /><span>下载完成</span></label>
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_scrape_complete" /><span>刮削完成</span></label>
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_error" /><span>错误告警</span></label>
           </div>
-          <AppButton variant="ghost" size="sm" :loading="testingTg" @click="handleTestTg">测试发送</AppButton>
         </div>
       </div>
 

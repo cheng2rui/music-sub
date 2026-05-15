@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getRecommend, getPlaylists, getToplist, getPlaylist } from '@/api/index.js'
+import { getRecommend, getPlaylists, getToplist, getPlaylist, addSub } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -36,6 +36,16 @@ async function openPlaylist(id) {
   showPlaylistModal.value = true
 }
 
+async function quickSubscribe(keyword, type) {
+  if (!keyword) return
+  const labels = { artist: '艺人', song: '歌曲', album: '专辑' }
+  if (!confirm(`订阅${labels[type] || ''}: ${keyword}?`)) return
+  try {
+    await addSub({ keyword, type: type || 'artist', quality: 'any', sites: 'all' })
+    alert(`✅ 已添加订阅: ${keyword}`)
+  } catch (e) { alert('订阅失败: ' + e.message) }
+}
+
 onMounted(loadAll)
 </script>
 
@@ -57,7 +67,11 @@ onMounted(loadAll)
           <MusicCover :src="item.cover" show-play />
           <div class="cover-info">
             <div class="cover-title">{{ item.title }}</div>
-            <div class="cover-sub">{{ item.artist }} · {{ item.album }}</div>
+            <div class="cover-sub">{{ item.artist }}</div>
+            <div class="cover-actions">
+              <AppButton variant="ghost" size="sm" @click="quickSubscribe(item.title + ' ' + item.artist, 'song')">订歌</AppButton>
+              <AppButton variant="ghost" size="sm" @click="quickSubscribe(item.artist, 'artist')">订艺人</AppButton>
+            </div>
           </div>
         </div>
       </div>
@@ -101,7 +115,11 @@ onMounted(loadAll)
           <MusicCover :src="item.cover" class="rank-cover" />
           <div class="rank-info">
             <div class="rank-title">{{ item.title }}</div>
-            <div class="rank-sub">{{ item.artist }} · {{ item.album }}</div>
+            <div class="rank-sub">{{ item.artist }}</div>
+          </div>
+          <div class="rank-actions">
+            <AppButton variant="ghost" size="sm" @click="quickSubscribe(item.title + ' ' + item.artist, 'song')">订歌</AppButton>
+            <AppButton variant="ghost" size="sm" @click="quickSubscribe(item.artist, 'artist')">订艺人</AppButton>
           </div>
         </div>
       </div>
@@ -114,8 +132,11 @@ onMounted(loadAll)
         <p v-if="selectedPlaylist?.desc" class="detail-desc">{{ selectedPlaylist.desc }}</p>
         <div class="song-list">
           <div v-for="song in playlistSongs" :key="song.title" class="song-row">
-            <span class="song-title">{{ song.title }}</span>
-            <span class="song-sub">{{ song.artist }} · {{ song.album }}</span>
+            <div class="song-info">
+              <span class="song-title">{{ song.title }}</span>
+              <span class="song-sub">{{ song.artist }}</span>
+            </div>
+            <AppButton variant="ghost" size="sm" @click="quickSubscribe(song.title + ' ' + song.artist, 'song')">订</AppButton>
           </div>
         </div>
       </div>
@@ -134,6 +155,7 @@ onMounted(loadAll)
 .cover-info { display: flex; flex-direction: column; gap: 2px; }
 .cover-title { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cover-sub { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cover-actions { display: flex; gap: 4px; margin-top: 4px; }
 .toplist-table { display: flex; flex-direction: column; gap: 2px; }
 .toplist-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--radius-md); transition: background 0.15s; }
 .toplist-row:hover { background: var(--surface-hover); }
@@ -141,14 +163,16 @@ onMounted(loadAll)
 .rank-top { color: var(--accent); }
 .rank-cover { width: 44px; height: 44px; border-radius: var(--radius-sm); flex-shrink: 0; }
 .rank-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.rank-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .rank-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rank-sub { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .playlist-detail { display: flex; flex-direction: column; gap: 16px; min-width: 400px; }
 .detail-cover { width: 200px; height: 200px; border-radius: var(--radius-lg); object-fit: cover; }
 .detail-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
 .song-list { display: flex; flex-direction: column; gap: 4px; max-height: 400px; overflow-y: auto; }
-.song-row { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: var(--radius-sm); }
+.song-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); }
 .song-row:hover { background: var(--surface-hover); }
-.song-title { font-size: 14px; font-weight: 500; }
+.song-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.song-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song-sub { font-size: 12px; color: var(--text-dim); }
 </style>
