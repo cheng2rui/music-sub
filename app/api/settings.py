@@ -3,7 +3,8 @@ import yaml
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
-from app.config import config, CONFIG_PATH, load_config, AppConfig
+from app.config import CONFIG_PATH, load_config, AppConfig
+import app.config as cfg_module
 
 router = APIRouter()
 
@@ -77,13 +78,13 @@ class AllSettings(BaseModel):
 def get_settings():
     """Get current settings (passwords masked)."""
     data = AllSettings(
-        sites={name: SiteSettingInput(**s.model_dump()) for name, s in config.sites.items()},
-        qbittorrent=QBSettingInput(**config.qbittorrent.model_dump()),
-        paths=PathsSettingInput(**config.paths.model_dump()),
-        scraper=ScraperSettingInput(**config.scraper.model_dump()),
-        scheduler=SchedulerSettingInput(**config.scheduler.model_dump()),
+        sites={name: SiteSettingInput(**s.model_dump()) for name, s in cfg_module.config.sites.items()},
+        qbittorrent=QBSettingInput(**cfg_module.config.qbittorrent.model_dump()),
+        paths=PathsSettingInput(**cfg_module.config.paths.model_dump()),
+        scraper=ScraperSettingInput(**cfg_module.config.scraper.model_dump()),
+        scheduler=SchedulerSettingInput(**cfg_module.config.scheduler.model_dump()),
         notify=NotifySettingInput(
-            telegram=TelegramNotifyInput(**config.notify.telegram.model_dump()),
+            telegram=TelegramNotifyInput(**cfg_module.config.notify.telegram.model_dump()),
         ),
     )
     # Mask sensitive fields
@@ -104,7 +105,6 @@ def get_settings():
 @router.put("/")
 def save_settings(settings: AllSettings):
     """Save settings to config.yaml and reload."""
-    import app.config as cfg_module
 
     # Build raw dict for YAML
     raw = {
@@ -119,7 +119,7 @@ def save_settings(settings: AllSettings):
     # For sites, merge with existing to preserve unmasked secrets
     for name, site_input in settings.sites.items():
         site_dict = site_input.model_dump()
-        existing = config.sites.get(name)
+        existing = cfg_module.config.sites.get(name)
         if existing:
             # Don't overwrite secrets if masked
             if site_dict.get("api_key", "").endswith("***"):
@@ -132,11 +132,11 @@ def save_settings(settings: AllSettings):
 
     # Preserve QB password if masked
     if raw["qbittorrent"]["password"] == "***":
-        raw["qbittorrent"]["password"] = config.qbittorrent.password
+        raw["qbittorrent"]["password"] = cfg_module.config.qbittorrent.password
 
     # Preserve telegram bot_token if masked
     if raw["notify"]["telegram"]["bot_token"].endswith("***"):
-        raw["notify"]["telegram"]["bot_token"] = config.notify.telegram.bot_token
+        raw["notify"]["telegram"]["bot_token"] = cfg_module.config.notify.telegram.bot_token
 
     # Write YAML
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -162,7 +162,7 @@ def test_qb_connection():
 def test_telegram_notify():
     """Send a test message via Telegram bot using current saved config."""
     import requests
-    tg = config.notify.telegram
+    tg = cfg_module.config.notify.telegram
     if not tg.bot_token or not tg.chat_id:
         return {"ok": False, "message": "请先填写 bot_token 和 chat_id 并保存"}
     url = f"https://api.telegram.org/bot{tg.bot_token}/sendMessage"

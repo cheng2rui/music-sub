@@ -39,6 +39,9 @@ async def auth_middleware(request: Request, call_next):
     # Allow public paths and static assets
     if path in PUBLIC_PATHS or not path.startswith("/api/"):
         return await call_next(request)
+    # Allow cover image endpoints (used as CSS background-image, no auth header)
+    if path.startswith("/api/library/album-cover") or path.startswith("/api/library/cover/"):
+        return await call_next(request)
 
     # Check Authorization header
     auth_header = request.headers.get("Authorization", "")

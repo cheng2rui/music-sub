@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from sqlalchemy import func, Integer, case
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import MusicFile
