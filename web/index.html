@@ -107,12 +107,12 @@ input[type="text"] { flex: 1; min-width: 200px; }
   </h1>
 
   <div class="nav">
-    <button class="nav-btn" :class="{active: tab==='discover'}" @click="tab='discover';loadDiscover()">🏠 发现</button>
-    <button class="nav-btn" :class="{active: tab==='subs'}" @click="tab='subs'">📡 订阅</button>
-    <button class="nav-btn" :class="{active: tab==='search'}" @click="tab='search'">🔍 搜索</button>
-    <button class="nav-btn" :class="{active: tab==='tasks'}" @click="tab='tasks';loadTasks()">⬇️ 任务</button>
-    <button class="nav-btn" :class="{active: tab==='library'}" @click="tab='library';loadLibrary()">🎶 音乐库</button>
-    <button class="nav-btn" :class="{active: tab==='settings'}" @click="tab='settings';loadSettings()">⚙️ 设置</button>
+    <button class="nav-btn" :class="{active: tab==='discover'}" @click="tab='discover';stopTasksAutoRefresh();loadDiscover()">🏠 发现</button>
+    <button class="nav-btn" :class="{active: tab==='subs'}" @click="tab='subs';stopTasksAutoRefresh()">📡 订阅</button>
+    <button class="nav-btn" :class="{active: tab==='search'}" @click="tab='search';stopTasksAutoRefresh()">🔍 搜索</button>
+    <button class="nav-btn" :class="{active: tab==='tasks'}" @click="tab='tasks';loadTasks();startTasksAutoRefresh()">⬇️ 任务</button>
+    <button class="nav-btn" :class="{active: tab==='library'}" @click="tab='library';stopTasksAutoRefresh();loadLibrary()">🎶 音乐库</button>
+    <button class="nav-btn" :class="{active: tab==='settings'}" @click="tab='settings';stopTasksAutoRefresh();loadSettings()">⚙️ 设置</button>
   </div>
 
   <!-- 订阅页 -->
@@ -261,7 +261,10 @@ input[type="text"] { flex: 1; min-width: 200px; }
         <thead><tr><th>标题</th><th>站点</th><th>大小</th><th>做种</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="r in searchResults" :key="r.torrent_id">
-            <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.title }}</td>
+            <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              {{ r.title }}
+              <span v-if="r.free" class="badge badge-green" style="margin-left:4px">FREE</span>
+            </td>
             <td><span class="badge badge-blue">{{ r.site }}</span></td>
             <td>{{ formatSize(r.size) }}</td>
             <td>{{ r.seeders }}</td>
@@ -289,7 +292,7 @@ input[type="text"] { flex: 1; min-width: 200px; }
             <td><span class="badge badge-blue">{{ t.site }}</span></td>
             <td>{{ formatSize(t.size) }}</td>
             <td>
-              <span class="badge" :class="statusClass(t.status)">{{ t.status }}</span>
+              <span class="badge" :class="statusClass(t.status)">{{ statusLabel(t.status) }}</span>
             </td>
             <td style="font-size:0.78rem;color:var(--text-dim)">{{ formatDate(t.created_at) }}</td>
           </tr>
@@ -778,6 +781,7 @@ createApp({
 
     // Tasks
     const tasks = ref([]);
+    let tasksTimer = null;
     async function loadTasks() {
       const r = await authFetch(`${API}/api/tasks/`);
       tasks.value = await r.json();
@@ -785,6 +789,13 @@ createApp({
     async function checkTasks() {
       await authFetch(`${API}/api/tasks/check`, { method: 'POST' });
       loadTasks();
+    }
+    function startTasksAutoRefresh() {
+      stopTasksAutoRefresh();
+      tasksTimer = setInterval(loadTasks, 30000);
+    }
+    function stopTasksAutoRefresh() {
+      if (tasksTimer) { clearInterval(tasksTimer); tasksTimer = null; }
     }
 
     // Library
@@ -920,6 +931,9 @@ createApp({
       if (s === 'organized') return 'badge-orange';
       return 'badge-red';
     }
+    function statusLabel(s) {
+      return ({ downloading: '下载中', organized: '已整理', scraped: '已刮削', completed: '完成', error: '错误' })[s] || s;
+    }
 
     onMounted(() => { if (loggedIn.value) { loadDiscover(); loadSubs(); } });
 
@@ -928,11 +942,11 @@ createApp({
       tab, recommendSongs, playlists, toplist, discoverLoading, discoverRefreshed, playlistDetail, playlistLoading, loadDiscover, openPlaylist, quickSubscribe, formatPlayCount, subTypeLabel, subTypeClass,
       subs, newSub, addSub, deleteSub, toggleSub,
       searchKeyword, searchResults, searching, searchDone, doSearch, downloadTorrent,
-      tasks, loadTasks, checkTasks,
+      tasks, loadTasks, checkTasks, startTasksAutoRefresh, stopTasksAutoRefresh,
       libStats, libFiles, libAlbums, libView, libSearch, albumDetail, loadLibrary, openAlbum,
       settingsData, saving, saveMsg, saveOk, qbTestResult, qbTestOk, tgTestResult, tgTestOk, loadSettings, saveSettings, testQB, testTelegram,
       pwdForm, pwdMsg, pwdOk, changePassword,
-      formatSize, formatDate, statusClass,
+      formatSize, formatDate, statusClass, statusLabel,
     };
   }
 }).mount('#app');
