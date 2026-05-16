@@ -42,6 +42,46 @@ def _check_downloads():
         _record_run("check_downloads", False, str(e)[:200])
 
 
+def _cleanup_scan():
+    """Periodic task: dry-run cleanup scan, log and notify when candidates appear."""
+    from app.db import SessionLocal
+    from app.api.tasks import _build_cleanup_preview
+    from app.services.notify import notify_cleanup_candidates
+
+    db = SessionLocal()
+    try:
+        preview = _build_cleanup_preview(db)
+        candidate_count = preview.get("candidate_count", 0)
+        message = (
+            f"候选 {candidate_count}，qB+DB {preview.get('qb_and_db_count', 0)}，"
+            f"仅DB {preview.get('db_only_count', 0)}"
+        )
+        if candidate_count:
+            logger.warning(
+                "Cleanup scan found %s candidates (qb_and_db=%s, db_only=%s, total_size=%s, amount_left=%s)",
+                candidate_count,
+                preview.get("qb_and_db_count", 0),
+                preview.get("db_only_count", 0),
+                preview.get("total_size", 0),
+                preview.get("total_amount_left", 0),
+            )
+            notify_cleanup_candidates(
+                candidate_count,
+                preview.get("qb_and_db_count", 0),
+                preview.get("db_only_count", 0),
+                preview.get("total_size", 0),
+                preview.get("total_amount_left", 0),
+            )
+        else:
+            logger.info("Cleanup scan found no candidates")
+        _record_run("cleanup_scan", True, message)
+    except Exception as e:
+        logger.error(f"Cleanup scan failed: {e}")
+        _record_run("cleanup_scan", False, str(e)[:200])
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the scheduler with configured intervals."""
     config = cfg_module.config
@@ -59,6 +99,14 @@ def start_scheduler():
         id="check_downloads",
         replace_existing=True,
     )
+    if config.scheduler.cleanup_scan_enabled:
+        scheduler.add_job(
+            _cleanup_scan,
+            "interval",
+            hours=config.scheduler.cleanup_scan_interval_hours,
+            id="cleanup_scan",
+            replace_existing=True,
+        )
     scheduler.start()
     logger.info("Scheduler started")
 
@@ -78,6 +126,7 @@ def get_scheduler_status() -> list[dict]:
             "name": {
                 "search_subscriptions": "订阅搜索",
                 "check_downloads": "下载检查",
+                "cleanup_scan": "清理扫描",
             }.get(job.id, job.id),
             "interval": str(job.trigger),
             "next_run": job.next_run_time.isoformat() if job.next_run_time else None,

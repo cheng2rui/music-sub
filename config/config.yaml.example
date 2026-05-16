@@ -66,6 +66,8 @@ scraper:
 scheduler:
   search_interval_minutes: 30
   check_complete_interval_minutes: 5
+  cleanup_scan_enabled: true
+  cleanup_scan_interval_hours: 24
 
 notify:
   telegram:
@@ -76,6 +78,7 @@ notify:
     on_download_complete: true
     on_scrape_complete: true
     on_error: true
+    on_cleanup_candidates: true
 
 auth:
   username: "888"

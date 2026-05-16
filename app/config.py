@@ -49,6 +49,8 @@ class ScraperConfig(BaseModel):
 class SchedulerConfig(BaseModel):
     search_interval_minutes: int = 30
     check_complete_interval_minutes: int = 5
+    cleanup_scan_enabled: bool = True
+    cleanup_scan_interval_hours: int = 24
 
 
 class TelegramNotifyConfig(BaseModel):
@@ -60,6 +62,7 @@ class TelegramNotifyConfig(BaseModel):
     on_download_complete: bool = True
     on_scrape_complete: bool = True
     on_error: bool = True
+    on_cleanup_candidates: bool = True
 
 
 class NotifyConfig(BaseModel):

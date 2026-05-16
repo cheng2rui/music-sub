@@ -14,8 +14,8 @@ const settings = ref({
   qbittorrent: { host: '', username: '', password: '', category: 'music', save_path: '/downloads/music', tag: 'music-sub' },
   paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
   scraper: { sources: ['qqmusic', 'netease', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false },
-  scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5 },
-  notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true } }
+  scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
+  notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } }
 })
 const loading = ref(false)
 const saving = ref(false)
@@ -243,6 +243,11 @@ onMounted(loadAll)
             <label>完成检查间隔(分钟)</label>
             <input type="number" v-model.number="settings.scheduler.check_complete_interval_minutes" style="width:100px" />
           </div>
+          <div class="field">
+            <label>清理扫描间隔(小时)</label>
+            <input type="number" v-model.number="settings.scheduler.cleanup_scan_interval_hours" style="width:100px" min="1" />
+          </div>
+          <label class="toggle-item" style="padding-bottom:8px"><input type="checkbox" v-model="settings.scheduler.cleanup_scan_enabled" /><span>启用自动清理扫描</span></label>
         </div>
         <div class="scheduler-list">
           <div v-for="s in scheduler" :key="s.id" class="scheduler-row">
@@ -277,6 +282,7 @@ onMounted(loadAll)
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_download_complete" /><span>下载完成</span></label>
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_scrape_complete" /><span>刮削完成</span></label>
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_error" /><span>错误告警</span></label>
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_cleanup_candidates" /><span>清理候选提醒</span></label>
           </div>
         </div>
       </div>
