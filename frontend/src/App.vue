@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from '@/stores/theme.js'
 import { useAuthStore } from '@/stores/auth.js'
 import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
+import GlobalPlayer from '@/components/GlobalPlayer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -47,7 +48,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.5.10</div>
+        <div class="version-tag">v0.5.11</div>
       </div>
     </aside>
 
@@ -64,6 +65,8 @@ function handleLogout() {
         <router-view />
       </main>
     </div>
+
+    <GlobalPlayer />
 
     <!-- Bottom tab bar (mobile) -->
     <nav class="bottom-tabs">
@@ -178,6 +181,7 @@ function handleLogout() {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+  padding-bottom: 112px;
 }
 .login-wrapper {
   min-height: 100vh;
@@ -207,7 +211,7 @@ function handleLogout() {
   .page-title { font-size: 16px; }
   .main-content {
     padding: 16px;
-    padding-bottom: 72px; /* space for bottom tabs */
+    padding-bottom: 144px; /* space for player + bottom tabs */
   }
   .mobile-theme, .mobile-logout {
     display: flex;

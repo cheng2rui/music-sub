@@ -1,10 +1,11 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { getLibraryStats, getLibraryAlbums, getAlbumTracks, getAlbumCover, getFile, getStreamUrl, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { ref, onMounted } from 'vue'
+import { getLibraryStats, getLibraryAlbums, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
+import { usePlayerStore } from '@/stores/player.js'
 
 const stats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
 const albums = ref([])
@@ -20,8 +21,7 @@ const selectedTrack = ref(null)
 const showTrackModal = ref(false)
 const trackEdit = ref({})
 const savingTrack = ref(false)
-const currentPlayingId = ref(null)
-const currentPlayingTrack = ref(null)
+const player = usePlayerStore()
 
 const scraping = ref(false)
 
@@ -59,13 +59,8 @@ async function rescrapeAlbum() {
   finally { scraping.value = false }
 }
 
-function streamUrl(id) {
-  return getStreamUrl(id)
-}
-
 function playTrack(track) {
-  currentPlayingId.value = track.id
-  currentPlayingTrack.value = track
+  player.playTrack(track)
 }
 
 async function openTrack(id) {
@@ -221,7 +216,7 @@ onMounted(() => { loadStats(); loadAlbums() })
               <div class="track-sub">{{ track.artist }} · {{ track.album }}</div>
             </div>
             <div class="track-actions">
-              <button class="play-btn" @click.stop="playTrack(track)">{{ currentPlayingId === track.id ? '正在播放' : '播放' }}</button>
+              <button class="play-btn" @click.stop="playTrack(track)">{{ player.currentId === track.id ? '正在播放' : '播放' }}</button>
               <AppBadge :color="track.scraped ? 'green' : 'orange'">
                 {{ track.scraped ? '已刮削' : '未刮削' }}
               </AppBadge>
@@ -231,20 +226,14 @@ onMounted(() => { loadStats(); loadAlbums() })
       </div>
     </AppModal>
 
-    <!-- 底部播放器 -->
-    <div v-if="currentPlayingId" class="player-bar">
-      <div class="player-meta">
-        <div class="player-title">{{ currentPlayingTrack?.title || '正在播放' }}</div>
-        <div class="player-sub">{{ currentPlayingTrack?.artist }} · {{ currentPlayingTrack?.album }}</div>
-      </div>
-      <audio :key="currentPlayingId" controls autoplay :src="streamUrl(currentPlayingId)"></audio>
-      <button class="player-close" @click="currentPlayingId = null; currentPlayingTrack = null">×</button>
-    </div>
-
     <!-- 曲目详情弹窗 -->
     <AppModal v-if="showTrackModal && selectedTrack" title="曲目详情" @close="showTrackModal = false">
       <div class="track-modal">
-        <audio class="detail-player" controls :src="streamUrl(selectedTrack.id)"></audio>
+        <div class="detail-actions">
+          <AppButton variant="primary" size="sm" @click="playTrack(selectedTrack)">
+            {{ player.currentId === selectedTrack.id ? '正在全局播放' : '用全局播放器播放' }}
+          </AppButton>
+        </div>
         <div class="detail-grid">
           <div class="detail-row"><span class="detail-label">路径</span><span class="detail-val text-dim">{{ selectedTrack.file_path }}</span></div>
           <div class="detail-row"><span class="detail-label">艺人</span><span class="detail-val">{{ selectedTrack.artist }}</span></div>
@@ -324,15 +313,8 @@ onMounted(() => { loadStats(); loadAlbums() })
 .play-btn:hover { color: var(--text); background: var(--surface); }
 .track-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-sub { font-size: 12px; color: var(--text-dim); }
-.player-bar { position: sticky; bottom: 0; z-index: 20; display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 -8px 24px rgba(0,0,0,0.25); }
-.player-meta { min-width: 180px; max-width: 320px; overflow: hidden; }
-.player-title { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.player-sub { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.player-bar audio { flex: 1; min-width: 220px; }
-.player-close { border: none; background: transparent; color: var(--text-muted); font-size: 22px; cursor: pointer; }
-.player-close:hover { color: var(--danger); }
 .track-modal { display: flex; flex-direction: column; gap: 20px; min-width: 460px; }
-.detail-player { width: 100%; }
+.detail-actions { display: flex; gap: 8px; }
 .detail-grid { display: flex; flex-direction: column; gap: 8px; }
 .detail-row { display: flex; gap: 12px; align-items: flex-start; }
 .detail-label { font-size: 12px; color: var(--text-dim); min-width: 60px; }
