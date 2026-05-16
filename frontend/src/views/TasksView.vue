@@ -14,6 +14,7 @@ const cleanupLoading = ref(false)
 const cleanupApplying = ref(false)
 const cleanupPreview = ref(null)
 const cleanupResult = ref(null)
+const cleanupDeleteFiles = ref(false)
 let timer = null
 
 const hasActiveTasks = computed(() => tasks.value.some(t => ['downloading', 'organized', 'downloaded'].includes(t.status)))
@@ -72,6 +73,7 @@ async function runTaskAction(task, action) {
 async function handleCleanupPreview() {
   cleanupLoading.value = true
   cleanupResult.value = null
+  cleanupDeleteFiles.value = false
   try {
     cleanupPreview.value = await previewTaskCleanup()
   } catch (e) {
@@ -83,13 +85,24 @@ async function handleCleanupPreview() {
 
 async function handleCleanupApply() {
   if (!cleanupPreview.value?.candidate_count) return
-  const ok = confirm(`确认清理 ${cleanupPreview.value.candidate_count} 条脏任务？\n\n默认不会删除下载文件；qB 种子会从列表移除。`)
+  const lines = [
+    `确认清理 ${cleanupPreview.value.candidate_count} 条脏任务？`,
+    `qB 种子：${cleanupPreview.value.unique_qb_hash_count} 个`,
+    `影响大小：${formatSize(cleanupPreview.value.total_size || 0)}`,
+    `未下载剩余：${formatSize(cleanupPreview.value.total_amount_left || 0)}`,
+    '',
+    cleanupDeleteFiles.value
+      ? '⚠️ 已开启“同时删除下载文件”，qB 会尝试删除本地数据文件。'
+      : '默认安全模式：不会删除下载文件，只移除任务记录/qB 种子。',
+  ]
+  const ok = confirm(lines.join('\n'))
   if (!ok) return
   cleanupApplying.value = true
   try {
-    cleanupResult.value = await applyTaskCleanup(false)
+    cleanupResult.value = await applyTaskCleanup(cleanupDeleteFiles.value)
     await loadTasks()
     cleanupPreview.value = await previewTaskCleanup()
+    cleanupDeleteFiles.value = false
     scheduleNextLoad()
   } catch (e) {
     alert(e.message || '执行清理失败')
@@ -101,6 +114,7 @@ async function handleCleanupApply() {
 function closeCleanupModal() {
   cleanupPreview.value = null
   cleanupResult.value = null
+  cleanupDeleteFiles.value = false
 }
 
 function reasonText(reasons = []) {
@@ -199,18 +213,32 @@ onUnmounted(() => {
         <div>扫描任务：{{ cleanupPreview.task_count }}</div>
         <div>候选清理：<strong>{{ cleanupPreview.candidate_count }}</strong></div>
         <div>仅删 DB：{{ cleanupPreview.db_only_count }} · qB+DB：{{ cleanupPreview.qb_and_db_count }} · qB Hash：{{ cleanupPreview.unique_qb_hash_count }}</div>
+        <div>影响大小：{{ formatSize(cleanupPreview.total_size) }} · 未下载剩余：{{ formatSize(cleanupPreview.total_amount_left) }}</div>
       </div>
       <div v-if="cleanupResult" class="success-text">
         已清理 {{ cleanupResult.tasks_deleted }} 条任务，删除 music_files {{ cleanupResult.music_files_deleted }} 条；DB 备份：{{ cleanupResult.backup_path || '-' }}
       </div>
-      <div v-if="cleanupPreview.candidates.length" class="cleanup-list">
-        <div v-for="item in cleanupPreview.candidates" :key="item.id" class="cleanup-item">
-          <div class="cleanup-title">#{{ item.id }} {{ item.torrent_name }}</div>
-          <div class="cleanup-meta">
-            {{ item.cleanup_type === 'qb_and_db' ? 'qB + DB' : '仅 DB' }} · {{ item.effective_status }} · {{ item.qb_state || '-' }} · {{ reasonText(item.reasons) }}
+      <template v-if="cleanupPreview.candidates.length">
+        <div class="cleanup-list">
+          <div v-for="item in cleanupPreview.candidates" :key="item.id" class="cleanup-item">
+            <div class="cleanup-title">#{{ item.id }} {{ item.torrent_name }}</div>
+            <div class="cleanup-meta">
+              {{ item.cleanup_type === 'qb_and_db' ? 'qB + DB' : '仅 DB' }} · {{ item.effective_status }} · {{ item.qb_state || '-' }} · {{ reasonText(item.reasons) }}
+            </div>
+            <div class="cleanup-meta">
+              大小 {{ formatSize(item.size) }} · 剩余 {{ formatSize(item.amount_left) }}
+            </div>
           </div>
         </div>
-      </div>
+        <label class="delete-files-toggle" :class="{ danger: cleanupDeleteFiles }">
+          <input type="checkbox" v-model="cleanupDeleteFiles" />
+          <span>
+            同时删除下载文件
+            <strong v-if="cleanupDeleteFiles">（危险：会让 qB 删除本地数据文件）</strong>
+            <em v-else>（默认关闭，仅移除任务/qB 种子）</em>
+          </span>
+        </label>
+      </template>
       <div v-else class="empty-text">没有发现需要清理的脏任务。</div>
       <div class="modal-actions">
         <AppButton variant="ghost" @click="closeCleanupModal">关闭</AppButton>
@@ -308,7 +336,12 @@ onUnmounted(() => {
 .cleanup-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
 .cleanup-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); }
 .cleanup-title { font-weight: 600; margin-bottom: 4px; }
-.cleanup-meta { color: var(--text-dim); font-size: 12px; }
+.cleanup-meta { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.delete-files-toggle { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-dim); font-size: 13px; }
+.delete-files-toggle input { margin-top: 2px; }
+.delete-files-toggle strong { color: var(--danger); font-style: normal; }
+.delete-files-toggle em { color: var(--text-muted); font-style: normal; }
+.delete-files-toggle.danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .tasks-table-wrap { overflow-x: auto; }
 .tasks-table { width: 100%; border-collapse: collapse; min-width: 1120px; }

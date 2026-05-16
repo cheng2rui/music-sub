@@ -161,6 +161,9 @@ def _build_cleanup_preview(db: Session) -> dict:
                 "effective_status": effective["status"],
             })
 
+    total_size = sum(float(c.get("size") or 0) for c in candidates)
+    total_amount_left = sum(float(c.get("amount_left") or 0) for c in candidates)
+
     return {
         "ok": True,
         "dry_run": True,
@@ -169,6 +172,10 @@ def _build_cleanup_preview(db: Session) -> dict:
         "db_only_count": sum(1 for c in candidates if c["cleanup_type"] == "db_only"),
         "qb_and_db_count": sum(1 for c in candidates if c["cleanup_type"] == "qb_and_db"),
         "unique_qb_hash_count": len(unique_qb_hashes),
+        "total_size": total_size,
+        "total_amount_left": total_amount_left,
+        "delete_files_supported": True,
+        "delete_files_default": False,
         "candidates": candidates,
         "keep": keep,
     }
@@ -225,6 +232,8 @@ def apply_cleanup(delete_files: bool = False, db: Session = Depends(get_db)):
         "music_files_deleted": music_files_deleted,
         "qb_deleted": qb_deleted,
         "candidate_count": len(candidates),
+        "total_size": preview.get("total_size", 0),
+        "total_amount_left": preview.get("total_amount_left", 0),
     }
 
 
