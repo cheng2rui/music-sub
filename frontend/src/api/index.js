@@ -74,6 +74,8 @@ export const downloadOnlineSong = (song, organize = true) => authFetch('/api/onl
 // ============ Tasks ============
 export const getTasks = () => authFetch('/api/tasks/').then(r => r.json())
 export const checkTasks = () => authFetch('/api/tasks/check', { method: 'POST' }).then(r => r.json())
+export const previewTaskCleanup = () => authFetch('/api/tasks/cleanup/preview', { method: 'POST' }).then(r => r.json())
+export const applyTaskCleanup = (deleteFiles = false) => authFetch(`/api/tasks/cleanup/apply?delete_files=${deleteFiles ? 'true' : 'false'}`, { method: 'POST' }).then(r => r.json())
 export const pauseTask = (id) => authFetch(`/api/tasks/${id}/pause`, { method: 'POST' }).then(r => r.json())
 export const resumeTask = (id) => authFetch(`/api/tasks/${id}/resume`, { method: 'POST' }).then(r => r.json())
 export const deleteTask = (id) => authFetch(`/api/tasks/${id}`, { method: 'DELETE' }).then(r => r.json())

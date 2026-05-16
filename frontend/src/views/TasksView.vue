@@ -1,14 +1,19 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { getTasks, checkTasks, pauseTask, resumeTask, deleteTask } from '@/api/index.js'
+import { getTasks, checkTasks, pauseTask, resumeTask, deleteTask, previewTaskCleanup, applyTaskCleanup } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
+import AppModal from '@/components/AppModal.vue'
 
 const tasks = ref([])
 const loading = ref(false)
 const actingId = ref(null)
 const errorText = ref('')
 const lastUpdatedAt = ref(null)
+const cleanupLoading = ref(false)
+const cleanupApplying = ref(false)
+const cleanupPreview = ref(null)
+const cleanupResult = ref(null)
 let timer = null
 
 const hasActiveTasks = computed(() => tasks.value.some(t => ['downloading', 'organized', 'downloaded'].includes(t.status)))
@@ -62,6 +67,51 @@ async function runTaskAction(task, action) {
   } finally {
     actingId.value = null
   }
+}
+
+async function handleCleanupPreview() {
+  cleanupLoading.value = true
+  cleanupResult.value = null
+  try {
+    cleanupPreview.value = await previewTaskCleanup()
+  } catch (e) {
+    alert(e.message || '清理扫描失败')
+  } finally {
+    cleanupLoading.value = false
+  }
+}
+
+async function handleCleanupApply() {
+  if (!cleanupPreview.value?.candidate_count) return
+  const ok = confirm(`确认清理 ${cleanupPreview.value.candidate_count} 条脏任务？\n\n默认不会删除下载文件；qB 种子会从列表移除。`)
+  if (!ok) return
+  cleanupApplying.value = true
+  try {
+    cleanupResult.value = await applyTaskCleanup(false)
+    await loadTasks()
+    cleanupPreview.value = await previewTaskCleanup()
+    scheduleNextLoad()
+  } catch (e) {
+    alert(e.message || '执行清理失败')
+  } finally {
+    cleanupApplying.value = false
+  }
+}
+
+function closeCleanupModal() {
+  cleanupPreview.value = null
+  cleanupResult.value = null
+}
+
+function reasonText(reasons = []) {
+  const map = {
+    simulated_hash: '模拟测试任务',
+    qb_missing: 'qB 任务缺失',
+    video_like: '疑似视频资源',
+    paused_video_like: '已暂停且疑似视频',
+    paused_zero_progress_video_like: '0% 暂停的视频类任务',
+  }
+  return reasons.map(r => map[r] || r).join('、')
 }
 
 function statusLabel(s) {
@@ -138,8 +188,40 @@ onUnmounted(() => {
           <span v-if="hasActiveTasks"> · 活跃任务 5s 刷新</span>
         </div>
       </div>
-      <AppButton variant="primary" :loading="loading" @click="handleCheck">检查完成</AppButton>
+      <div class="header-actions">
+        <AppButton variant="ghost" :loading="cleanupLoading" @click="handleCleanupPreview">清理扫描</AppButton>
+        <AppButton variant="primary" :loading="loading" @click="handleCheck">检查完成</AppButton>
+      </div>
     </div>
+
+    <AppModal v-if="cleanupPreview" title="脏任务清理 dry-run" @close="closeCleanupModal">
+      <div class="cleanup-summary">
+        <div>扫描任务：{{ cleanupPreview.task_count }}</div>
+        <div>候选清理：<strong>{{ cleanupPreview.candidate_count }}</strong></div>
+        <div>仅删 DB：{{ cleanupPreview.db_only_count }} · qB+DB：{{ cleanupPreview.qb_and_db_count }} · qB Hash：{{ cleanupPreview.unique_qb_hash_count }}</div>
+      </div>
+      <div v-if="cleanupResult" class="success-text">
+        已清理 {{ cleanupResult.tasks_deleted }} 条任务，删除 music_files {{ cleanupResult.music_files_deleted }} 条；DB 备份：{{ cleanupResult.backup_path || '-' }}
+      </div>
+      <div v-if="cleanupPreview.candidates.length" class="cleanup-list">
+        <div v-for="item in cleanupPreview.candidates" :key="item.id" class="cleanup-item">
+          <div class="cleanup-title">#{{ item.id }} {{ item.torrent_name }}</div>
+          <div class="cleanup-meta">
+            {{ item.cleanup_type === 'qb_and_db' ? 'qB + DB' : '仅 DB' }} · {{ item.effective_status }} · {{ item.qb_state || '-' }} · {{ reasonText(item.reasons) }}
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-text">没有发现需要清理的脏任务。</div>
+      <div class="modal-actions">
+        <AppButton variant="ghost" @click="closeCleanupModal">关闭</AppButton>
+        <AppButton
+          variant="danger"
+          :disabled="!cleanupPreview.candidate_count"
+          :loading="cleanupApplying"
+          @click="handleCleanupApply"
+        >执行清理</AppButton>
+      </div>
+    </AppModal>
 
     <div v-if="errorText" class="error-text">{{ errorText }}</div>
     <div v-if="tasks.length === 0" class="empty-text">暂无任务</div>
@@ -215,11 +297,19 @@ onUnmounted(() => {
 
 <style scoped>
 .tasks-view { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; height: 100%; }
-.tasks-header { display: flex; align-items: center; justify-content: space-between; }
+.tasks-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .tasks-header h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
 .refresh-meta { font-size: 12px; color: var(--text-dim); }
 .empty-text { color: var(--text-dim); padding: 20px 0; }
 .error-text { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: var(--radius-md); padding: 10px 12px; }
+.success-text { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); border-radius: var(--radius-md); padding: 10px 12px; margin: 12px 0; }
+.cleanup-summary { display: flex; flex-direction: column; gap: 6px; color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
+.cleanup-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
+.cleanup-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.cleanup-title { font-weight: 600; margin-bottom: 4px; }
+.cleanup-meta { color: var(--text-dim); font-size: 12px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .tasks-table-wrap { overflow-x: auto; }
 .tasks-table { width: 100%; border-collapse: collapse; min-width: 1120px; }
 .tasks-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
