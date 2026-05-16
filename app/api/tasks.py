@@ -431,6 +431,7 @@ def organize_qb_task(torrent_hash: str):
         "hash": torrent_hash,
         "name": info.get("name") or torrent_hash,
         "content_path": content_path,
+        "mark_processed": True,
     })
     return {"ok": True}
 
@@ -460,6 +461,40 @@ def resume_task(task_id: int, db: Session = Depends(get_db)):
             raise HTTPException(status_code=500, detail="Failed to resume torrent")
     task.status = "downloading"
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/{task_id}/retry")
+def retry_task(task_id: int, db: Session = Depends(get_db)):
+    """Retry organize/scrape for a failed or completed qB-backed task without requiring a re-download."""
+    from app.services.pipeline import _process_completed_torrent
+
+    task = db.query(DownloadTask).filter(DownloadTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_qb_backed(task):
+        raise HTTPException(status_code=400, detail="Task is not qBittorrent-backed")
+
+    info = qb_client.get_torrents_by_hash([task.torrent_hash.lower()]).get(task.torrent_hash.lower())
+    if not info:
+        raise HTTPException(status_code=404, detail="Torrent not found in qBittorrent")
+    if (info.get("progress") or 0) < 1:
+        task.status = "downloading"
+        db.commit()
+        raise HTTPException(status_code=400, detail="Torrent is not completed yet")
+
+    content_path = info.get("content_path") or info.get("save_path")
+    if not content_path or not Path(content_path).exists():
+        raise HTTPException(status_code=400, detail="Torrent content path does not exist")
+
+    task.status = "downloaded"
+    db.commit()
+    _process_completed_torrent({
+        "hash": task.torrent_hash.lower(),
+        "name": task.torrent_name,
+        "content_path": content_path,
+        "mark_processed": True,
+    })
     return {"ok": True}
 
 

@@ -78,6 +78,7 @@ export const previewTaskCleanup = () => authFetch('/api/tasks/cleanup/preview', 
 export const applyTaskCleanup = (deleteFiles = false) => authFetch(`/api/tasks/cleanup/apply?delete_files=${deleteFiles ? 'true' : 'false'}`, { method: 'POST' }).then(r => r.json())
 export const pauseTask = (id) => authFetch(`/api/tasks/${id}/pause`, { method: 'POST' }).then(r => r.json())
 export const resumeTask = (id) => authFetch(`/api/tasks/${id}/resume`, { method: 'POST' }).then(r => r.json())
+export const retryTask = (id) => authFetch(`/api/tasks/${id}/retry`, { method: 'POST' }).then(r => r.json())
 export const deleteTask = (id) => authFetch(`/api/tasks/${id}`, { method: 'DELETE' }).then(r => r.json())
 export const pauseQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/pause`, { method: 'POST' }).then(r => r.json())
 export const resumeQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/resume`, { method: 'POST' }).then(r => r.json())

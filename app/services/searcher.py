@@ -9,7 +9,7 @@ from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
 from app.services.subscription import get_all_subscriptions, update_last_search
 from app.services.notify import notify_download_added
-from app.downloader.qbittorrent import qb_client
+from app.downloader.qbittorrent import qb_client, torrent_info_hash
 from app.models import DownloadTask
 from app.db import SessionLocal
 
@@ -143,25 +143,42 @@ def _filter_subscription_results(results: list[TorrentInfo], sub) -> list[Torren
     return filtered
 
 
+def fetch_torrent_info_hash(site_name: str, torrent_id: str) -> tuple[Optional[str], Optional[bytes]]:
+    """Download a torrent file and return (info_hash, content) without adding it to qB."""
+    site = _get_site_instance(site_name)
+    if not site:
+        logger.error(f"Site {site_name} not available")
+        return None, None
+
+    torrent_content = site.download_torrent(torrent_id)
+    if not torrent_content:
+        logger.error(f"Failed to download torrent {torrent_id} from {site_name}")
+        return None, None
+
+    info_hash = torrent_info_hash(torrent_content)
+    if not info_hash:
+        logger.error(f"Invalid torrent payload from {site_name}:{torrent_id}")
+        return None, None
+    return info_hash.lower(), torrent_content
+
+
+def download_torrent_content(torrent_content: bytes) -> Optional[str]:
+    """Add already-fetched torrent content to qB and return its info hash."""
+    torrent_hash = qb_client.add_torrent(torrent_content)
+    if torrent_hash:
+        logger.info(f"Added torrent to QB: {torrent_hash}")
+    return torrent_hash
+
+
 def download_from_site(site_name: str, torrent_id: str) -> Optional[str]:
     """Download a torrent from a site and add to QB.
 
     Returns torrent hash or None.
     """
-    site = _get_site_instance(site_name)
-    if not site:
-        logger.error(f"Site {site_name} not available")
-        return None
-
-    torrent_content = site.download_torrent(torrent_id)
+    _, torrent_content = fetch_torrent_info_hash(site_name, torrent_id)
     if not torrent_content:
-        logger.error(f"Failed to download torrent {torrent_id} from {site_name}")
         return None
-
-    torrent_hash = qb_client.add_torrent(torrent_content)
-    if torrent_hash:
-        logger.info(f"Added torrent to QB: {torrent_hash}")
-    return torrent_hash
+    return download_torrent_content(torrent_content)
 
 
 def search_all_subscriptions():

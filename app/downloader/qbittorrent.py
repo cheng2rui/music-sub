@@ -43,7 +43,7 @@ def _decode_bencode(data: bytes, pos: int = 0):
     raise ValueError(f"invalid bencode token: {token!r}")
 
 
-def _torrent_info_hash(torrent_content: bytes) -> Optional[str]:
+def torrent_info_hash(torrent_content: bytes) -> Optional[str]:
     """Return BitTorrent v1 info hash for a .torrent payload, or None if invalid."""
     try:
         decoded, end = _decode_bencode(torrent_content)
@@ -95,7 +95,7 @@ class QBClient:
                     category: Optional[str] = None, tags: Optional[list[str]] = None) -> Optional[str]:
         """Add torrent to qBittorrent. Returns the torrent's own info hash or None."""
         cfg = config.qbittorrent
-        expected_hash = _torrent_info_hash(torrent_content)
+        expected_hash = torrent_info_hash(torrent_content)
         if not expected_hash:
             preview = torrent_content[:200].decode("utf-8", errors="replace") if torrent_content else ""
             logger.error(f"Invalid torrent payload, refusing to add. Preview: {preview!r}")

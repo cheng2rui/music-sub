@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { getTasks, checkTasks, pauseTask, resumeTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask } from '@/api/index.js'
+import { getTasks, checkTasks, pauseTask, resumeTask, retryTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
@@ -68,6 +68,7 @@ async function runTaskAction(task, action) {
     } else {
       if (action === 'pause') await pauseTask(task.id)
       if (action === 'resume') await resumeTask(task.id)
+      if (action === 'retry') await retryTask(task.id)
       if (action === 'delete') {
         if (!confirm(`删除任务记录？\n${task.torrent_name}\n\n不会删除已下载文件。`)) return
         await deleteTask(task.id)
@@ -200,6 +201,10 @@ function canResume(task) {
 
 function canOrganize(task) {
   return task.external_qb && task.progress === 1
+}
+
+function canRetry(task) {
+  return !task.external_qb && isQbManaged(task) && ['failed', 'downloaded', 'organized'].includes(task.status)
 }
 
 function handleVisibilityChange() {
@@ -351,6 +356,13 @@ onUnmounted(() => {
                   :loading="actingId === actionKey(task, 'organize')"
                   @click="runTaskAction(task, 'organize')"
                 >整理</AppButton>
+                <AppButton
+                  v-if="canRetry(task)"
+                  size="sm"
+                  variant="success"
+                  :loading="actingId === actionKey(task, 'retry')"
+                  @click="runTaskAction(task, 'retry')"
+                >重试</AppButton>
                 <AppButton
                   size="sm"
                   variant="danger"

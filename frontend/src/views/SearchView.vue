@@ -26,8 +26,10 @@ async function handleSearch() {
 async function handleDownload(site, torrentId, title) {
   downloading.value = `${site}-${torrentId}`
   try {
-    await downloadTorrent(site, torrentId, title)
+    const res = await downloadTorrent(site, torrentId, title)
+    alert(res.already_exists ? '任务已存在，已跳过重复添加' : '已添加到下载任务')
   } catch (e) {
+    alert(e.message || '下载失败')
     console.error(e)
   } finally {
     downloading.value = null

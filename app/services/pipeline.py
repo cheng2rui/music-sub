@@ -81,12 +81,27 @@ def _meta_from_hint(hint: dict) -> MusicMeta | None:
     )
 
 
+def _mark_task_failed(torrent_hash: str, error: str):
+    """Mark a tracked task failed without tagging qB as processed."""
+    if not torrent_hash:
+        return
+    db = SessionLocal()
+    try:
+        task = db.query(DownloadTask).filter(DownloadTask.torrent_hash == torrent_hash).first()
+        if task:
+            task.status = "failed"
+            db.commit()
+    finally:
+        db.close()
+
+
 def _process_completed_torrent(torrent: dict):
     """Process a single completed torrent: hardlink + scrape."""
     content_path = torrent.get("content_path", "")
     torrent_hash = torrent.get("hash", "")
     torrent_name = torrent.get("name", "")
     metadata_hint = torrent.get("metadata") or {}
+    should_mark_processed = torrent.get("mark_processed", True)
 
     if not content_path or not os.path.exists(content_path):
         logger.warning(f"Content path not found: {content_path}")
@@ -99,7 +114,8 @@ def _process_completed_torrent(torrent: dict):
     source_audio_files = get_audio_files(content_path)
     if not source_audio_files:
         logger.warning(f"No audio files found in {content_path}")
-        mark_processed(torrent_hash)
+        if should_mark_processed:
+            mark_processed(torrent_hash)
         return
 
     meta_cache: dict[str, MusicMeta | None] = {}
@@ -116,7 +132,8 @@ def _process_completed_torrent(torrent: dict):
     linked_files = hardlink_to_library(content_path, artist=organize_artist, album=organize_album)
     if not linked_files:
         logger.warning(f"No audio files linked from {content_path}")
-        mark_processed(torrent_hash)
+        if should_mark_processed:
+            mark_processed(torrent_hash)
         return
 
     notify_download_complete(torrent_name, len(linked_files))
@@ -224,7 +241,8 @@ def _process_completed_torrent(torrent: dict):
     finally:
         db.close()
 
-    mark_processed(torrent_hash)
+    if should_mark_processed:
+        mark_processed(torrent_hash)
     logger.info(f"Completed processing: {torrent_name} ({len(linked_files)} files)")
 
 
@@ -241,4 +259,4 @@ def check_completed_downloads():
         except Exception as e:
             logger.error(f"Failed to process {torrent.get('name')}: {e}")
             notify_error(f"处理种子: {torrent.get('name', '?')}", str(e))
-            mark_processed(torrent.get("hash", ""))
+            _mark_task_failed(torrent.get("hash", ""), str(e))
