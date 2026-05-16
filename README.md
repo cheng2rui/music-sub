@@ -228,7 +228,7 @@ data/                 # SQLite（gitignore）
 
 ```bash
 # 本地构建并部署
-docker build -t music-sub:0.5.3 -t music-sub:latest .
+docker build -t music-sub:0.5.4 -t music-sub:latest .
 docker compose up -d
 
 # 增量更新代码（不重 build）

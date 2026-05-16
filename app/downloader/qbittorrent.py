@@ -197,6 +197,10 @@ class QBClient:
                 t.hash.lower(): {
                     "qb_state": t.state,
                     "progress": float(t.progress or 0),
+                    "download_speed": float(getattr(t, "dlspeed", 0) or 0),
+                    "upload_speed": float(getattr(t, "upspeed", 0) or 0),
+                    "eta": int(getattr(t, "eta", 0) or 0),
+                    "amount_left": float(getattr(t, "amount_left", 0) or 0),
                     "save_path": t.save_path,
                     "content_path": t.content_path,
                     "name": t.name,

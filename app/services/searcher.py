@@ -8,6 +8,7 @@ from app.sites.opencd import OpenCDSite
 from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
 from app.services.subscription import get_all_subscriptions, update_last_search
+from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client
 from app.models import DownloadTask
 from app.db import SessionLocal
@@ -19,6 +20,24 @@ SITE_CLASSES = {
     "opencd": OpenCDSite,
     "ptclub": PTClubSite,
     "dismusic": DisMusicSite,
+}
+
+VIDEO_EXCLUDE_TERMS = [
+    "mv", "music video", "mp4", "mkv", "avi", "web-dl", "webrip", "bluray",
+    "bdrip", "dvdrip", "h264", "h265", "x264", "x265", "hevc", "2160p",
+    "1080p", "720p", "4k", "60fps", "ac3", "remux", "演唱会", "演唱會",
+    "concert", "live concert", "dvd", "中字", "字幕", "修复", "修復", "repair",
+]
+
+AUDIO_HINT_TERMS = [
+    "flac", "mp3", "ape", "wav", "m4a", "aac", "alac", "cue", "cd", "hi-res",
+    "hires", "lossless", "无损", "無損", "320", "24bit", "16bit",
+]
+
+TYPE_MAX_SIZE_BYTES = {
+    "song": 500 * 1024 * 1024,
+    "album": 8 * 1024 * 1024 * 1024,
+    "keyword": 3 * 1024 * 1024 * 1024,
 }
 
 
@@ -63,6 +82,67 @@ def search_sites(keyword: str, site_names: list[str] = None) -> list[TorrentInfo
     return results
 
 
+def _split_keywords(keyword: str) -> list[str]:
+    """Split a subscription keyword into non-empty lower-case terms."""
+    return [part.strip().lower() for part in keyword.replace("　", " ").split() if part.strip()]
+
+
+def _looks_like_video(title: str) -> bool:
+    """Return True when a torrent title is very likely video instead of an audio release."""
+    lower = title.lower()
+    return any(term in lower for term in VIDEO_EXCLUDE_TERMS)
+
+
+def _has_audio_hint(title: str) -> bool:
+    """Return True when a torrent title contains common music/audio release hints."""
+    lower = title.lower()
+    return any(term in lower for term in AUDIO_HINT_TERMS)
+
+
+def _filter_subscription_results(results: list[TorrentInfo], sub) -> list[TorrentInfo]:
+    """Apply subscription matching, quality, media-type, and size filters.
+
+    Auto-download should be conservative: it is better to skip a dubious video result than
+    to burn PT download limits or fill qB with stalled 4K concert/MV torrents.
+    """
+    keyword_lower = sub.keyword.lower().strip()
+    words = _split_keywords(sub.keyword)
+
+    if sub.type == "artist":
+        results = [r for r in results if keyword_lower in r.title.lower()]
+    elif sub.type == "song":
+        # Song subscriptions created from playlists are usually "title artist".
+        # Require every token to appear and keep results small/audio-like.
+        results = [r for r in results if words and all(w in r.title.lower() for w in words)]
+    elif sub.type == "album":
+        results = [r for r in results if keyword_lower in r.title.lower()]
+    elif sub.type == "keyword":
+        # Keep keyword subscriptions conservative too; PT search may return loosely related items.
+        results = [r for r in results if keyword_lower in r.title.lower()]
+
+    if sub.quality == "flac":
+        results = [r for r in results if "flac" in r.title.lower()]
+    elif sub.quality == "mp3":
+        results = [r for r in results if "mp3" in r.title.lower() or "320" in r.title.lower()]
+
+    max_size = TYPE_MAX_SIZE_BYTES.get(sub.type)
+    if max_size:
+        results = [r for r in results if not r.size or r.size <= max_size]
+
+    # Keyword/artist subscriptions are broad; keep only audio-looking results and drop video hints.
+    # For explicit quality filters, the quality term itself is a strong audio hint.
+    filtered = []
+    for result in results:
+        if _looks_like_video(result.title):
+            logger.info(f"Skip likely video result: {result.title}")
+            continue
+        if sub.quality == "any" and sub.type in {"artist", "keyword"} and not _has_audio_hint(result.title):
+            logger.info(f"Skip result without audio hint: {result.title}")
+            continue
+        filtered.append(result)
+    return filtered
+
+
 def download_from_site(site_name: str, torrent_id: str) -> Optional[str]:
     """Download a torrent from a site and add to QB.
 
@@ -97,27 +177,12 @@ def search_all_subscriptions():
             sites = sub.sites.split(",") if sub.sites != "all" else None
             results = search_sites(sub.keyword, sites)
 
-            # Filter results based on subscription type
-            if sub.type == "artist":
-                # Artist subscription: match artist name in title
-                keyword_lower = sub.keyword.lower()
-                results = [r for r in results if keyword_lower in r.title.lower()]
-            elif sub.type == "song":
-                # Song subscription: keyword should contain both song+artist
-                # More strict matching - all words must appear
-                words = sub.keyword.lower().split()
-                results = [r for r in results if all(w in r.title.lower() for w in words)]
-            elif sub.type == "album":
-                # Album subscription: match album name
-                keyword_lower = sub.keyword.lower()
-                results = [r for r in results if keyword_lower in r.title.lower()]
-            # type == "keyword": no filtering, use all results
-
-            # Quality filter
-            if sub.quality == "flac":
-                results = [r for r in results if "flac" in r.title.lower()]
-            elif sub.quality == "mp3":
-                results = [r for r in results if "mp3" in r.title.lower() or "320" in r.title.lower()]
+            before_count = len(results)
+            results = _filter_subscription_results(results, sub)
+            logger.info(
+                f"Subscription filter kept {len(results)}/{before_count} results for "
+                f"[{sub.type}/{sub.quality}] {sub.keyword}"
+            )
 
             # Check for results already downloaded/attempted globally. Subscription titles can
             # overlap, and PT sites may rate-limit repeated .torrent downloads even if qB already

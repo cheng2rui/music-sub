@@ -10,13 +10,25 @@ from app.downloader.qbittorrent import qb_client
 router = APIRouter()
 
 
+def _is_qb_backed(task: DownloadTask) -> bool:
+    return bool(task.torrent_hash) and not task.torrent_hash.startswith(("online:", "SIMULATED_"))
+
+
 def _task_to_response(task: DownloadTask, qb_info: dict | None = None) -> dict:
     """Convert ORM task to API response and enrich with qBittorrent state when available."""
     qb_info = qb_info or {}
     status = task.status
     qb_state = qb_info.get("qb_state")
-    if qb_state in {"stoppedDL", "stoppedUP", "pausedDL", "pausedUP"} and status in {"downloading", "paused"}:
+    qb_missing = _is_qb_backed(task) and status in {"downloading", "paused", "organized"} and not qb_info
+
+    if qb_missing:
+        status = "missing"
+    elif qb_state in {"stoppedDL", "stoppedUP", "pausedDL", "pausedUP"} and status in {"downloading", "paused"}:
         status = "paused"
+    elif qb_state in {"error", "missingFiles", "unknown"}:
+        status = "failed"
+    elif qb_info.get("progress") == 1 and status == "downloading":
+        status = "downloaded"
     elif qb_state and status == "paused" and qb_state not in {"stoppedDL", "stoppedUP", "pausedDL", "pausedUP"}:
         status = "downloading"
 
@@ -31,6 +43,11 @@ def _task_to_response(task: DownloadTask, qb_info: dict | None = None) -> dict:
         "completed_at": task.completed_at,
         "qb_state": qb_state,
         "progress": qb_info.get("progress"),
+        "qb_missing": qb_missing,
+        "download_speed": qb_info.get("download_speed"),
+        "upload_speed": qb_info.get("upload_speed"),
+        "eta": qb_info.get("eta"),
+        "amount_left": qb_info.get("amount_left"),
     }
 
 
@@ -43,7 +60,7 @@ def list_tasks(status: str = "", db: Session = Depends(get_db)):
     tasks = q.limit(100).all()
     qb_states = qb_client.get_torrents_by_hash([
         t.torrent_hash for t in tasks
-        if t.torrent_hash and not t.torrent_hash.startswith(("online:", "SIMULATED_"))
+        if _is_qb_backed(t)
     ])
     return [
         _task_to_response(task, qb_states.get((task.torrent_hash or "").lower()))
@@ -64,7 +81,7 @@ def pause_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(DownloadTask).filter(DownloadTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.torrent_hash and not task.torrent_hash.startswith(("online:", "SIMULATED_")):
+    if _is_qb_backed(task):
         if not qb_client.pause_torrent(task.torrent_hash):
             raise HTTPException(status_code=500, detail="Failed to pause torrent")
     task.status = "paused"
@@ -78,7 +95,7 @@ def resume_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(DownloadTask).filter(DownloadTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.torrent_hash and not task.torrent_hash.startswith(("online:", "SIMULATED_")):
+    if _is_qb_backed(task):
         if not qb_client.resume_torrent(task.torrent_hash):
             raise HTTPException(status_code=500, detail="Failed to resume torrent")
     task.status = "downloading"
@@ -95,7 +112,7 @@ def delete_task(task_id: int, delete_files: bool = False, db: Session = Depends(
     task = db.query(DownloadTask).filter(DownloadTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.torrent_hash and not task.torrent_hash.startswith(("online:", "SIMULATED_")):
+    if _is_qb_backed(task):
         qb_client.delete_torrent(task.torrent_hash, delete_files=delete_files)
     db.delete(task)
     db.commit()

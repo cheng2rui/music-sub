@@ -47,6 +47,11 @@ class DownloadTaskResponse(BaseModel):
     torrent_hash: Optional[str] = None
     qb_state: Optional[str] = None
     progress: Optional[float] = None
+    qb_missing: bool = False
+    download_speed: Optional[float] = None
+    upload_speed: Optional[float] = None
+    eta: Optional[int] = None
+    amount_left: Optional[float] = None
 
     class Config:
         from_attributes = True
