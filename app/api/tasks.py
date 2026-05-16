@@ -2,6 +2,7 @@
 import datetime
 import os
 import shutil
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db import DB_PATH, get_db
@@ -70,6 +71,46 @@ def _task_to_response(task: DownloadTask, qb_info: dict | None = None) -> dict:
         "upload_speed": qb_info.get("upload_speed"),
         "eta": qb_info.get("eta"),
         "amount_left": qb_info.get("amount_left"),
+        "external_qb": False,
+        "content_path": qb_info.get("content_path"),
+        "save_path": qb_info.get("save_path"),
+        "category": qb_info.get("category"),
+        "tags": qb_info.get("tags"),
+    }
+
+
+def _qb_info_to_response(torrent_hash: str, qb_info: dict) -> dict:
+    """Convert a qB-only torrent to a task-like response for unified management."""
+    qb_state = qb_info.get("qb_state")
+    status = "downloading"
+    if qb_state in {"stoppedDL", "stoppedUP", "pausedDL", "pausedUP"}:
+        status = "paused"
+    elif qb_state in {"error", "missingFiles", "unknown"}:
+        status = "failed"
+    elif qb_info.get("progress") == 1:
+        status = "downloaded"
+
+    return {
+        "id": -1,
+        "torrent_name": qb_info.get("name") or torrent_hash,
+        "torrent_hash": torrent_hash,
+        "site": "qbittorrent",
+        "status": status,
+        "size": qb_info.get("size") or 0,
+        "created_at": datetime.datetime.fromtimestamp(0),
+        "completed_at": None,
+        "qb_state": qb_state,
+        "progress": qb_info.get("progress"),
+        "qb_missing": False,
+        "download_speed": qb_info.get("download_speed"),
+        "upload_speed": qb_info.get("upload_speed"),
+        "eta": qb_info.get("eta"),
+        "amount_left": qb_info.get("amount_left"),
+        "external_qb": True,
+        "content_path": qb_info.get("content_path"),
+        "save_path": qb_info.get("save_path"),
+        "category": qb_info.get("category"),
+        "tags": qb_info.get("tags"),
     }
 
 
@@ -84,10 +125,32 @@ def list_tasks(status: str = "", db: Session = Depends(get_db)):
         t.torrent_hash for t in tasks
         if _is_qb_backed(t)
     ])
-    return [
+    result = [
         _task_to_response(task, qb_states.get((task.torrent_hash or "").lower()))
         for task in tasks
     ]
+
+    known_hashes = {
+        (t.torrent_hash or "").lower()
+        for t in tasks
+        if _is_qb_backed(t)
+    }
+    try:
+        cfg = __import__("app.config", fromlist=["config"]).config.qbittorrent
+        torrents = qb_client.client.torrents_info(category=cfg.category)
+        for torrent in torrents:
+            torrent_hash = (torrent.hash or "").lower()
+            if not torrent_hash or torrent_hash in known_hashes:
+                continue
+            info = qb_client.get_torrents_by_hash([torrent_hash]).get(torrent_hash)
+            if info:
+                result.append(_qb_info_to_response(torrent_hash, info))
+    except Exception:
+        pass
+
+    if status:
+        result = [t for t in result if t.get("status") == status]
+    return sorted(result, key=lambda t: (not t.get("external_qb"), t.get("created_at") or datetime.datetime.fromtimestamp(0)), reverse=True)
 
 
 @router.post("/check")
@@ -161,6 +224,70 @@ def _build_cleanup_preview(db: Session) -> dict:
                 "effective_status": effective["status"],
             })
 
+    known_hashes = {
+        (t.torrent_hash or "").lower()
+        for t in tasks
+        if _is_qb_backed(t)
+    }
+    try:
+        cfg = __import__("app.config", fromlist=["config"]).config.qbittorrent
+        for torrent in qb_client.client.torrents_info(category=cfg.category):
+            torrent_hash = (torrent.hash or "").lower()
+            if not torrent_hash or torrent_hash in known_hashes:
+                continue
+            qb_info = qb_client.get_torrents_by_hash([torrent_hash]).get(torrent_hash) or {}
+            pseudo_task = DownloadTask(
+                torrent_name=qb_info.get("name") or torrent.name or torrent_hash,
+                torrent_hash=torrent_hash,
+                site="qbittorrent",
+                size=float(qb_info.get("size") or getattr(torrent, "size", 0) or 0),
+                status="paused" if (qb_info.get("qb_state") or torrent.state) in {"stoppedDL", "stoppedUP", "pausedDL", "pausedUP"} else "downloading",
+            )
+            effective = _qb_info_to_response(torrent_hash, qb_info)
+            reasons = []
+            cleanup_type = ""
+            if effective["status"] in {"failed", "missing"}:
+                cleanup_type = "qb_and_db"
+                reasons.append(f"status:{effective['status']}")
+            elif effective["status"] == "paused" and (qb_info or {}).get("progress", 0) == 0 and _is_video_like(pseudo_task, qb_info):
+                cleanup_type = "qb_and_db"
+                reasons.append("external_qb_paused_zero_progress_video_like")
+            elif pseudo_task.status == "paused" and _is_video_like(pseudo_task, qb_info):
+                cleanup_type = "qb_and_db"
+                reasons.append("external_qb_paused_video_like")
+
+            if cleanup_type:
+                if _is_video_like(pseudo_task, qb_info):
+                    reasons.append("video_like")
+                unique_qb_hashes.add(torrent_hash)
+                candidates.append({
+                    "id": -1,
+                    "torrent_name": effective["torrent_name"],
+                    "torrent_hash": torrent_hash,
+                    "site": "qbittorrent",
+                    "status": effective["status"],
+                    "effective_status": effective["status"],
+                    "size": effective.get("size") or 0,
+                    "qb_state": effective.get("qb_state"),
+                    "progress": effective.get("progress"),
+                    "amount_left": effective.get("amount_left"),
+                    "cleanup_type": cleanup_type,
+                    "reasons": reasons,
+                    "external_qb": True,
+                })
+            else:
+                keep.append({
+                    "id": -1,
+                    "torrent_name": effective["torrent_name"],
+                    "torrent_hash": torrent_hash,
+                    "site": "qbittorrent",
+                    "status": effective["status"],
+                    "effective_status": effective["status"],
+                    "external_qb": True,
+                })
+    except Exception:
+        pass
+
     total_size = sum(float(c.get("size") or 0) for c in candidates)
     total_amount_left = sum(float(c.get("amount_left") or 0) for c in candidates)
 
@@ -195,7 +322,7 @@ def apply_cleanup(delete_files: bool = False, db: Session = Depends(get_db)):
     """
     preview = _build_cleanup_preview(db)
     candidates = preview["candidates"]
-    task_ids = [c["id"] for c in candidates]
+    task_ids = [c["id"] for c in candidates if c.get("id", -1) > 0]
     qb_hashes = sorted({
         (c.get("torrent_hash") or "").lower()
         for c in candidates
@@ -235,6 +362,77 @@ def apply_cleanup(delete_files: bool = False, db: Session = Depends(get_db)):
         "total_size": preview.get("total_size", 0),
         "total_amount_left": preview.get("total_amount_left", 0),
     }
+
+
+@router.post("/qb/{torrent_hash}/pause")
+def pause_qb_task(torrent_hash: str):
+    """Pause a qBittorrent task even when it has no DB row."""
+    if not qb_client.pause_torrent(torrent_hash):
+        raise HTTPException(status_code=500, detail="Failed to pause torrent")
+    return {"ok": True}
+
+
+@router.post("/qb/{torrent_hash}/resume")
+def resume_qb_task(torrent_hash: str):
+    """Resume a qBittorrent task even when it has no DB row."""
+    if not qb_client.resume_torrent(torrent_hash):
+        raise HTTPException(status_code=500, detail="Failed to resume torrent")
+    return {"ok": True}
+
+
+@router.delete("/qb/{torrent_hash}")
+def delete_qb_task(torrent_hash: str, delete_files: bool = False):
+    """Delete a qBittorrent task even when it has no DB row."""
+    if not qb_client.delete_torrent(torrent_hash, delete_files=delete_files):
+        raise HTTPException(status_code=500, detail="Failed to delete torrent")
+    return {"ok": True}
+
+
+@router.post("/qb/{torrent_hash}/import")
+def import_qb_task(torrent_hash: str, db: Session = Depends(get_db)):
+    """Create a DB DownloadTask row for an existing qBittorrent task."""
+    torrent_hash = torrent_hash.lower()
+    existing = db.query(DownloadTask).filter(DownloadTask.torrent_hash == torrent_hash).first()
+    if existing:
+        return {"ok": True, "task_id": existing.id, "message": "Already imported"}
+
+    info = qb_client.get_torrents_by_hash([torrent_hash]).get(torrent_hash)
+    if not info:
+        raise HTTPException(status_code=404, detail="Torrent not found in qBittorrent")
+
+    task = DownloadTask(
+        torrent_name=info.get("name") or torrent_hash,
+        torrent_hash=torrent_hash,
+        site="qbittorrent",
+        size=float(info.get("size") or 0),
+        status="paused" if info.get("qb_state") in {"stoppedDL", "stoppedUP", "pausedDL", "pausedUP"} else "downloading",
+        save_path=info.get("content_path") or info.get("save_path"),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {"ok": True, "task_id": task.id}
+
+
+@router.post("/qb/{torrent_hash}/organize")
+def organize_qb_task(torrent_hash: str):
+    """Run the organize/scrape pipeline for a completed qB task."""
+    from app.services.pipeline import _process_completed_torrent
+    torrent_hash = torrent_hash.lower()
+    info = qb_client.get_torrents_by_hash([torrent_hash]).get(torrent_hash)
+    if not info:
+        raise HTTPException(status_code=404, detail="Torrent not found in qBittorrent")
+    if (info.get("progress") or 0) < 1:
+        raise HTTPException(status_code=400, detail="Torrent is not completed yet")
+    content_path = info.get("content_path") or info.get("save_path")
+    if not content_path or not Path(content_path).exists():
+        raise HTTPException(status_code=400, detail="Torrent content path does not exist")
+    _process_completed_torrent({
+        "hash": torrent_hash,
+        "name": info.get("name") or torrent_hash,
+        "content_path": content_path,
+    })
+    return {"ok": True}
 
 
 @router.post("/{task_id}/pause")

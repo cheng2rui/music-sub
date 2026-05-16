@@ -79,6 +79,11 @@ export const applyTaskCleanup = (deleteFiles = false) => authFetch(`/api/tasks/c
 export const pauseTask = (id) => authFetch(`/api/tasks/${id}/pause`, { method: 'POST' }).then(r => r.json())
 export const resumeTask = (id) => authFetch(`/api/tasks/${id}/resume`, { method: 'POST' }).then(r => r.json())
 export const deleteTask = (id) => authFetch(`/api/tasks/${id}`, { method: 'DELETE' }).then(r => r.json())
+export const pauseQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/pause`, { method: 'POST' }).then(r => r.json())
+export const resumeQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/resume`, { method: 'POST' }).then(r => r.json())
+export const deleteQbTask = (hash, deleteFiles = false) => authFetch(`/api/tasks/qb/${hash}?delete_files=${deleteFiles ? 'true' : 'false'}`, { method: 'DELETE' }).then(r => r.json())
+export const importQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/import`, { method: 'POST' }).then(r => r.json())
+export const organizeQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/organize`, { method: 'POST' }).then(r => r.json())
 
 // ============ Library ============
 export const getLibraryStats = () => authFetch('/api/library/stats').then(r => r.json())

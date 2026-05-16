@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { getTasks, checkTasks, pauseTask, resumeTask, deleteTask, previewTaskCleanup, applyTaskCleanup } from '@/api/index.js'
+import { getTasks, checkTasks, pauseTask, resumeTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
@@ -53,13 +53,25 @@ async function handleCheck() {
 }
 
 async function runTaskAction(task, action) {
-  actingId.value = `${action}:${task.id}`
+  const key = task.external_qb ? task.torrent_hash : task.id
+  actingId.value = `${action}:${key}`
   try {
-    if (action === 'pause') await pauseTask(task.id)
-    if (action === 'resume') await resumeTask(task.id)
-    if (action === 'delete') {
-      if (!confirm(`删除任务记录？\n${task.torrent_name}\n\n不会删除已下载文件。`)) return
-      await deleteTask(task.id)
+    if (task.external_qb) {
+      if (action === 'pause') await pauseQbTask(task.torrent_hash)
+      if (action === 'resume') await resumeQbTask(task.torrent_hash)
+      if (action === 'import') await importQbTask(task.torrent_hash)
+      if (action === 'organize') await organizeQbTask(task.torrent_hash)
+      if (action === 'delete') {
+        if (!confirm(`删除 qB 任务？\n${task.torrent_name}\n\n默认不会删除已下载文件。`)) return
+        await deleteQbTask(task.torrent_hash, false)
+      }
+    } else {
+      if (action === 'pause') await pauseTask(task.id)
+      if (action === 'resume') await resumeTask(task.id)
+      if (action === 'delete') {
+        if (!confirm(`删除任务记录？\n${task.torrent_name}\n\n不会删除已下载文件。`)) return
+        await deleteTask(task.id)
+      }
     }
     await loadTasks()
     scheduleNextLoad()
@@ -124,6 +136,8 @@ function reasonText(reasons = []) {
     video_like: '疑似视频资源',
     paused_video_like: '已暂停且疑似视频',
     paused_zero_progress_video_like: '0% 暂停的视频类任务',
+    external_qb_paused_video_like: 'qB 未关联且疑似视频',
+    external_qb_paused_zero_progress_video_like: 'qB 未关联 0% 暂停的视频类任务',
   }
   return reasons.map(r => map[r] || r).join('、')
 }
@@ -168,12 +182,24 @@ function formatEta(seconds) {
   return `${Math.ceil(seconds / 3600)}h`
 }
 
+function isQbManaged(task) {
+  return task.torrent_hash && !task.torrent_hash.startsWith('online:') && !task.torrent_hash.startsWith('SIMULATED_')
+}
+
+function actionKey(task, action) {
+  return `${action}:${task.external_qb ? task.torrent_hash : task.id}`
+}
+
 function canPause(task) {
-  return task.torrent_hash && !task.torrent_hash.startsWith('online:') && !task.torrent_hash.startsWith('SIMULATED_') && !['paused', 'scraped', 'missing'].includes(task.status)
+  return isQbManaged(task) && !['paused', 'scraped', 'missing'].includes(task.status)
 }
 
 function canResume(task) {
-  return task.torrent_hash && !task.torrent_hash.startsWith('online:') && !task.torrent_hash.startsWith('SIMULATED_') && task.status === 'paused'
+  return isQbManaged(task) && task.status === 'paused'
+}
+
+function canOrganize(task) {
+  return task.external_qb && task.progress === 1
 }
 
 function handleVisibilityChange() {
@@ -270,8 +296,11 @@ onUnmounted(() => {
         </thead>
         <tbody>
           <tr v-for="task in tasks" :key="task.id">
-            <td class="name-cell" :title="task.torrent_name">{{ task.torrent_name }}</td>
-            <td class="text-dim">{{ task.site }}</td>
+            <td class="name-cell" :title="task.torrent_name">
+              <div>{{ task.torrent_name }}</div>
+              <div v-if="task.external_qb" class="external-qb-tag">qB 未关联 · {{ task.content_path || task.save_path || '' }}</div>
+            </td>
+            <td class="text-dim">{{ task.external_qb ? 'qB' : task.site }}</td>
             <td class="text-dim">{{ formatSize(task.size) }}</td>
             <td>
               <AppBadge :color="statusLabel(task.status).color">
@@ -298,20 +327,34 @@ onUnmounted(() => {
                   v-if="canPause(task)"
                   size="sm"
                   variant="ghost"
-                  :loading="actingId === `pause:${task.id}`"
+                  :loading="actingId === actionKey(task, 'pause')"
                   @click="runTaskAction(task, 'pause')"
                 >暂停</AppButton>
                 <AppButton
                   v-if="canResume(task)"
                   size="sm"
                   variant="success"
-                  :loading="actingId === `resume:${task.id}`"
+                  :loading="actingId === actionKey(task, 'resume')"
                   @click="runTaskAction(task, 'resume')"
                 >继续</AppButton>
                 <AppButton
+                  v-if="task.external_qb"
+                  size="sm"
+                  variant="ghost"
+                  :loading="actingId === actionKey(task, 'import')"
+                  @click="runTaskAction(task, 'import')"
+                >导入</AppButton>
+                <AppButton
+                  v-if="canOrganize(task)"
+                  size="sm"
+                  variant="success"
+                  :loading="actingId === actionKey(task, 'organize')"
+                  @click="runTaskAction(task, 'organize')"
+                >整理</AppButton>
+                <AppButton
                   size="sm"
                   variant="danger"
-                  :loading="actingId === `delete:${task.id}`"
+                  :loading="actingId === actionKey(task, 'delete')"
                   @click="runTaskAction(task, 'delete')"
                 >删除</AppButton>
               </div>
@@ -348,7 +391,8 @@ onUnmounted(() => {
 .tasks-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
 .tasks-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .tasks-table tr:hover td { background: var(--surface-hover); }
-.name-cell { font-weight: 500; max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.name-cell { font-weight: 500; max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.external-qb-tag { margin-top: 3px; font-size: 11px; color: var(--warning); overflow: hidden; text-overflow: ellipsis; }
 .progress-cell { min-width: 150px; }
 .progress-bar { width: 120px; height: 6px; background: var(--surface); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
 .progress-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }

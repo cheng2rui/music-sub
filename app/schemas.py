@@ -52,6 +52,11 @@ class DownloadTaskResponse(BaseModel):
     upload_speed: Optional[float] = None
     eta: Optional[int] = None
     amount_left: Optional[float] = None
+    external_qb: bool = False
+    content_path: Optional[str] = None
+    save_path: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[str] = None
 
     class Config:
         from_attributes = True
