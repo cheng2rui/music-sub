@@ -100,6 +100,10 @@ export const getAlbumTracks = (artist, album) =>
 export const getAlbumCover = (artist, album) =>
   `/api/library/album-cover?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`
 export const getFile = (id) => authFetch(`/api/library/file/${id}`).then(r => r.json())
+export const getStreamUrl = (id) => {
+  const token = localStorage.getItem('music_sub_token') || ''
+  return `/api/library/stream/${id}?token=${encodeURIComponent(token)}`
+}
 export const rescrapeLibrary = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/rescrape${qs ? '?' + qs : ''}`, { method: 'POST' }).then(r => r.json())

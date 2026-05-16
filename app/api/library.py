@@ -1,10 +1,11 @@
 """Library API routes."""
 import os
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
+from app.auth import verify_token
 from app.db import get_db
 from app.models import MusicFile
 
@@ -178,6 +179,30 @@ def library_stats(db: Session = Depends(get_db)):
         "artists": artists,
         "albums": albums,
     }
+
+
+@router.get("/stream/{file_id}")
+def stream_file(file_id: int, token: str = Query(""), db: Session = Depends(get_db)):
+    """Stream an audio file for in-browser playback.
+
+    The endpoint accepts a JWT token query parameter because native audio elements
+    cannot attach Authorization headers.
+    """
+    if not verify_token(token):
+        raise HTTPException(status_code=401, detail="登录已过期")
+    f = db.query(MusicFile).filter(MusicFile.id == file_id).first()
+    if not f or not f.file_path or not os.path.exists(f.file_path):
+        raise HTTPException(status_code=404, detail="Not found")
+    media_type = {
+        "mp3": "audio/mpeg",
+        "flac": "audio/flac",
+        "wav": "audio/wav",
+        "m4a": "audio/mp4",
+        "aac": "audio/aac",
+        "ogg": "audio/ogg",
+        "ape": "audio/ape",
+    }.get((f.format or Path(f.file_path).suffix.lstrip(".")).lower(), "application/octet-stream")
+    return FileResponse(f.file_path, media_type=media_type, filename=Path(f.file_path).name)
 
 
 @router.get("/file/{file_id}")

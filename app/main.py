@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Music Sub",
     description="音乐订阅下载管理系统 - PT站搜索订阅 + QB下载 + 硬链接整理 + 自动刮削",
-    version="0.5.9",
+    version="0.5.10",
     lifespan=lifespan,
 )
 
@@ -62,7 +62,7 @@ async def auth_middleware(request: Request, call_next):
     if path in PUBLIC_PATHS or not path.startswith("/api/"):
         return await call_next(request)
     # Allow cover image endpoints (used as CSS background-image, no auth header)
-    if path.startswith("/api/library/album-cover") or path.startswith("/api/library/cover/"):
+    if path.startswith("/api/library/album-cover") or path.startswith("/api/library/cover/") or path.startswith("/api/library/stream/"):
         return await call_next(request)
     # Allow health check
     if path == "/api/health":
@@ -94,7 +94,7 @@ app.include_router(online.router, prefix="/api/online", tags=["online"])
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.5.9"}
+    return {"status": "ok", "version": "0.5.10"}
 
 
 # Serve new Vue SPA (web/dist/) with fallback to legacy (web/index.html)
