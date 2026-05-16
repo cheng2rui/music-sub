@@ -159,6 +159,13 @@ class QBClient:
         except Exception as e:
             logger.error(f"Failed to add tag: {e}")
 
+    def remove_tag(self, torrent_hash: str, tag: str):
+        """Remove a tag from a torrent."""
+        try:
+            self.client.torrents_remove_tags(tags=tag, torrent_hashes=torrent_hash)
+        except Exception as e:
+            logger.error(f"Failed to remove tag: {e}")
+
     def pause_torrent(self, torrent_hash: str) -> bool:
         """Pause/stop a torrent by hash."""
         try:
@@ -180,6 +187,8 @@ class QBClient:
     def delete_torrent(self, torrent_hash: str, delete_files: bool = False) -> bool:
         """Delete a torrent from qBittorrent. Does not delete files by default."""
         try:
+            # Clear internal processed marker first so a future re-import can be processed again.
+            self.remove_tag(torrent_hash, "music-sub-done")
             self.client.torrents_delete(delete_files=delete_files, torrent_hashes=torrent_hash)
             return True
         except Exception as e:

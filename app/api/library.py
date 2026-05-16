@@ -54,7 +54,12 @@ def list_library(artist: str = "", album: str = "", limit: int = 50,
             "year": f.year,
             "format": f.format,
             "scraped": f.scraped,
-            "track_number": getattr(f, "track_number", None),
+            "track_number": f.track_number,
+            "disc_number": f.disc_number,
+            "duration": f.duration,
+            "bitrate": f.bitrate,
+            "sample_rate": f.sample_rate,
+            "channels": f.channels,
             "has_cover": bool(_album_cover_path(f.file_path)),
         }
         for f in files
@@ -62,7 +67,7 @@ def list_library(artist: str = "", album: str = "", limit: int = 50,
 
 
 @router.get("/albums")
-def list_albums(artist: str = "", q: str = "", limit: int = 200,
+def list_albums(artist: str = "", q: str = "", limit: int = 200, offset: int = 0,
                 db: Session = Depends(get_db)):
     """List unique albums grouped by (artist, album), with track counts."""
     album_group = func.coalesce(func.nullif(MusicFile.album, ""), UNKNOWN_ALBUM)
@@ -86,7 +91,9 @@ def list_albums(artist: str = "", q: str = "", limit: int = 200,
         query = query.filter(
             (MusicFile.album.ilike(f"%{q}%")) | (MusicFile.artist.ilike(f"%{q}%"))
         )
-    rows = query.order_by(func.max(MusicFile.created_at).desc()).limit(limit).all()
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    rows = query.order_by(func.max(MusicFile.created_at).desc()).offset(offset).limit(limit).all()
     result = []
     for r in rows:
         result.append({
@@ -109,7 +116,13 @@ def list_album_tracks(artist: str, album: str, db: Session = Depends(get_db)):
         query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
     else:
         query = query.filter(MusicFile.album == album)
-    files = query.order_by(MusicFile.id.asc()).all()
+    files = query.order_by(
+        MusicFile.disc_number.is_(None),
+        MusicFile.disc_number.asc(),
+        MusicFile.track_number.is_(None),
+        MusicFile.track_number.asc(),
+        MusicFile.id.asc(),
+    ).all()
     return [
         {
             "id": f.id,
@@ -117,6 +130,9 @@ def list_album_tracks(artist: str, album: str, db: Session = Depends(get_db)):
             "artist": f.artist,
             "album": _display_album(f.album),
             "year": f.year,
+            "track_number": f.track_number,
+            "disc_number": f.disc_number,
+            "duration": f.duration,
             "format": f.format,
             "scraped": f.scraped,
             "file_path": f.file_path,
@@ -223,26 +239,26 @@ def get_file_detail(file_id: int, db: Session = Depends(get_db)):
         "format": f.format,
         "scraped": f.scraped,
         "has_cover": bool(_album_cover_path(f.file_path)),
-        "bitrate": None,
-        "sample_rate": None,
-        "duration": None,
-        "channels": None,
+        "track_number": f.track_number,
+        "disc_number": f.disc_number,
+        "bitrate": f.bitrate,
+        "sample_rate": f.sample_rate,
+        "duration": f.duration,
+        "channels": f.channels,
         "lyrics": None,
     }
 
-    # Read audio metadata from actual file
+    # Fall back to reading audio metadata from disk for older DB rows.
     if f.file_path and os.path.exists(f.file_path):
-        try:
-            import mutagen
-            audio = mutagen.File(f.file_path)
-            if audio:
-                info = audio.info
-                result["bitrate"] = getattr(info, "bitrate", None)
-                result["sample_rate"] = getattr(info, "sample_rate", None)
-                result["duration"] = round(info.length, 1) if hasattr(info, "length") else None
-                result["channels"] = getattr(info, "channels", None)
-        except Exception:
-            pass
+        if not all(result.get(k) for k in ("duration", "bitrate", "sample_rate", "channels")):
+            try:
+                from app.scrapers.tagger import read_audio_metadata
+                audio_meta = read_audio_metadata(f.file_path)
+                for key, value in audio_meta.items():
+                    if result.get(key) is None and value is not None:
+                        result[key] = value
+            except Exception:
+                pass
 
         # Try to read lyrics from .lrc file
         lrc_path = Path(f.file_path).with_suffix(".lrc")
@@ -260,7 +276,7 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
                   db: Session = Depends(get_db)):
     """Re-scrape metadata for specified files or an entire album."""
     from app.services.pipeline import _scrape_file
-    from app.scrapers.tagger import tag_file, save_lyrics, save_cover
+    from app.scrapers.tagger import tag_file, save_lyrics, save_cover, read_audio_metadata
 
     # Get files to rescrape
     if file_ids:
@@ -295,6 +311,13 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
             f.title = meta.title
             f.year = meta.year
             f.genre = meta.genre
+            f.track_number = meta.track_number or None
+            f.disc_number = meta.disc_number or None
+            audio_meta = read_audio_metadata(f.file_path)
+            f.duration = audio_meta.get("duration")
+            f.bitrate = audio_meta.get("bitrate")
+            f.sample_rate = audio_meta.get("sample_rate")
+            f.channels = audio_meta.get("channels")
             f.scraped = True
             scraped_count += 1
 

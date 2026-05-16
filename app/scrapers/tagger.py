@@ -57,6 +57,26 @@ def _resize_cover(cover_data: bytes, max_size: int) -> bytes:
         return cover_data
 
 
+def read_audio_metadata(file_path: str) -> dict:
+    """Read stable technical metadata from an audio file for DB caching."""
+    try:
+        import mutagen
+        audio = mutagen.File(file_path)
+        if not audio or not getattr(audio, "info", None):
+            return {}
+        info = audio.info
+        duration = getattr(info, "length", None)
+        return {
+            "duration": round(float(duration), 1) if duration else None,
+            "bitrate": int(getattr(info, "bitrate", 0) or 0) or None,
+            "sample_rate": int(getattr(info, "sample_rate", 0) or 0) or None,
+            "channels": int(getattr(info, "channels", 0) or 0) or None,
+        }
+    except Exception as e:
+        logger.warning(f"Failed to read audio metadata {file_path}: {e}")
+        return {}
+
+
 def tag_file(file_path: str, meta: MusicMeta) -> bool:
     """Write metadata to an audio file.
 

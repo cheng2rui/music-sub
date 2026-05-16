@@ -65,6 +65,13 @@ def download(req: OnlineDownloadRequest):
             "hash": synthetic_hash,
             "name": title,
             "content_path": file_path,
+            "metadata": {
+                "source": source,
+                "song_id": song.get("song_id") or "",
+                "title": song.get("title") or title,
+                "artist": song.get("artist") or "",
+                "album": song.get("album") or "",
+            },
         })
 
     return {"ok": True, "file_path": file_path, "task_id": task_id, "organized": req.organize}

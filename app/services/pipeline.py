@@ -8,7 +8,7 @@ from app.db import SessionLocal
 from app.models import DownloadTask, MusicFile
 from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
-from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo
+from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo, read_audio_metadata
 from app.scrapers.base import MusicMeta
 from app.services.notify import notify_download_complete, notify_scrape_complete, notify_error
 
@@ -37,15 +37,16 @@ def _get_scraper_chain():
     return scrapers
 
 
-def _scrape_file(file_path: str) -> MusicMeta | None:
-    """Try to scrape metadata for a single file."""
+def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") -> MusicMeta | None:
+    """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
     filename = Path(file_path).stem
-    # Try to extract artist - title from filename
-    parts = filename.split(" - ", 1)
-    if len(parts) == 2:
-        artist_hint, title_hint = parts[0].strip(), parts[1].strip()
-    else:
-        artist_hint, title_hint = "", filename
+    if not title_hint:
+        # Try to extract artist - title from filename.
+        parts = filename.split(" - ", 1)
+        if len(parts) == 2:
+            artist_hint, title_hint = parts[0].strip(), parts[1].strip()
+        else:
+            artist_hint, title_hint = artist_hint or "", filename
 
     scrapers = _get_scraper_chain()
     for scraper in scrapers:
@@ -65,11 +66,27 @@ def _scrape_file(file_path: str) -> MusicMeta | None:
     return None
 
 
+def _meta_from_hint(hint: dict) -> MusicMeta | None:
+    """Build a fallback metadata object from trusted source/search result fields."""
+    title = (hint or {}).get("title") or ""
+    artist = (hint or {}).get("artist") or ""
+    if not title and not artist:
+        return None
+    return MusicMeta(
+        title=title,
+        artist=artist,
+        album=(hint or {}).get("album") or "",
+        song_id=str((hint or {}).get("song_id") or ""),
+        source=(hint or {}).get("source") or "online",
+    )
+
+
 def _process_completed_torrent(torrent: dict):
     """Process a single completed torrent: hardlink + scrape."""
     content_path = torrent.get("content_path", "")
     torrent_hash = torrent.get("hash", "")
     torrent_name = torrent.get("name", "")
+    metadata_hint = torrent.get("metadata") or {}
 
     if not content_path or not os.path.exists(content_path):
         logger.warning(f"Content path not found: {content_path}")
@@ -86,7 +103,11 @@ def _process_completed_torrent(torrent: dict):
         return
 
     meta_cache: dict[str, MusicMeta | None] = {}
-    first_meta = _scrape_file(source_audio_files[0])
+    first_meta = _scrape_file(
+        source_audio_files[0],
+        title_hint=metadata_hint.get("title") or "",
+        artist_hint=metadata_hint.get("artist") or "",
+    ) or _meta_from_hint(metadata_hint)
     meta_cache[os.path.basename(source_audio_files[0])] = first_meta
     organize_artist = (first_meta.album_artist or first_meta.artist) if first_meta else ""
     organize_album = first_meta.album if first_meta else ""
@@ -121,10 +142,20 @@ def _process_completed_torrent(torrent: dict):
 
             meta = meta_cache.get(os.path.basename(file_path))
             if os.path.basename(file_path) not in meta_cache:
-                meta = _scrape_file(file_path)
+                # For single-file online downloads, the source result has correct title/artist
+                # while the filename may be "title - artist", not "artist - title".
+                use_hint = metadata_hint if len(linked_files) == 1 else {}
+                meta = _scrape_file(
+                    file_path,
+                    title_hint=use_hint.get("title") or "",
+                    artist_hint=use_hint.get("artist") or "",
+                ) or _meta_from_hint(use_hint)
                 meta_cache[os.path.basename(file_path)] = meta
+            audio_meta = read_audio_metadata(file_path)
             if meta:
                 tag_file(file_path, meta)
+                # Re-read after tagging so duration/bitrate/sample-rate are cached with final file state.
+                audio_meta = {**audio_meta, **read_audio_metadata(file_path)}
                 if meta.lyrics:
                     save_lyrics(file_path, meta.lyrics)
                 if meta.cover_data and not album_cover_saved:
@@ -135,6 +166,7 @@ def _process_completed_torrent(torrent: dict):
                 nfo_tracks.append({
                     "track_number": meta.track_number,
                     "title": meta.title,
+                    "duration": audio_meta.get("duration"),
                 })
 
                 # Record in DB
@@ -147,6 +179,12 @@ def _process_completed_torrent(torrent: dict):
                     title=meta.title,
                     year=meta.year,
                     genre=meta.genre,
+                    track_number=meta.track_number or None,
+                    disc_number=meta.disc_number or None,
+                    duration=audio_meta.get("duration"),
+                    bitrate=audio_meta.get("bitrate"),
+                    sample_rate=audio_meta.get("sample_rate"),
+                    channels=audio_meta.get("channels"),
                     format=Path(file_path).suffix.lstrip("."),
                     scraped=True,
                 )
@@ -157,6 +195,10 @@ def _process_completed_torrent(torrent: dict):
                     task_id=task.id if task else None,
                     file_path=file_path,
                     link_path=file_path,
+                    duration=audio_meta.get("duration"),
+                    bitrate=audio_meta.get("bitrate"),
+                    sample_rate=audio_meta.get("sample_rate"),
+                    channels=audio_meta.get("channels"),
                     format=Path(file_path).suffix.lstrip("."),
                     scraped=False,
                 )

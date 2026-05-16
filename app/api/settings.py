@@ -8,6 +8,20 @@ import app.config as cfg_module
 
 router = APIRouter()
 
+MASK_SUFFIX = "••••••"
+QB_PASSWORD_MASK = MASK_SUFFIX
+
+
+def _mask_secret(value: str, prefix_len: int = 0) -> str:
+    if not value:
+        return ""
+    return f"{value[:prefix_len]}{MASK_SUFFIX}" if prefix_len else MASK_SUFFIX
+
+
+def _is_unchanged_mask(value: str, existing: str, prefix_len: int = 0) -> bool:
+    """Return True only for the exact mask this API generated for the existing secret."""
+    return bool(existing) and value == _mask_secret(existing, prefix_len)
+
 
 class SiteSettingInput(BaseModel):
     enabled: bool = False
@@ -93,15 +107,15 @@ def get_settings():
     # Mask sensitive fields
     for s in data.sites.values():
         if s.api_key:
-            s.api_key = s.api_key[:6] + "***"
+            s.api_key = _mask_secret(s.api_key, 6)
         if s.cookie:
-            s.cookie = s.cookie[:10] + "***"
+            s.cookie = _mask_secret(s.cookie, 10)
         if s.token:
-            s.token = s.token[:6] + "***"
+            s.token = _mask_secret(s.token, 6)
     if data.qbittorrent.password:
-        data.qbittorrent.password = "***"
+        data.qbittorrent.password = QB_PASSWORD_MASK
     if data.notify.telegram.bot_token:
-        data.notify.telegram.bot_token = data.notify.telegram.bot_token[:6] + "***"
+        data.notify.telegram.bot_token = _mask_secret(data.notify.telegram.bot_token, 6)
     return data
 
 
@@ -124,21 +138,21 @@ def save_settings(settings: AllSettings):
         site_dict = site_input.model_dump()
         existing = cfg_module.config.sites.get(name)
         if existing:
-            # Don't overwrite secrets if masked
-            if site_dict.get("api_key", "").endswith("***"):
+            # Don't overwrite secrets only when the submitted value is the exact mask we generated.
+            if _is_unchanged_mask(site_dict.get("api_key", ""), existing.api_key, 6):
                 site_dict["api_key"] = existing.api_key
-            if site_dict.get("cookie", "").endswith("***"):
+            if _is_unchanged_mask(site_dict.get("cookie", ""), existing.cookie, 10):
                 site_dict["cookie"] = existing.cookie
-            if site_dict.get("token", "").endswith("***"):
+            if _is_unchanged_mask(site_dict.get("token", ""), existing.token, 6):
                 site_dict["token"] = existing.token
         raw["sites"][name] = site_dict
 
-    # Preserve QB password if masked
-    if raw["qbittorrent"]["password"] == "***":
+    # Preserve QB password only if the exact generated mask was submitted.
+    if raw["qbittorrent"]["password"] == QB_PASSWORD_MASK and cfg_module.config.qbittorrent.password:
         raw["qbittorrent"]["password"] = cfg_module.config.qbittorrent.password
 
-    # Preserve telegram bot_token if masked
-    if raw["notify"]["telegram"]["bot_token"].endswith("***"):
+    # Preserve telegram bot_token only if the exact generated mask was submitted.
+    if _is_unchanged_mask(raw["notify"]["telegram"].get("bot_token", ""), cfg_module.config.notify.telegram.bot_token, 6):
         raw["notify"]["telegram"]["bot_token"] = cfg_module.config.notify.telegram.bot_token
 
     # Write YAML

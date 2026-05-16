@@ -12,6 +12,10 @@ const albums = ref([])
 const searchQ = ref('')
 const viewMode = ref('grid')
 const loading = ref(false)
+const loadingMore = ref(false)
+const albumLimit = 200
+const albumOffset = ref(0)
+const hasMoreAlbums = ref(false)
 
 const selectedAlbum = ref(null)
 const albumTracks = ref([])
@@ -31,15 +35,28 @@ async function loadStats() {
   } catch (e) { console.error(e) }
 }
 
-async function loadAlbums() {
-  loading.value = true
+async function loadAlbums(reset = true) {
+  if (reset) {
+    loading.value = true
+    albumOffset.value = 0
+  } else {
+    loadingMore.value = true
+  }
   try {
-    const params = { limit: 200 }
+    const params = { limit: albumLimit, offset: reset ? 0 : albumOffset.value }
     if (searchQ.value) params.q = searchQ.value
     const data = await getLibraryAlbums(params)
-    albums.value = Array.isArray(data) ? data : []
+    const rows = Array.isArray(data) ? data : []
+    albums.value = reset ? rows : albums.value.concat(rows)
+    albumOffset.value = albums.value.length
+    hasMoreAlbums.value = rows.length === albumLimit
   } catch (e) { console.error(e) }
-  finally { loading.value = false }
+  finally { loading.value = false; loadingMore.value = false }
+}
+
+async function loadMoreAlbums() {
+  if (!hasMoreAlbums.value || loadingMore.value) return
+  await loadAlbums(false)
 }
 
 async function openAlbum(artist, album) {
@@ -149,7 +166,7 @@ onMounted(() => { loadStats(); loadAlbums() })
 
     <!-- 工具栏 -->
     <div class="toolbar">
-      <input v-model="searchQ" placeholder="搜索专辑或艺术家..." class="search-input" @input="loadAlbums" />
+      <input v-model="searchQ" placeholder="搜索专辑或艺术家..." class="search-input" @input="loadAlbums(true)" />
       <div class="view-toggles">
         <button :class="['view-btn', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'">▦</button>
         <button :class="['view-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'">☰</button>
@@ -197,6 +214,12 @@ onMounted(() => { loadStats(); loadAlbums() })
           {{ item.scraped_count }}/{{ item.track_count }}
         </AppBadge>
       </div>
+    </div>
+
+    <div v-if="!loading && hasMoreAlbums" class="load-more-row">
+      <AppButton variant="ghost" size="sm" :loading="loadingMore" @click="loadMoreAlbums">
+        加载更多
+      </AppButton>
     </div>
 
     <!-- 专辑详情弹窗 -->
@@ -287,6 +310,7 @@ onMounted(() => { loadStats(); loadAlbums() })
 .view-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; padding: 6px 10px; border-radius: var(--radius-md); font-size: 14px; }
 .view-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 .loading-text { color: var(--text-dim); padding: 20px 0; }
+.load-more-row { display: flex; justify-content: center; padding: 8px 0 24px; }
 .album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
 .album-card { display: flex; flex-direction: column; gap: 8px; cursor: pointer; }
 .album-info { display: flex; flex-direction: column; gap: 2px; }
