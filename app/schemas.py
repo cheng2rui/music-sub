@@ -8,7 +8,15 @@ class SubscriptionCreate(BaseModel):
     keyword: str
     type: str = "artist"
     quality: str = "any"
-    sites: str = "all"
+    sites: str | list[str] = "all"
+
+
+class SubscriptionUpdate(BaseModel):
+    keyword: str | None = None
+    type: str | None = None
+    quality: str | None = None
+    sites: str | list[str] | None = None
+    enabled: bool | None = None
 
 
 class SubscriptionResponse(BaseModel):

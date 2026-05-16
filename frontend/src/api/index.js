@@ -46,6 +46,10 @@ export const addSub = (data) => authFetch('/api/subscriptions/', {
   method: 'POST',
   body: JSON.stringify(data)
 }).then(r => r.json())
+export const updateSub = (id, data) => authFetch(`/api/subscriptions/${id}`, {
+  method: 'PUT',
+  body: JSON.stringify(data)
+}).then(r => r.json())
 export const deleteSub = (id) => authFetch(`/api/subscriptions/${id}`, { method: 'DELETE' }).then(r => r.json())
 export const toggleSub = (id) => authFetch(`/api/subscriptions/${id}/toggle`, { method: 'PUT' }).then(r => r.json())
 

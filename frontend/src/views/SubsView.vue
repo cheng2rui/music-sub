@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSubs, addSub, deleteSub, toggleSub, parsePlaylistUrl } from '@/api/index.js'
+import { getSubs, addSub, updateSub, deleteSub, toggleSub, parsePlaylistUrl } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
@@ -11,6 +11,9 @@ const loading = ref(false)
 // New sub form
 const newSub = ref({ keyword: '', type: 'artist', quality: 'any', sites: [] })
 const adding = ref(false)
+const editingSub = ref(null)
+const editForm = ref({ keyword: '', type: 'artist', quality: 'any', sites: 'all', enabled: true })
+const savingEdit = ref(false)
 
 const typeOptions = [
   { label: '艺人', value: 'artist' },
@@ -63,7 +66,39 @@ async function handleToggle(id) {
   }
 }
 
+function openEdit(sub) {
+  editingSub.value = sub
+  editForm.value = {
+    keyword: sub.keyword,
+    type: sub.type,
+    quality: sub.quality,
+    sites: sub.sites || 'all',
+    enabled: sub.enabled,
+  }
+}
+
+async function handleSaveEdit() {
+  if (!editingSub.value || !editForm.value.keyword.trim()) return
+  savingEdit.value = true
+  try {
+    await updateSub(editingSub.value.id, {
+      keyword: editForm.value.keyword.trim(),
+      type: editForm.value.type,
+      quality: editForm.value.quality,
+      sites: editForm.value.sites || 'all',
+      enabled: editForm.value.enabled,
+    })
+    editingSub.value = null
+    await loadSubs()
+  } catch (e) {
+    alert(e.message || '保存失败')
+  } finally {
+    savingEdit.value = false
+  }
+}
+
 async function handleDelete(id) {
+  if (!confirm('确认删除这个订阅？')) return
   try {
     await deleteSub(id)
     await loadSubs()
@@ -171,6 +206,29 @@ onMounted(loadSubs)
       </div>
     </AppModal>
 
+    <!-- 编辑订阅弹窗 -->
+    <AppModal v-if="editingSub" title="编辑订阅" @close="editingSub = null">
+      <div class="edit-form">
+        <label>关键词</label>
+        <input v-model="editForm.keyword" placeholder="关键词" />
+        <label>类型</label>
+        <select v-model="editForm.type">
+          <option v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label>品质</label>
+        <select v-model="editForm.quality">
+          <option v-for="o in qualityOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label>站点</label>
+        <input v-model="editForm.sites" placeholder="all 或 mteam,opencd" />
+        <label class="checkbox-row"><input type="checkbox" v-model="editForm.enabled" /> 启用</label>
+        <div class="parse-actions">
+          <AppButton variant="primary" :loading="savingEdit" @click="handleSaveEdit">保存</AppButton>
+          <AppButton variant="ghost" @click="editingSub = null">取消</AppButton>
+        </div>
+      </div>
+    </AppModal>
+
     <!-- 订阅列表 -->
     <div class="subs-list">
       <div v-if="loading" class="loading-text">加载中...</div>
@@ -203,6 +261,7 @@ onMounted(loadSubs)
                   <button class="icon-btn" @click="handleToggle(sub.id)" :title="sub.enabled ? '停用' : '启用'">
                     {{ sub.enabled ? '⏸' : '▶' }}
                   </button>
+                  <button class="icon-btn" @click="openEdit(sub)" title="编辑">✏️</button>
                   <button class="icon-btn danger" @click="handleDelete(sub.id)" title="删除">🗑</button>
                 </div>
               </td>
@@ -238,6 +297,10 @@ onMounted(loadSubs)
 .icon-btn.danger:hover { color: var(--danger); }
 .form-hint { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
 .parse-result { display: flex; flex-direction: column; gap: 16px; min-width: 400px; }
+.edit-form { display: grid; grid-template-columns: 80px minmax(240px, 1fr); gap: 12px; align-items: center; min-width: 420px; }
+.edit-form label { color: var(--text-dim); font-size: 13px; }
+.checkbox-row { grid-column: 2; display: flex; align-items: center; gap: 8px; color: var(--text); }
+.edit-form .parse-actions { grid-column: 2; }
 .parse-meta { font-size: 13px; color: var(--text-dim); }
 .parse-songs { display: flex; flex-direction: column; gap: 4px; max-height: 350px; overflow-y: auto; }
 .parse-song-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); font-size: 13px; }
