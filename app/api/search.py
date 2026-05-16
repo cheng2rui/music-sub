@@ -2,6 +2,7 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas import SearchRequest, TorrentResult
 from app.services.searcher import search_sites, download_from_site
+from app.services.notify import notify_download_added
 from app.db import SessionLocal
 from app.models import DownloadTask
 
@@ -45,6 +46,7 @@ def download_torrent(site: str, torrent_id: str, title: str = ""):
         )
         db.add(task)
         db.commit()
+        notify_download_added(task.torrent_name, site)
         return {"ok": True, "hash": torrent_hash, "task_id": task.id}
     finally:
         db.close()

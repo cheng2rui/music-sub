@@ -143,7 +143,7 @@ scraper:
   overwrite_tag: false    # true 强制覆盖已有标签
 ```
 
-### 通知（待接入事件）
+### 通知
 
 ```yaml
 notify:
@@ -151,12 +151,13 @@ notify:
     enabled: false
     bot_token: "123456:ABC..."
     chat_id: "-100..."     # 群组用 -100 开头；私聊用 user id
+    on_download_added: false
     on_download_complete: true
     on_scrape_complete: true
     on_error: true
 ```
 
-> 当前可在 Web UI 设置页点 "📨 发送测试" 验证渠道，事件触发后的实际推送暂未接入。
+> 可在 Web UI 设置页点 "📨 发送测试" 验证渠道。启用后，开始下载、下载完成、刮削完成和错误告警会按开关推送。
 
 ## 🔌 API 端点
 
@@ -170,6 +171,8 @@ notify:
 | `POST /api/subscriptions/`          | 创建订阅                   |
 | `POST /api/search/`                 | 跨站搜索                   |
 | `POST /api/search/download`         | 下载指定种子               |
+| `POST /api/online/search`           | 在线音乐源搜索             |
+| `POST /api/online/download`         | 在线音乐直接下载并整理入库 |
 | `GET  /api/tasks/`                  | 下载任务列表               |
 | `POST /api/tasks/check`             | 手动触发完成检查           |
 | `GET  /api/library/stats`           | 库统计                     |
@@ -188,7 +191,7 @@ notify:
 - **存储**：SQLite + 硬链接文件系统
 - **下载器**：qbittorrent-api
 - **音频标签**：music_tag
-- **前端**：Vue 3（CDN）单文件 SPA
+- **前端**：Vite + Vue 3 SFC + Pinia
 - **部署**：Docker / docker-compose
 
 ## 📁 项目结构
@@ -198,6 +201,7 @@ app/
 ├── api/              # FastAPI 路由
 │   ├── discover.py
 │   ├── library.py
+│   ├── online.py
 │   ├── search.py
 │   ├── settings.py
 │   ├── subscriptions.py
@@ -213,7 +217,9 @@ app/
 ├── scheduler.py
 └── main.py
 config/               # config.yaml（gitignore）+ 模板
-web/index.html        # Vue3 SPA
+frontend/             # Vite + Vue3 前端源码
+web/dist/             # 前端构建产物
+web/index.html        # 旧版 fallback
 data/                 # SQLite（gitignore）
 ```
 
@@ -221,7 +227,7 @@ data/                 # SQLite（gitignore）
 
 ```bash
 # 本地构建并部署
-docker build -t music-sub:latest .
+docker build -t music-sub:0.5.1 -t music-sub:latest .
 docker compose up -d
 
 # 增量更新代码（不重 build）
@@ -237,11 +243,12 @@ docker logs -f music-sub
 - [x] 版本号统一 / NFO 输出 / 文件重命名
 - [x] 音乐库专辑卡片视图
 - [x] Telegram 通知渠道配置
-- [ ] Telegram 事件触发推送（下载/刮削/错误）
-- [ ] 订阅高级规则（FLAC only / 大小过滤）
+- [x] Telegram 事件触发推送（开始下载/下载完成/刮削完成/错误）
+- [x] 订阅基础质量规则（FLAC / MP3）
+- [x] 音乐库批量重新刮削
+- [x] 日志页面 / 运行仪表盘
+- [ ] 订阅高级规则（大小过滤 / 更严格匹配）
 - [ ] PT 站 cookie 过期检测
-- [ ] 音乐库批量重新刮削
-- [ ] 日志页面 / 运行仪表盘
 - [ ] 单元测试
 
 ## 📝 License

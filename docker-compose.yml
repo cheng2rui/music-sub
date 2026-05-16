@@ -1,7 +1,6 @@
-version: "3.8"
-
 services:
   music-sub:
+    image: music-sub:0.5.1
     build: .
     container_name: music-sub
     ports:

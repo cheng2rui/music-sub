@@ -8,7 +8,6 @@ from app.sites.opencd import OpenCDSite
 from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
 from app.services.subscription import get_all_subscriptions, update_last_search
-from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client
 from app.models import DownloadTask
 from app.db import SessionLocal
@@ -82,7 +81,6 @@ def download_from_site(site_name: str, torrent_id: str) -> Optional[str]:
     torrent_hash = qb_client.add_torrent(torrent_content)
     if torrent_hash:
         logger.info(f"Added torrent to QB: {torrent_hash}")
-        notify_download_added(torrent_id, site_name)
     return torrent_hash
 
 
@@ -121,12 +119,17 @@ def search_all_subscriptions():
             elif sub.quality == "mp3":
                 results = [r for r in results if "mp3" in r.title.lower() or "320" in r.title.lower()]
 
-            # Check for new results not already downloaded
+            # Check for results already downloaded/attempted globally. Subscription titles can
+            # overlap, and PT sites may rate-limit repeated .torrent downloads even if qB already
+            # has the task. Keep this global instead of per-subscription to avoid hammering sites.
             existing_names = {
                 t.torrent_name
-                for t in db.query(DownloadTask).filter(
-                    DownloadTask.subscription_id == sub.id
-                ).all()
+                for t in db.query(DownloadTask).all()
+            }
+            existing_active_hashes = {
+                t.hash.lower()
+                for t in qb_client.client.torrents_info(category=cfg_module.config.qbittorrent.category)
+                if getattr(t, "hash", None)
             }
 
             for torrent in results[:3]:  # Limit auto-downloads
@@ -136,16 +139,31 @@ def search_all_subscriptions():
                 # Auto-download
                 torrent_hash = download_from_site(torrent.site, torrent.torrent_id)
                 if torrent_hash:
+                    normalized_hash = torrent_hash.lower()
+                    existing_task = db.query(DownloadTask).filter(
+                        DownloadTask.torrent_hash == normalized_hash
+                    ).first()
+                    if existing_task:
+                        existing_names.add(torrent.title)
+                        logger.info(f"Already tracked by hash, skip task insert: {torrent.title} ({normalized_hash})")
+                        continue
+
+                    if normalized_hash in existing_active_hashes:
+                        logger.info(f"Already present in qBittorrent, skip duplicate task: {torrent.title} ({normalized_hash})")
+                        continue
+
                     task = DownloadTask(
                         subscription_id=sub.id,
                         torrent_name=torrent.title,
-                        torrent_hash=torrent_hash,
+                        torrent_hash=normalized_hash,
                         site=torrent.site,
                         size=torrent.size,
                         status="downloading",
                     )
                     db.add(task)
                     db.commit()
+                    existing_names.add(torrent.title)
+                    existing_active_hashes.add(normalized_hash)
                     logger.info(f"Auto-downloaded: {torrent.title}")
                     notify_download_added(torrent.title, torrent.site)
 

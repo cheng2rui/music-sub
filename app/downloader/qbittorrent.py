@@ -1,10 +1,61 @@
 """qBittorrent downloader integration."""
+import hashlib
 import logging
 from typing import Optional
 import qbittorrentapi
 from app.config import config
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_bencode(data: bytes, pos: int = 0):
+    """Decode enough bencode to validate .torrent files and locate the info dict."""
+    if pos >= len(data):
+        raise ValueError("unexpected end of data")
+    token = data[pos:pos + 1]
+    if token == b"i":
+        end = data.index(b"e", pos)
+        return int(data[pos + 1:end]), end + 1
+    if token == b"l":
+        pos += 1
+        items = []
+        while data[pos:pos + 1] != b"e":
+            item, pos = _decode_bencode(data, pos)
+            items.append(item)
+        return items, pos + 1
+    if token == b"d":
+        pos += 1
+        items = {}
+        while data[pos:pos + 1] != b"e":
+            key, pos = _decode_bencode(data, pos)
+            value_start = pos
+            value, pos = _decode_bencode(data, pos)
+            items[key] = (value, value_start, pos)
+        return items, pos + 1
+    if b"0" <= token <= b"9":
+        colon = data.index(b":", pos)
+        length = int(data[pos:colon])
+        start = colon + 1
+        end = start + length
+        if end > len(data):
+            raise ValueError("string extends past end of data")
+        return data[start:end], end
+    raise ValueError(f"invalid bencode token: {token!r}")
+
+
+def _torrent_info_hash(torrent_content: bytes) -> Optional[str]:
+    """Return BitTorrent v1 info hash for a .torrent payload, or None if invalid."""
+    try:
+        decoded, end = _decode_bencode(torrent_content)
+        if end != len(torrent_content) or not isinstance(decoded, dict):
+            return None
+        info_entry = decoded.get(b"info")
+        if not info_entry:
+            return None
+        _, info_start, info_end = info_entry
+        return hashlib.sha1(torrent_content[info_start:info_end]).hexdigest()
+    except Exception:
+        return None
 
 
 class QBClient:
@@ -42,8 +93,14 @@ class QBClient:
 
     def add_torrent(self, torrent_content: bytes, save_path: Optional[str] = None,
                     category: Optional[str] = None, tags: Optional[list[str]] = None) -> Optional[str]:
-        """Add torrent to qBittorrent. Returns torrent hash or None."""
+        """Add torrent to qBittorrent. Returns the torrent's own info hash or None."""
         cfg = config.qbittorrent
+        expected_hash = _torrent_info_hash(torrent_content)
+        if not expected_hash:
+            preview = torrent_content[:200].decode("utf-8", errors="replace") if torrent_content else ""
+            logger.error(f"Invalid torrent payload, refusing to add. Preview: {preview!r}")
+            return None
+
         try:
             result = self.client.torrents_add(
                 torrent_files=torrent_content,
@@ -57,19 +114,16 @@ class QBClient:
             if result not in (None, "", "Ok", "Ok."):
                 logger.warning(f"qBittorrent add_torrent returned: {result}")
 
-            torrents = self.client.torrents_info(
-                category=category or cfg.category,
-                sort="added_on",
-                reverse=True,
-                limit=5,
-            )
-            if not torrents:
-                torrents = self.client.torrents_info(sort="added_on", reverse=True, limit=5)
-            if torrents:
-                return torrents[0].hash
-            return None
+            # Do not infer the hash from "latest torrent"; concurrent or duplicate adds can make
+            # that point at a different task. The .torrent info hash is the canonical identifier.
+            torrent = self.client.torrents_info(torrent_hashes=expected_hash)
+            if torrent:
+                return expected_hash
+
+            logger.warning(f"Torrent add accepted but hash not visible in qBittorrent yet: {expected_hash}")
+            return expected_hash
         except Exception as e:
-            logger.error(f"Failed to add torrent: {e}")
+            logger.error(f"Failed to add torrent {expected_hash}: {e}")
             return None
 
     def get_completed(self, category: Optional[str] = None, tag: Optional[str] = None) -> list[dict]:
