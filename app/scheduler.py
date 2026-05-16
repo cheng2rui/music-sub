@@ -1,14 +1,36 @@
 """APScheduler setup."""
+import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 import app.config as cfg_module
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
 
+JOB_HISTORY_PATH = Path("data/job_history.json")
+
+
+def _load_job_history() -> dict[str, dict]:
+    try:
+        if JOB_HISTORY_PATH.exists():
+            return json.loads(JOB_HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"Failed to load job history: {e}")
+    return {}
+
+
 # Track last run results
-_job_history: dict[str, dict] = {}
+_job_history: dict[str, dict] = _load_job_history()
+
+
+def _save_job_history():
+    try:
+        JOB_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        JOB_HISTORY_PATH.write_text(json.dumps(_job_history, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Failed to save job history: {e}")
 
 
 def _record_run(job_id: str, success: bool, message: str = ""):
@@ -18,6 +40,7 @@ def _record_run(job_id: str, success: bool, message: str = ""):
         "success": success,
         "message": message,
     }
+    _save_job_history()
 
 
 def _search_subscriptions():
@@ -82,20 +105,20 @@ def _cleanup_scan():
         db.close()
 
 
-def start_scheduler():
-    """Start the scheduler with configured intervals."""
+def apply_scheduler_config():
+    """Apply current scheduler config to APScheduler jobs without restarting the app."""
     config = cfg_module.config
     scheduler.add_job(
         _search_subscriptions,
         "interval",
-        minutes=config.scheduler.search_interval_minutes,
+        minutes=max(1, config.scheduler.search_interval_minutes),
         id="search_subscriptions",
         replace_existing=True,
     )
     scheduler.add_job(
         _check_downloads,
         "interval",
-        minutes=config.scheduler.check_complete_interval_minutes,
+        minutes=max(1, config.scheduler.check_complete_interval_minutes),
         id="check_downloads",
         replace_existing=True,
     )
@@ -103,11 +126,22 @@ def start_scheduler():
         scheduler.add_job(
             _cleanup_scan,
             "interval",
-            hours=config.scheduler.cleanup_scan_interval_hours,
+            hours=max(1, config.scheduler.cleanup_scan_interval_hours),
             id="cleanup_scan",
             replace_existing=True,
         )
-    scheduler.start()
+    else:
+        job = scheduler.get_job("cleanup_scan")
+        if job:
+            scheduler.remove_job("cleanup_scan")
+    logger.info("Scheduler config applied")
+
+
+def start_scheduler():
+    """Start the scheduler with configured intervals."""
+    apply_scheduler_config()
+    if not scheduler.running:
+        scheduler.start()
     logger.info("Scheduler started")
 
 

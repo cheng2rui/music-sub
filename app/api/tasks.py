@@ -145,8 +145,18 @@ def list_tasks(status: str = "", db: Session = Depends(get_db)):
             info = qb_client.get_torrents_by_hash([torrent_hash]).get(torrent_hash)
             if info:
                 result.append(_qb_info_to_response(torrent_hash, info))
-    except Exception:
-        pass
+    except Exception as e:
+        result.append({
+            "id": -999,
+            "torrent_name": f"qB 状态读取失败：{str(e)[:120]}",
+            "torrent_hash": "",
+            "site": "system",
+            "status": "failed",
+            "size": 0,
+            "created_at": datetime.datetime.utcnow(),
+            "completed_at": None,
+            "external_qb": True,
+        })
 
     if status:
         result = [t for t in result if t.get("status") == status]
@@ -170,6 +180,7 @@ def _build_cleanup_preview(db: Session) -> dict:
 
     candidates = []
     keep = []
+    warnings = []
     unique_qb_hashes: set[str] = set()
 
     for task in tasks:
@@ -285,8 +296,8 @@ def _build_cleanup_preview(db: Session) -> dict:
                     "effective_status": effective["status"],
                     "external_qb": True,
                 })
-    except Exception:
-        pass
+    except Exception as e:
+        warnings.append(f"qB 状态读取失败：{str(e)[:200]}")
 
     total_size = sum(float(c.get("size") or 0) for c in candidates)
     total_amount_left = sum(float(c.get("amount_left") or 0) for c in candidates)
@@ -303,6 +314,7 @@ def _build_cleanup_preview(db: Session) -> dict:
         "total_amount_left": total_amount_left,
         "delete_files_supported": True,
         "delete_files_default": False,
+        "warnings": warnings,
         "candidates": candidates,
         "keep": keep,
     }

@@ -21,7 +21,7 @@ const hasActiveTasks = computed(() => tasks.value.some(t => ['downloading', 'org
 
 function scheduleNextLoad() {
   if (timer) clearTimeout(timer)
-  const delay = document.hidden ? 120000 : (hasActiveTasks.value ? 5000 : 30000)
+  const delay = document.hidden ? 120000 : (hasActiveTasks.value ? 5000 : 60000)
   timer = setTimeout(async () => {
     await loadTasks()
     scheduleNextLoad()
@@ -249,6 +249,9 @@ onUnmounted(() => {
       <div v-if="cleanupResult" class="success-text">
         已清理 {{ cleanupResult.tasks_deleted }} 条任务，删除 music_files {{ cleanupResult.music_files_deleted }} 条；DB 备份：{{ cleanupResult.backup_path || '-' }}
       </div>
+      <div v-if="cleanupPreview.warnings?.length" class="warning-text">
+        <div v-for="w in cleanupPreview.warnings" :key="w">{{ w }}</div>
+      </div>
       <template v-if="cleanupPreview.candidates.length">
         <div class="cleanup-list">
           <div v-for="item in cleanupPreview.candidates" :key="item.id" class="cleanup-item">
@@ -387,6 +390,7 @@ onUnmounted(() => {
 .empty-text { color: var(--text-dim); padding: 20px 0; }
 .error-text { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: var(--radius-md); padding: 10px 12px; }
 .success-text { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); border-radius: var(--radius-md); padding: 10px 12px; margin: 12px 0; }
+.warning-text { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); border-radius: var(--radius-md); padding: 10px 12px; margin: 12px 0; font-size: 13px; }
 .cleanup-summary { display: flex; flex-direction: column; gap: 6px; color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
 .cleanup-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
 .cleanup-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); }

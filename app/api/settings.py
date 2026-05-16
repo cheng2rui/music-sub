@@ -159,9 +159,11 @@ def save_settings(settings: AllSettings):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
 
-    # Reload config
+    # Reload config and apply runtime scheduler changes immediately.
     new_config = load_config(CONFIG_PATH)
     cfg_module.config = new_config
+    from app.scheduler import apply_scheduler_config
+    apply_scheduler_config()
 
     return {"ok": True, "message": "Settings saved and reloaded"}
 
