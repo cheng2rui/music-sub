@@ -44,6 +44,9 @@ class DownloadTaskResponse(BaseModel):
     size: float
     created_at: datetime
     completed_at: Optional[datetime] = None
+    torrent_hash: Optional[str] = None
+    qb_state: Optional[str] = None
+    progress: Optional[float] = None
 
     class Config:
         from_attributes = True

@@ -159,6 +159,54 @@ class QBClient:
         except Exception as e:
             logger.error(f"Failed to add tag: {e}")
 
+    def pause_torrent(self, torrent_hash: str) -> bool:
+        """Pause/stop a torrent by hash."""
+        try:
+            self.client.torrents_pause(torrent_hashes=torrent_hash)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to pause torrent {torrent_hash}: {e}")
+            return False
+
+    def resume_torrent(self, torrent_hash: str) -> bool:
+        """Resume/start a torrent by hash."""
+        try:
+            self.client.torrents_resume(torrent_hashes=torrent_hash)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to resume torrent {torrent_hash}: {e}")
+            return False
+
+    def delete_torrent(self, torrent_hash: str, delete_files: bool = False) -> bool:
+        """Delete a torrent from qBittorrent. Does not delete files by default."""
+        try:
+            self.client.torrents_delete(delete_files=delete_files, torrent_hashes=torrent_hash)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete torrent {torrent_hash}: {e}")
+            return False
+
+    def get_torrents_by_hash(self, hashes: list[str]) -> dict[str, dict]:
+        """Return qBittorrent state keyed by lowercase hash."""
+        hashes = [h.lower() for h in hashes if h]
+        if not hashes:
+            return {}
+        try:
+            torrents = self.client.torrents_info(torrent_hashes="|".join(hashes))
+            return {
+                t.hash.lower(): {
+                    "qb_state": t.state,
+                    "progress": float(t.progress or 0),
+                    "save_path": t.save_path,
+                    "content_path": t.content_path,
+                    "name": t.name,
+                }
+                for t in torrents
+            }
+        except Exception as e:
+            logger.error(f"Failed to get torrent states: {e}")
+            return {}
+
     def get_torrent_files(self, torrent_hash: str) -> list[dict]:
         """Get files in a torrent."""
         try:
