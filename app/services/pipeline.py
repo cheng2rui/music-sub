@@ -81,6 +81,34 @@ def _meta_from_hint(hint: dict) -> MusicMeta | None:
     )
 
 
+def _upsert_music_file(db, *, task_id: int | None, file_path: str, link_path: str | None, scraped: bool, meta: MusicMeta | None, audio_meta: dict):
+    """Create or update a music_files row keyed by file_path to keep retries idempotent."""
+    music_file = db.query(MusicFile).filter(MusicFile.file_path == file_path).first()
+    if not music_file:
+        music_file = MusicFile(file_path=file_path)
+        db.add(music_file)
+
+    music_file.task_id = task_id
+    music_file.link_path = link_path or file_path
+    music_file.format = Path(file_path).suffix.lstrip(".")
+    music_file.scraped = scraped
+    music_file.duration = audio_meta.get("duration")
+    music_file.bitrate = audio_meta.get("bitrate")
+    music_file.sample_rate = audio_meta.get("sample_rate")
+    music_file.channels = audio_meta.get("channels")
+
+    if meta:
+        music_file.artist = meta.artist
+        music_file.album = meta.album
+        music_file.title = meta.title
+        music_file.year = meta.year
+        music_file.genre = meta.genre
+        music_file.track_number = meta.track_number or None
+        music_file.disc_number = meta.disc_number or None
+
+    return music_file
+
+
 def _mark_task_failed(torrent_hash: str, error: str):
     """Mark a tracked task failed without tagging qB as processed."""
     if not torrent_hash:
@@ -186,40 +214,25 @@ def _process_completed_torrent(torrent: dict):
                     "duration": audio_meta.get("duration"),
                 })
 
-                # Record in DB
-                music_file = MusicFile(
+                _upsert_music_file(
+                    db,
                     task_id=task.id if task else None,
                     file_path=file_path,
                     link_path=file_path,
-                    artist=meta.artist,
-                    album=meta.album,
-                    title=meta.title,
-                    year=meta.year,
-                    genre=meta.genre,
-                    track_number=meta.track_number or None,
-                    disc_number=meta.disc_number or None,
-                    duration=audio_meta.get("duration"),
-                    bitrate=audio_meta.get("bitrate"),
-                    sample_rate=audio_meta.get("sample_rate"),
-                    channels=audio_meta.get("channels"),
-                    format=Path(file_path).suffix.lstrip("."),
                     scraped=True,
+                    meta=meta,
+                    audio_meta=audio_meta,
                 )
-                db.add(music_file)
             else:
-                # Record without scraping
-                music_file = MusicFile(
+                _upsert_music_file(
+                    db,
                     task_id=task.id if task else None,
                     file_path=file_path,
                     link_path=file_path,
-                    duration=audio_meta.get("duration"),
-                    bitrate=audio_meta.get("bitrate"),
-                    sample_rate=audio_meta.get("sample_rate"),
-                    channels=audio_meta.get("channels"),
-                    format=Path(file_path).suffix.lstrip("."),
                     scraped=False,
+                    meta=None,
+                    audio_meta=audio_meta,
                 )
-                db.add(music_file)
 
         # Write album NFO if we have any scraped meta
         if album_meta_for_nfo and linked_files:

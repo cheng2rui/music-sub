@@ -21,6 +21,19 @@ def _ensure_column(table: str, column: str, ddl: str):
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
 
 
+def _dedupe_music_files():
+    """Remove duplicate music_files rows for the same file_path, keeping the newest row."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            DELETE FROM music_files
+            WHERE id NOT IN (
+                SELECT MAX(id)
+                FROM music_files
+                GROUP BY file_path
+            )
+        """))
+
+
 def _run_lightweight_migrations():
     """Apply additive SQLite migrations for deployments without Alembic."""
     if engine.dialect.name != "sqlite":
@@ -32,6 +45,7 @@ def _run_lightweight_migrations():
         "channels": "INTEGER",
     }.items():
         _ensure_column("music_files", column, ddl)
+    _dedupe_music_files()
 
 
 def init_db():
