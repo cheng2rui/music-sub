@@ -6,7 +6,10 @@ from app.sites.base import BaseSite, TorrentInfo
 
 logger = logging.getLogger(__name__)
 
-MUSIC_CATEGORIES = ["406", "408", "409"]
+# M-Team web route https://kp.m-team.cc/browse/music?keyword= maps to API mode="music".
+# Do not hard-code category IDs here: M-Team adds/changes music subcategories (e.g. new
+# categories like 434), and an old fixed category list makes valid music releases disappear.
+MUSIC_BROWSE_MODE = "music"
 
 
 class MTeamSite(BaseSite):
@@ -41,7 +44,7 @@ class MTeamSite(BaseSite):
         url = f"{self._api_base}/api/torrent/search"
         payload = {
             "keyword": keyword,
-            "categories": MUSIC_CATEGORIES,
+            "mode": MUSIC_BROWSE_MODE,
             "pageNumber": 1,
             "pageSize": 50,
             "visible": 1,
