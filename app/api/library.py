@@ -282,12 +282,12 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
     if file_ids:
         files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
     elif album_artist and album_name:
-        files = (
-            db.query(MusicFile)
-            .filter(MusicFile.artist == album_artist)
-            .filter(MusicFile.album == album_name)
-            .all()
-        )
+        query = db.query(MusicFile).filter(MusicFile.artist == album_artist)
+        if album_name == UNKNOWN_ALBUM:
+            query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
+        else:
+            query = query.filter(MusicFile.album == album_name)
+        files = query.all()
     else:
         # Rescrape all unscraped
         files = db.query(MusicFile).filter(MusicFile.scraped == False).limit(50).all()

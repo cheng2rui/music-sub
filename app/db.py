@@ -41,6 +41,8 @@ def _run_lightweight_migrations():
     for column, ddl in {
         "track_number": "INTEGER",
         "disc_number": "INTEGER",
+        "duration": "FLOAT",
+        "bitrate": "INTEGER",
         "sample_rate": "INTEGER",
         "channels": "INTEGER",
     }.items():

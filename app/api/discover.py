@@ -2,7 +2,7 @@
 import logging
 import random
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ def get_playlists():
 
 
 @router.get("/playlist/{playlist_id}")
-def get_playlist_detail(playlist_id: str):
+def get_playlist_detail(playlist_id: str, limit: int = Query(30, ge=1, le=200)):
     """Get playlist detail with song list."""
     # QQ Music playlist detail
     try:
@@ -134,7 +134,7 @@ def get_playlist_detail(playlist_id: str):
         resp = _session.get(
             "https://u.y.qq.com/cgi-bin/musicu.fcg",
             params={
-                "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(playlist_id), "onlysonglist": 0, "song_num": 30, "song_begin": 0}}})
+                "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(playlist_id), "onlysonglist": 0, "song_num": limit, "song_begin": 0}}})
             },
             timeout=10,
         )
@@ -176,7 +176,7 @@ def get_playlist_detail(playlist_id: str):
         result = data.get("result", {})
         tracks = result.get("tracks", [])
         results = []
-        for t in tracks[:30]:
+        for t in tracks[:limit]:
             artists = t.get("artists", [])
             artist = "/".join(a.get("name", "") for a in artists) if artists else ""
             album = t.get("album", {})
