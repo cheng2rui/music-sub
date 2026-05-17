@@ -215,6 +215,12 @@ function selectTool(tool) {
   deleteIds.value = new Set()
 }
 
+watch(() => [tools.value.length, props.context?.preferred_tool], ([len, preferred]) => {
+  if (!props.open || !len || !preferred || activeTool.value) return
+  const tool = tools.value.find(t => t.id === preferred)
+  if (tool) selectTool(tool)
+})
+
 function handleClose() {
   emit('close')
 }

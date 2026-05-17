@@ -222,7 +222,7 @@ def _is_unknown_artist(artist: str | None) -> bool:
     return a in {"", "unknown artist", "未知艺人", "unknown", "various artists"}
 
 
-_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped")
+_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates")
 
 
 @router.get("/health")
@@ -232,6 +232,17 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
     limit = max(1, min(limit, 1000))
     buckets: dict[str, dict[tuple[str, str], dict]] = {k: {} for k in _HEALTH_KINDS}
     totals = {k: 0 for k in _HEALTH_KINDS}
+
+    def _has_cue(f: MusicFile) -> bool:
+        if not f.file_path:
+            return False
+        p = Path(f.file_path)
+        if p.with_suffix(".cue").exists():
+            return True
+        try:
+            return len(list(p.parent.glob("*.cue"))) == 1
+        except Exception:
+            return False
 
     def _add(bucket_key: str, f: MusicFile):
         artist = (f.artist or "").strip() or UNKNOWN_ARTIST
@@ -261,6 +272,8 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
             _add("unknown_artist", f)
         if not f.scraped:
             _add("unscraped", f)
+        if _has_cue(f):
+            _add("cue_candidates", f)
 
     def _serialize(bucket_key: str):
         items = list(buckets[bucket_key].values())

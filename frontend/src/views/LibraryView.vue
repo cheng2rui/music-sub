@@ -47,17 +47,18 @@ function openToolbox(ctx = {}) {
 const healthLoading = ref(false)
 const healthRescraping = ref('')
 const healthKind = ref('missing_cover')
-const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0 })
+const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0, cue_candidates: 0 })
 const healthItems = ref([])
 const healthKinds = [
   { id: 'missing_cover', label: '缺封面' },
   { id: 'missing_lyrics', label: '缺歌词' },
   { id: 'missing_duration', label: '缺时长' },
   { id: 'unknown_artist', label: '艺人异常' },
-  { id: 'unscraped', label: '未刮削' }
+  { id: 'unscraped', label: '未刮削' },
+  { id: 'cue_candidates', label: 'CUE整轨' }
 ]
 const healthLabels = Object.fromEntries(healthKinds.map(k => [k.id, k.label]))
-const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped']
+const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped', 'cue_candidates']
 
 async function openHealthModal(kind = healthKind.value) {
   showHealthModal.value = true
@@ -112,6 +113,10 @@ async function pollBatchJob(jobId) {
 
 async function batchRescrapeCurrentKind() {
   if (!healthItems.value.length) return
+  if (healthKind.value === 'cue_candidates') {
+    openToolbox({ file_ids: healthItems.value.map(it => it.sample_track_id).filter(Boolean), preferred_tool: 'cue_candidates' })
+    return
+  }
   batchBusy.value = true
   batchJob.value = null
   if (batchPollTimer) { clearTimeout(batchPollTimer); batchPollTimer = null }
@@ -376,7 +381,6 @@ onMounted(() => { loadStats(); loadAlbums() })
         >
           {{ healthLabels[key] }} <strong>{{ scanHealthValue(key) }}</strong>
         </button>
-        <span class="scan-health-chip" :class="{ warn: scanJob.summary.health.cue_candidates > 0 }">CUE候选 <strong>{{ scanJob.summary.health.cue_candidates || 0 }}</strong></span>
         <span class="scan-health-chip" :class="{ warn: scanJob.summary.health.missing_files > 0 }">文件缺失 <strong>{{ scanJob.summary.health.missing_files || 0 }}</strong></span>
       </div>
       <div v-if="hasScanHealthReport()" class="scan-next-actions">
@@ -536,7 +540,7 @@ onMounted(() => { loadStats(); loadAlbums() })
             :disabled="!healthItems.length"
             :loading="batchBusy"
             @click="batchRescrapeCurrentKind"
-          >批量重刮削当前 {{ healthItems.length }} 项</AppButton>
+          >{{ healthKind === 'cue_candidates' ? '打开工具箱批量拆分' : `批量重刮削当前 ${healthItems.length} 项` }}</AppButton>
         </div>
         <div v-if="batchJob" class="job-progress">
           <div class="job-progress-head">
@@ -574,8 +578,8 @@ onMounted(() => { loadStats(); loadAlbums() })
                 variant="primary"
                 size="sm"
                 :loading="healthRescraping === `${item.artist}::${item.album}`"
-                @click="rescrapeHealthAlbum(item)"
-              >重刮削</AppButton>
+                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : rescrapeHealthAlbum(item)"
+              >{{ healthKind === 'cue_candidates' ? '拆分' : '重刮削' }}</AppButton>
             </div>
           </div>
         </div>

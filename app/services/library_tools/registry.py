@@ -21,6 +21,7 @@ from app.services.library_tools import (
     split_audio as split_audio_mod,
     zh_convert as zh_convert_mod,
     fix_garble as fix_garble_mod,
+    cue_candidates as cue_candidates_mod,
 )
 from app.services.scrape_jobs import runner as job_runner, JobStep, mark_step
 
@@ -81,6 +82,12 @@ _TOOLS: dict[str, dict[str, Any]] = {
         "description": "检测 GBK/UTF-8 被 latin-1 误读产生的乱码，尝试还原。",
         "preview": fix_garble_mod.preview,
         "apply": fix_garble_mod.apply,
+    },
+    "cue_candidates": {
+        "label": "CUE整轨候选",
+        "description": "查找带 .cue 的整轨音频，并批量拆成分轨。",
+        "preview": cue_candidates_mod.preview,
+        "apply": cue_candidates_mod.apply,
     },
 }
 
