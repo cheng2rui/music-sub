@@ -2,6 +2,7 @@
 import os
 import datetime
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from app.config import config
 from app.db import SessionLocal
@@ -41,6 +42,28 @@ def _get_scraper_chain():
     return scrapers
 
 
+_SOURCE_PRIORITY = {
+    "qqmusic": 5,
+    "kugou": 4,
+    "netease": 3,
+    "migu": 2,
+    "kuwo": 1,
+    "musicbrainz": 0,
+}
+
+
+def _source_priority(source: str) -> int:
+    return _SOURCE_PRIORITY.get(source, -1)
+
+
+def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str) -> list:
+    try:
+        return scraper.search(title_hint, artist_hint) or []
+    except Exception as e:
+        logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")
+        return []
+
+
 def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") -> MusicMeta | None:
     """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
     filename = Path(file_path).stem
@@ -65,19 +88,25 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") ->
     seen_keys: set[tuple] = set()
 
     def _collect(t_hint: str, a_hint: str):
-        for scraper in scrapers:
-            scraper_by_name[scraper.name] = scraper
-            try:
-                results = scraper.search(t_hint, a_hint)
-            except Exception as e:
-                logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")
-                continue
-            for meta in results:
-                key = (meta.source, getattr(meta, "song_id", "") or "", meta.title, meta.artist, meta.album)
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                scored_candidates.append(score_meta(meta, title_hint, artist_hint))
+        if not scrapers:
+            return
+        # 并行调所有 scraper，缩短单次搜索延迟
+        max_workers = max(1, min(len(scrapers), 6))
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="scrape") as ex:
+            futures = {
+                ex.submit(_safe_search, scraper, t_hint, a_hint, filename): scraper
+                for scraper in scrapers
+            }
+            for fut in as_completed(futures):
+                scraper = futures[fut]
+                scraper_by_name[scraper.name] = scraper
+                results = fut.result() or []
+                for meta in results:
+                    key = (meta.source, getattr(meta, "song_id", "") or "", meta.title, meta.artist, meta.album)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    scored_candidates.append(score_meta(meta, title_hint, artist_hint))
 
     _collect(title_hint, artist_hint)
 
@@ -94,7 +123,7 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") ->
             if scored_candidates and max(c.score for c in scored_candidates) >= threshold:
                 break
 
-    scored_candidates.sort(key=lambda item: item.score, reverse=True)
+    scored_candidates.sort(key=lambda item: (item.score, _source_priority(item.meta.source)), reverse=True)
     if scored_candidates:
         preview = "; ".join(
             f"{item.meta.source}:{item.meta.title}/{item.meta.artist}/{item.meta.album}={item.score:.2f}"
