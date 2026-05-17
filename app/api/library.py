@@ -1,5 +1,6 @@
 """Library API routes."""
 import os
+import subprocess
 from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -299,6 +300,26 @@ def library_stats(db: Session = Depends(get_db)):
     }
 
 
+def _probe_audio_codec(file_path: Path) -> str:
+    """Return audio codec name via ffprobe, or empty string if unavailable."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1",
+                str(file_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return (result.stdout or "").strip().splitlines()[0].lower()
+    except Exception:
+        return ""
+
+
 @router.get("/stream/{file_id}")
 def stream_file(request: Request, file_id: int, token: str = Query(""), db: Session = Depends(get_db)):
     """Stream an audio file with HTTP Range support for seekable playback.
@@ -314,8 +335,13 @@ def stream_file(request: Request, file_id: int, token: str = Query(""), db: Sess
         raise HTTPException(status_code=404, detail="Not found")
 
     file_path = Path(f.file_path)
-    file_size = file_path.stat().st_size
     ext = (f.format or file_path.suffix.lstrip(".")).lower()
+    # ALAC inside .m4a is not supported by Chrome/Edge/Firefox. Safari may play it,
+    # but a universal player should fall back to MP3 transcoding.
+    if ext in {"m4a", "mp4"} and _probe_audio_codec(file_path) == "alac":
+        return stream_transcoded_audio(file_id=file_id, token=token, db=db)
+
+    file_size = file_path.stat().st_size
     media_type = {
         "mp3": "audio/mpeg",
         "flac": "audio/flac",
@@ -382,6 +408,54 @@ def stream_file(request: Request, file_id: int, token: str = Query(""), db: Sess
         iter_file(0, file_size - 1),
         media_type=media_type,
         headers={**common_headers, "Content-Length": str(file_size)},
+    )
+
+
+@router.get("/stream-transcoded/{file_id}")
+def stream_transcoded_audio(file_id: int, token: str = Query(""), db: Session = Depends(get_db)):
+    """Transcode browser-unfriendly audio (notably ALAC-in-M4A) to MP3 on the fly.
+
+    Chrome/Edge/Firefox generally cannot decode ALAC even when the container is
+    .m4a. Safari can, but behavior varies. This endpoint gives the player a
+    universal MP3 fallback without mutating the library file.
+    """
+    if not verify_token(token):
+        raise HTTPException(status_code=401, detail="登录已过期")
+    f = db.query(MusicFile).filter(MusicFile.id == file_id).first()
+    if not f or not f.file_path or not os.path.exists(f.file_path):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    file_path = Path(f.file_path)
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", str(file_path),
+        "-vn", "-map", "0:a:0", "-codec:a", "libmp3lame", "-b:a", "320k",
+        "-f", "mp3", "pipe:1",
+    ]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="ffmpeg not installed")
+
+    def iter_transcoded():
+        assert proc.stdout is not None
+        try:
+            while True:
+                chunk = proc.stdout.read(1024 * 256)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    from urllib.parse import quote
+    return StreamingResponse(
+        iter_transcoded(),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(file_path.stem)}.mp3"},
     )
 
 
