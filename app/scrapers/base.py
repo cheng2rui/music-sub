@@ -19,6 +19,7 @@ class MusicMeta:
     cover_data: Optional[bytes] = None
     song_id: str = ""       # provider-specific song id, used for lyrics
     lyrics: str = ""
+    duration: float = 0.0
     source: str = ""
 
 

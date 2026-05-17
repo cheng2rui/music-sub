@@ -199,6 +199,38 @@ def find_local_cover_data(directory: str | Path) -> Optional[bytes]:
     return None
 
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+_LIKELY_BAD_RE = re.compile(r"[\u00a0-\u00ff]{2,}")
+
+
+def _garble_score(text: str) -> int:
+    if not text:
+        return -1
+    return len(_CJK_RE.findall(text)) * 5 - len(_LIKELY_BAD_RE.findall(text)) * 4 - text.count("\ufffd") * 8
+
+
+def repair_garble_hint(text: str) -> str:
+    """Best-effort garble repair for matching hints only; never writes files."""
+    if not text or not _LIKELY_BAD_RE.search(text) or _CJK_RE.search(text):
+        return text
+    best = text
+    best_score = _garble_score(text)
+    for src in ("latin-1", "cp1252"):
+        try:
+            raw = text.encode(src, errors="strict")
+        except UnicodeEncodeError:
+            continue
+        for tgt in ("utf-8", "gbk", "gb18030", "big5"):
+            try:
+                fixed = raw.decode(tgt, errors="strict")
+            except Exception:
+                continue
+            score = _garble_score(fixed)
+            if fixed and fixed != text and _CJK_RE.search(fixed) and score > best_score:
+                best, best_score = fixed, score
+    return best
+
+
 def read_sidecar_lyrics(file_path: str) -> str:
     """Read .lrc sidecar lyrics if present."""
     lrc_path = Path(file_path).with_suffix(".lrc")

@@ -10,6 +10,11 @@ from app.scrapers.base import MusicMeta
 
 
 _SEPARATORS = re.compile(r"[\s\-_·・•,，、/\\|:：;；'\"“”‘’()（）\[\]【】{}<>《》]+")
+try:
+    from opencc import OpenCC
+    _T2S = OpenCC("t2s").convert
+except Exception:  # pragma: no cover - optional dependency fallback
+    _T2S = lambda text: text
 _EXTRA_MARKERS = re.compile(
     r"\b(live|remix|cover|伴奏|demo|karaoke|instrumental|mv|版|现场|演唱会|巡回|remastered?)\b",
     re.IGNORECASE,
@@ -25,7 +30,7 @@ class ScoredMeta:
 
 def normalize_text(value: str | None) -> str:
     """Normalize text for fuzzy matching across punctuation/case/full-width variants."""
-    value = unicodedata.normalize("NFKC", value or "").lower().strip()
+    value = _T2S(unicodedata.normalize("NFKC", value or "")).lower().strip()
     value = value.replace("&", "and")
     value = _SEPARATORS.sub("", value)
     return value
@@ -85,31 +90,93 @@ def _quality_penalty(meta: MusicMeta, title_hint: str, artist_hint: str) -> tupl
     return penalty, reasons
 
 
-def score_meta(meta: MusicMeta, title_hint: str, artist_hint: str = "", album_hint: str = "") -> ScoredMeta:
+def _year_score(expected: int | str | None, actual: int | str | None) -> float:
+    def parse(v) -> int:
+        if not v:
+            return 0
+        m = re.search(r"\d{4}", str(v))
+        return int(m.group(0)) if m else 0
+    e, a = parse(expected), parse(actual)
+    if not e or not a:
+        return 0.0
+    delta = abs(e - a)
+    if delta == 0:
+        return 1.0
+    if delta <= 1:
+        return 0.7
+    if delta <= 3:
+        return 0.35
+    return 0.0
+
+
+def _duration_score(expected: float | int | None, actual: float | int | None) -> float:
+    try:
+        e, a = float(expected or 0), float(actual or 0)
+    except Exception:
+        return 0.0
+    if e <= 0 or a <= 0:
+        return 0.0
+    delta = abs(e - a)
+    if delta <= 2:
+        return 1.0
+    if delta <= 5:
+        return 0.75
+    if delta <= 10:
+        return 0.45
+    # For very long tracks, tolerate a small relative drift.
+    return max(0.0, 1.0 - delta / max(e, a)) if delta / max(e, a) <= 0.08 else 0.0
+
+
+def _track_score(expected: int | str | None, actual: int | str | None) -> float:
+    def parse(v) -> int:
+        if not v:
+            return 0
+        m = re.search(r"\d+", str(v))
+        return int(m.group(0)) if m else 0
+    e, a = parse(expected), parse(actual)
+    if not e or not a:
+        return 0.0
+    return 1.0 if e == a else 0.0
+
+
+def score_meta(meta: MusicMeta, title_hint: str, artist_hint: str = "", album_hint: str = "",
+               year_hint: int | str | None = None, duration_hint: float | int | None = None,
+               track_hint: int | str | None = None) -> ScoredMeta:
     """Score one metadata result for a target song."""
     title = text_score(title_hint, meta.title)
     artist = artist_score(artist_hint, meta.artist or meta.album_artist)
     album = text_score(album_hint, meta.album) if album_hint else 0.0
+    year = _year_score(year_hint, meta.year)
+    duration = _duration_score(duration_hint, getattr(meta, "duration", 0.0))
+    track = _track_score(track_hint, meta.track_number)
 
-    score = title * 0.58
+    # Keep the old title/artist behavior dominant, then add small factual boosts.
+    score = title * 0.52
     reasons = [f"title={title:.2f}"]
     if artist_hint:
-        score += artist * 0.32
+        score += artist * 0.26
         reasons.append(f"artist={artist:.2f}")
     else:
-        # No trusted artist: still lightly prefer candidates whose artist appears in title/filename.
         title_artist = artist_score(title_hint, meta.artist)
-        score += title_artist * 0.10
+        score += title_artist * 0.08
         reasons.append(f"title_artist={title_artist:.2f}")
     if album_hint:
-        # 专辑作为强信号：完全匹配加 0.18，未命中且得分低于 0.5 时明显扣分，防止同名其他专辑被选上
-        score += album * 0.18
+        score += album * 0.14
         reasons.append(f"album={album:.2f}")
         if album < 0.5:
             score -= 0.15
             reasons.append("album_mismatch")
     else:
-        score += 0.04 if (meta.album or "").strip() else 0.0
+        score += 0.03 if (meta.album or "").strip() else 0.0
+    if year_hint:
+        score += year * 0.04
+        reasons.append(f"year={year:.2f}")
+    if duration_hint:
+        score += duration * 0.06
+        reasons.append(f"duration={duration:.2f}")
+    if track_hint:
+        score += track * 0.03
+        reasons.append(f"track={track:.2f}")
 
     penalty, penalty_reasons = _quality_penalty(meta, title_hint, artist_hint)
     score -= penalty
@@ -117,11 +184,13 @@ def score_meta(meta: MusicMeta, title_hint: str, artist_hint: str = "", album_hi
     return ScoredMeta(meta=meta, score=max(0.0, min(1.0, score)), reasons=reasons)
 
 
-def choose_best(candidates: list[MusicMeta], title_hint: str, artist_hint: str = "", album_hint: str = "") -> ScoredMeta | None:
+def choose_best(candidates: list[MusicMeta], title_hint: str, artist_hint: str = "", album_hint: str = "",
+                year_hint: int | str | None = None, duration_hint: float | int | None = None,
+                track_hint: int | str | None = None) -> ScoredMeta | None:
     """Return the best candidate above a conservative threshold."""
     if not candidates:
         return None
-    scored = [score_meta(m, title_hint, artist_hint, album_hint) for m in candidates]
+    scored = [score_meta(m, title_hint, artist_hint, album_hint, year_hint, duration_hint, track_hint) for m in candidates]
     scored.sort(key=lambda item: item.score, reverse=True)
     best = scored[0]
     if best.score < (0.48 if artist_hint else 0.42):

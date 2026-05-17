@@ -19,6 +19,7 @@ from app.scrapers.tagger import (
     read_sidecar_lyrics,
     find_local_cover_data,
     read_embedded_cover,
+    repair_garble_hint,
 )
 from app.scrapers.base import MusicMeta
 from app.scrapers.matcher import score_meta, text_score
@@ -75,8 +76,13 @@ def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str) -> l
 
 
 def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
-                 album_hint: str = "") -> MusicMeta | None:
+                 album_hint: str = "", year_hint: int | str | None = None,
+                 duration_hint: float | int | None = None,
+                 track_hint: int | str | None = None) -> MusicMeta | None:
     """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
+    title_hint = repair_garble_hint(title_hint or "")
+    artist_hint = repair_garble_hint(artist_hint or "")
+    album_hint = repair_garble_hint(album_hint or "")
     filename = Path(file_path).stem
     fallback_pairs: list[tuple[str, str]] = []
     # 去掉“01.” / “01 ” / “01-” 这种常见的轨号前缀，避免“01. 怪美的”被拆作 title=01
@@ -121,7 +127,15 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
                         continue
                     seen_keys.add(key)
                     # 使用本次搜索的 hint 评分，以便 fallback 反转顺序后能拿到高分
-                    scored_candidates.append(score_meta(meta, t_hint, a_hint, album_hint))
+                    scored_candidates.append(score_meta(
+                        meta,
+                        t_hint,
+                        a_hint,
+                        album_hint,
+                        year_hint=year_hint,
+                        duration_hint=duration_hint,
+                        track_hint=track_hint,
+                    ))
 
     _collect(title_hint, artist_hint)
 
@@ -191,7 +205,7 @@ def _merge_hints(*hints: dict | None) -> dict:
     for hint in reversed([h for h in hints if h]):
         for key, value in hint.items():
             if value not in (None, "", 0, False):
-                merged[key] = value
+                merged[key] = repair_garble_hint(value) if isinstance(value, str) else value
     return merged
 
 
@@ -223,6 +237,36 @@ def _enrich_from_local_assets(file_path: str, meta: MusicMeta) -> MusicMeta:
     if not meta.cover_data:
         meta.cover_data = find_local_cover_data(Path(file_path).parent) or read_embedded_cover(file_path)
     return meta
+
+
+def _album_hint_from_existing_tags(files: list[str]) -> dict:
+    """Infer album-level hints from tags across files in the same package."""
+    from collections import Counter
+    albums: Counter[str] = Counter()
+    artists: Counter[str] = Counter()
+    years: Counter[int] = Counter()
+    for path in files[:80]:
+        tags = read_existing_tags(path)
+        if tags.get("album"):
+            albums[str(tags["album"])] += 1
+        if tags.get("album_artist") or tags.get("artist"):
+            artists[str(tags.get("album_artist") or tags.get("artist"))] += 1
+        if tags.get("year"):
+            years[int(tags["year"])] += 1
+    out: dict = {}
+    if albums:
+        album, count = albums.most_common(1)[0]
+        if count >= 2 or len(files) == 1:
+            out["album"] = album
+    if artists:
+        artist, count = artists.most_common(1)[0]
+        if count >= 2 or len(files) == 1:
+            out["artist"] = artist
+            out["album_artist"] = artist
+    if years:
+        year, _count = years.most_common(1)[0]
+        out["year"] = year
+    return out
 
 
 def _upsert_music_file(db, *, task_id: int | None, file_path: str, link_path: str | None, scraped: bool, meta: MusicMeta | None, audio_meta: dict):
@@ -346,13 +390,24 @@ def _process_completed_torrent(torrent: dict):
         return
 
     meta_cache: dict[str, MusicMeta | None] = {}
+    package_hint = _album_hint_from_existing_tags(source_audio_files)
+    if package_hint:
+        metadata_hint = _merge_hints(metadata_hint, package_hint)
+        logger.info(
+            f"Album-level local hints: artist={metadata_hint.get('artist')} "
+            f"album={metadata_hint.get('album')} year={metadata_hint.get('year')}"
+        )
     first_existing_hint = read_existing_tags(source_audio_files[0])
     first_hint = _merge_hints(metadata_hint, first_existing_hint)
+    first_audio_meta = read_audio_metadata(source_audio_files[0])
     first_meta = _scrape_file(
         source_audio_files[0],
         title_hint=first_hint.get("title") or "",
         artist_hint=first_hint.get("artist") or first_hint.get("album_artist") or "",
         album_hint=first_hint.get("album") or "",
+        year_hint=first_hint.get("year") or metadata_hint.get("year"),
+        duration_hint=first_audio_meta.get("duration"),
+        track_hint=first_hint.get("track_number"),
     ) or _meta_from_hint(first_hint)
     if first_meta:
         _enrich_from_local_assets(source_audio_files[0], first_meta)
@@ -402,11 +457,15 @@ def _process_completed_torrent(torrent: dict):
                 shared_artist = (
                     (first_meta.album_artist or first_meta.artist) if first_meta else ""
                 ) or use_hint.get("album_artist") or ""
+                audio_meta_hint = read_audio_metadata(file_path)
                 meta = _scrape_file(
                     file_path,
                     title_hint=use_hint.get("title") or "",
                     artist_hint=use_hint.get("artist") or shared_artist,
                     album_hint=shared_album,
+                    year_hint=use_hint.get("year") or metadata_hint.get("year"),
+                    duration_hint=audio_meta_hint.get("duration"),
+                    track_hint=use_hint.get("track_number"),
                 ) or _meta_from_hint(_merge_hints(use_hint, {"album": shared_album, "album_artist": shared_artist}))
                 if meta:
                     _enrich_from_local_assets(file_path, meta)
