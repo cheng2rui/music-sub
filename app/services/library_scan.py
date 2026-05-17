@@ -103,6 +103,69 @@ def upsert_file_from_local(db: Session, file_path: str | Path, root: str | Path 
     return existing, created
 
 
+def _is_unknown_artist(artist: str | None) -> bool:
+    if not artist:
+        return True
+    return artist.strip().lower() in {"", "unknown artist", "未知艺人", "unknown", "various artists"}
+
+
+def _has_lrc(path: str | Path) -> bool:
+    try:
+        return Path(path).with_suffix(".lrc").exists()
+    except Exception:
+        return False
+
+
+def _has_cover(path: str | Path) -> bool:
+    p = Path(path)
+    return bool(find_local_cover_data(p.parent) or read_embedded_cover(str(p)))
+
+
+def _cue_split_candidates(root: Path) -> int:
+    count = 0
+    for path in iter_audio_files(root):
+        same = path.with_suffix(".cue")
+        if same.exists():
+            count += 1
+            continue
+        try:
+            cues = list(path.parent.glob("*.cue"))
+            if len(cues) == 1:
+                count += 1
+        except Exception:
+            continue
+    return count
+
+
+def _health_summary(db: Session, root_path: Path) -> dict:
+    rows = db.query(MusicFile).all()
+    summary = {
+        "missing_cover": 0,
+        "missing_lyrics": 0,
+        "missing_duration": 0,
+        "unknown_artist": 0,
+        "unscraped": 0,
+        "cue_candidates": _cue_split_candidates(root_path),
+        "missing_files": 0,
+    }
+    for row in rows:
+        if row.file_path and not Path(row.file_path).exists():
+            summary["missing_files"] += 1
+        if not row.file_path:
+            continue
+        if not _has_cover(row.file_path):
+            summary["missing_cover"] += 1
+        if not _has_lrc(row.file_path):
+            summary["missing_lyrics"] += 1
+        if not row.duration or row.duration <= 0:
+            summary["missing_duration"] += 1
+        if _is_unknown_artist(row.artist):
+            summary["unknown_artist"] += 1
+        if not row.scraped:
+            summary["unscraped"] += 1
+    return summary
+
+
 def scan_library(db: Session, root: str | Path | None = None, remove_missing: bool = False, progress=None) -> dict:
     """Scan root and upsert MusicFile records."""
     root_path = Path(root or config.paths.library).resolve()
@@ -127,4 +190,5 @@ def scan_library(db: Session, root: str | Path | None = None, remove_missing: bo
                 db.delete(row)
                 removed += 1
     db.commit()
-    return {"root": str(root_path), "total": len(files), "created": created, "updated": updated, "removed": removed, "errors": errors}
+    health = _health_summary(db, root_path)
+    return {"root": str(root_path), "total": len(files), "created": created, "updated": updated, "removed": removed, "errors": errors, "health": health}

@@ -56,10 +56,12 @@ const healthKinds = [
   { id: 'unknown_artist', label: '艺人异常' },
   { id: 'unscraped', label: '未刮削' }
 ]
+const healthLabels = Object.fromEntries(healthKinds.map(k => [k.id, k.label]))
+const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped']
 
-async function openHealthModal() {
+async function openHealthModal(kind = healthKind.value) {
   showHealthModal.value = true
-  await loadHealth(healthKind.value)
+  await loadHealth(kind)
 }
 
 async function loadHealth(kind) {
@@ -165,6 +167,18 @@ async function runLibraryScan() {
     console.error(e)
     scanning.value = false
   }
+}
+
+function scanHealthValue(key) {
+  return scanJob.value?.summary?.health?.[key] ?? 0
+}
+
+function hasScanHealthReport() {
+  return !!scanJob.value?.summary?.health
+}
+
+function openScanHealth(kind) {
+  openHealthModal(kind)
 }
 
 async function loadStats() {
@@ -347,9 +361,28 @@ onMounted(() => { loadStats(); loadAlbums() })
     </div>
 
     <div v-if="scanJob" class="scan-status">
-      资料库扫描：{{ scanJob.status }} · {{ scanJob.progress }} / {{ scanJob.total || '?' }}
-      <span v-if="scanJob.summary?.created !== undefined"> · 新增 {{ scanJob.summary.created }} · 更新 {{ scanJob.summary.updated }} · 错误 {{ scanJob.summary.errors }}</span>
-      <span v-else-if="scanJob.summary?.current"> · {{ scanJob.summary.current }}</span>
+      <div class="scan-status-line">
+        资料库扫描：{{ scanJob.status }} · {{ scanJob.progress }} / {{ scanJob.total || '?' }}
+        <span v-if="scanJob.summary?.created !== undefined"> · 新增 {{ scanJob.summary.created }} · 更新 {{ scanJob.summary.updated }} · 移除 {{ scanJob.summary.removed || 0 }} · 错误 {{ scanJob.summary.errors }}</span>
+        <span v-else-if="scanJob.summary?.current"> · {{ scanJob.summary.current }}</span>
+      </div>
+      <div v-if="hasScanHealthReport()" class="scan-health-report">
+        <button
+          v-for="key in scanHealthOrder"
+          :key="key"
+          class="scan-health-chip"
+          :class="{ warn: scanHealthValue(key) > 0 }"
+          @click="openScanHealth(key)"
+        >
+          {{ healthLabels[key] }} <strong>{{ scanHealthValue(key) }}</strong>
+        </button>
+        <span class="scan-health-chip" :class="{ warn: scanJob.summary.health.cue_candidates > 0 }">CUE候选 <strong>{{ scanJob.summary.health.cue_candidates || 0 }}</strong></span>
+        <span class="scan-health-chip" :class="{ warn: scanJob.summary.health.missing_files > 0 }">文件缺失 <strong>{{ scanJob.summary.health.missing_files || 0 }}</strong></span>
+      </div>
+      <div v-if="hasScanHealthReport()" class="scan-next-actions">
+        <AppButton variant="ghost" size="sm" @click="openHealthModal">打开治理</AppButton>
+        <AppButton variant="ghost" size="sm" @click="openToolbox">打开工具箱</AppButton>
+      </div>
     </div>
 
     <!-- 加载状态 -->
@@ -560,7 +593,14 @@ onMounted(() => { loadStats(); loadAlbums() })
 .stat-val { font-size: 24px; font-weight: 700; }
 .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.scan-status { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text-dim); font-size: 12px; }
+.scan-status { margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text-dim); font-size: 12px; display: flex; flex-direction: column; gap: 8px; }
+.scan-status-line { color: var(--text-dim); }
+.scan-health-report { display: flex; gap: 6px; flex-wrap: wrap; }
+.scan-health-chip { border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: default; }
+button.scan-health-chip { cursor: pointer; }
+.scan-health-chip.warn { border-color: rgba(255,193,7,.38); color: var(--warning); }
+.scan-health-chip strong { margin-left: 4px; color: var(--text); }
+.scan-next-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .search-input { flex: 1; min-width: 220px; }
 .sort-select { min-width: 120px; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-md); padding: 8px 10px; }
 .view-toggles { display: flex; gap: 4px; }
