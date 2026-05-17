@@ -69,9 +69,12 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
     """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
     filename = Path(file_path).stem
     fallback_pairs: list[tuple[str, str]] = []
+    # 去掉“01.” / “01 ” / “01-” 这种常见的轨号前缀，避免“01. 怪美的”被拆作 title=01
+    import re as _re
+    cleaned_filename = _re.sub(r"^\s*\d+\s*[.\-_)\u3001\uff0e]?\s*", "", filename).strip()
     if not title_hint:
         # Try `A - B` decomposition both ways since downloads can be either order.
-        parts = filename.split(" - ", 1)
+        parts = cleaned_filename.split(" - ", 1)
         if len(parts) == 2:
             left, right = parts[0].strip(), parts[1].strip()
             artist_hint, title_hint = left, right
@@ -79,8 +82,8 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
             fallback_pairs.append((right, ""))    # bare title fallback
             fallback_pairs.append((left, ""))     # bare other-side fallback
         else:
-            artist_hint, title_hint = artist_hint or "", filename
-            fallback_pairs.append((filename, ""))
+            artist_hint, title_hint = artist_hint or "", cleaned_filename
+            fallback_pairs.append((cleaned_filename, ""))
     fallback_pairs.append((title_hint, ""))  # always allow bare title retry
 
     scrapers = _get_scraper_chain()
@@ -218,12 +221,67 @@ def _mark_task_failed(torrent_hash: str, error: str):
         db.close()
 
 
+def _parse_torrent_hints(torrent_name: str) -> dict:
+    """从 PT 种子名提取 artist/album/year hint。
+
+    支持常见格式例如：
+      `蔡依林 - 怪美的 (2018) - WEB-DL - 24bit ALAC-HHWEB`
+      `蔡依林 - 什么什么 - 2017 - FLAC整轨`
+      `蔡依林-Ugly Beauty 2018-FLAC`
+      `Jay Chou - Children of the Sun 2026 - FLAC`
+    """
+    import re
+    if not torrent_name:
+        return {}
+    name = torrent_name.strip()
+    # 1. 先剀到全部质量/馆号/容器信息，贪婪匹配以去除后缀
+    quality_re = re.compile(
+        r"[\s_\-\(\[]+(WEB[- ]?DL|HHWEB|HiRes|HiFi|Hi-Res|HQ|FLAC|ALAC|APE|WAV|MP3|OGG|320k?|256k?|24bit|16bit|44\.?1kHz|48kHz|96kHz|192kHz|DSD\d*|\d+bit|\d+kHz|integral|整轨|分轨|整軌|分軌|CDDA|CD|EAC|Lossless|无损|無損).*$",
+        re.IGNORECASE,
+    )
+    name = quality_re.sub("", name)
+    name = name.strip(" -_\u3000()[]\u3010\u3011")
+    # 2. 拽出年份（单年 1900-2099，忍受括号/连字符包裹）后从名字中清除
+    year = ""
+    year_match = re.search(r"\(?\s*(19\d{2}|20\d{2})\s*\)?", name)
+    if year_match:
+        year = year_match.group(1)
+        name = (name[: year_match.start()] + name[year_match.end():]).strip(" -_\u3000()[]\u3010\u3011")
+        name = re.sub(r"\s{2,}", " ", name)
+        name = re.sub(r"-\s*-", "-", name)
+        name = name.strip(" -_\u3000")
+    # 3. 拆 artist - album（连字符两侧可能有空格）
+    parts = re.split(r"\s*-\s*|\s+\u2013\s+", name, maxsplit=1)
+    if len(parts) != 2:
+        m = re.match(r"^([^\s\-]+)-(.+)$", name)
+        if m:
+            parts = [m.group(1), m.group(2)]
+    if len(parts) != 2:
+        return {}
+    artist = parts[0].strip(" -_\u3000")
+    album = parts[1].strip(" -_\u3000")
+    # 4. 过滤明显是年份范围这种“Collection / 合集”型，artist 里不需要拼住年份
+    artist = re.sub(r"\s*(19|20)\d{2}\s*$", "", artist).strip()
+    if not artist or not album:
+        return {}
+    return {"artist": artist, "album": album, "year": year}
+
+
 def _process_completed_torrent(torrent: dict):
     """Process a single completed torrent: hardlink + scrape."""
     content_path = torrent.get("content_path", "")
     torrent_hash = torrent.get("hash", "")
     torrent_name = torrent.get("name", "")
     metadata_hint = torrent.get("metadata") or {}
+    # 如果上游没传 metadata，尝试从种子名提取 artist/album，避免刮削随机跳专辑
+    if not metadata_hint.get("artist") and not metadata_hint.get("album"):
+        parsed = _parse_torrent_hints(torrent_name)
+        if parsed:
+            metadata_hint = {**parsed, **metadata_hint}
+            logger.info(
+                f"Parsed torrent hints from name {torrent_name!r}: "
+                f"artist={parsed.get('artist')} album={parsed.get('album')}"
+            )
     should_mark_processed = torrent.get("mark_processed", True)
 
     if not content_path or not os.path.exists(content_path):
@@ -246,6 +304,7 @@ def _process_completed_torrent(torrent: dict):
         source_audio_files[0],
         title_hint=metadata_hint.get("title") or "",
         artist_hint=metadata_hint.get("artist") or "",
+        album_hint=metadata_hint.get("album") or "",
     ) or _meta_from_hint(metadata_hint)
     meta_cache[os.path.basename(source_audio_files[0])] = first_meta
     organize_artist = (first_meta.album_artist or first_meta.artist) if first_meta else ""

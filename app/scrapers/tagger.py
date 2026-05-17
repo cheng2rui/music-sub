@@ -32,6 +32,34 @@ def _resolve_template(template: str, variables: dict) -> str:
     return result.strip()
 
 
+def _ensure_cover_compatible(cover_data: bytes, file_path: str) -> bytes:
+    """保证 cover 为容器可接受的格式：mp4/m4a 只能要 jpeg 或 png。
+
+    该函数在检测到调用者是 mp4 容器且原图不是 jpeg/png 时，会调 PIL 转为 JPEG。
+    """
+    if not cover_data:
+        return cover_data
+    suffix = (Path(file_path).suffix or "").lower().lstrip(".")
+    needs_strict = suffix in {"m4a", "mp4", "aac"}
+    if not needs_strict:
+        return cover_data
+    head = cover_data[:12]
+    is_jpeg = head[:3] == b"\xff\xd8\xff"
+    is_png = head[:8] == b"\x89PNG\r\n\x1a\n"
+    if is_jpeg or is_png:
+        return cover_data
+    try:
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        img = Image.open(io.BytesIO(cover_data)).convert("RGB")
+        img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"Failed to convert cover to jpeg for {file_path}: {e}")
+        return b""
+
+
 def _resize_cover(cover_data: bytes, max_size: int) -> bytes:
     """Resize cover image to max_size width, keeping aspect ratio."""
     if not cover_data or max_size <= 0:
@@ -120,12 +148,14 @@ def tag_file(file_path: str, meta: MusicMeta) -> bool:
         if meta.disc_number:
             f["discnumber"] = meta.disc_number
 
-        # Embed cover art
+        # Embed cover art — mp4/m4a 只接受 jpeg/png，避免“mp4 artwork should be either jpeg or png”报错
         if cfg.embed_cover and meta.cover_data:
             cover = meta.cover_data
             if cfg.cover_max_size > 0:
                 cover = _resize_cover(cover, cfg.cover_max_size)
-            f["artwork"] = cover
+            cover = _ensure_cover_compatible(cover, file_path)
+            if cover:
+                f["artwork"] = cover
 
         # Write lyrics to tag
         if cfg.save_lyrics_to_tag and meta.lyrics:
