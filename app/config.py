@@ -33,7 +33,7 @@ class PathsConfig(BaseModel):
 
 
 class ScraperConfig(BaseModel):
-    sources: list[str] = ["qqmusic", "netease", "kugou", "migu", "musicbrainz"]
+    sources: list[str] = ["qqmusic", "netease", "kugou", "migu", "kuwo", "musicbrainz"]
     embed_cover: bool = True
     cover_max_size: int = 0  # 0=原图, >0=缩略图宽度(px)
     save_cover_file: bool = True  # 保存 cover.jpg 到专辑目录

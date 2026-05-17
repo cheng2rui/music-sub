@@ -13,7 +13,7 @@ const settings = ref({
   },
   qbittorrent: { host: '', username: '', password: '', category: 'music', save_path: '/downloads/music', tag: 'music-sub' },
   paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
-  scraper: { sources: ['qqmusic', 'netease', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false },
+  scraper: { sources: ['qqmusic', 'netease', 'kugou', 'migu', 'kuwo', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false },
   scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
   notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } }
 })

@@ -47,7 +47,7 @@ class PathsSettingInput(BaseModel):
 
 
 class ScraperSettingInput(BaseModel):
-    sources: list[str] = ["qqmusic", "netease", "musicbrainz"]
+    sources: list[str] = ["qqmusic", "netease", "kugou", "migu", "kuwo", "musicbrainz"]
     embed_cover: bool = True
     cover_max_size: int = 0
     save_cover_file: bool = True

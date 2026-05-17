@@ -10,6 +10,7 @@ from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
 from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo, read_audio_metadata
 from app.scrapers.base import MusicMeta
+from app.scrapers.matcher import score_meta
 from app.services.notify import notify_download_complete, notify_scrape_complete, notify_error
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ def _get_scraper_chain():
         elif source == "migu":
             from app.scrapers.migu import MiguScraper
             scrapers.append(MiguScraper())
+        elif source == "kuwo":
+            from app.scrapers.kuwo import KuwoScraper
+            scrapers.append(KuwoScraper())
         elif source == "musicbrainz":
             from app.scrapers.musicbrainz import MusicBrainzScraper
             scrapers.append(MusicBrainzScraper())
@@ -49,19 +53,46 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") ->
             artist_hint, title_hint = artist_hint or "", filename
 
     scrapers = _get_scraper_chain()
+    scored_candidates = []
+    scraper_by_name = {}
     for scraper in scrapers:
+        scraper_by_name[scraper.name] = scraper
         try:
             results = scraper.search(title_hint, artist_hint)
-            if results:
-                meta = results[0]
-                # Try to get cover and lyrics
-                if meta.cover_url and not meta.cover_data:
-                    meta.cover_data = scraper.get_cover(meta.cover_url)
-                if meta.song_id and not meta.lyrics:
-                    meta.lyrics = scraper.get_lyrics(meta.song_id)
-                return meta
+            for meta in results:
+                scored_candidates.append(score_meta(meta, title_hint, artist_hint))
         except Exception as e:
             logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")
+            continue
+
+    scored_candidates.sort(key=lambda item: item.score, reverse=True)
+    if scored_candidates:
+        preview = "; ".join(
+            f"{item.meta.source}:{item.meta.title}/{item.meta.artist}/{item.meta.album}={item.score:.2f}"
+            for item in scored_candidates[:3]
+        )
+        logger.info(f"Smart scrape candidates for {filename}: {preview}")
+
+    threshold = 0.48 if artist_hint else 0.42
+    for item in scored_candidates:
+        if item.score < threshold:
+            break
+        meta = item.meta
+        scraper = scraper_by_name.get(meta.source)
+        if not scraper:
+            continue
+        try:
+            if meta.cover_url and not meta.cover_data:
+                meta.cover_data = scraper.get_cover(meta.cover_url)
+            if meta.song_id and not meta.lyrics:
+                meta.lyrics = scraper.get_lyrics(meta.song_id)
+            logger.info(
+                f"Smart scrape selected for {filename}: "
+                f"{meta.source}:{meta.title}/{meta.artist}/{meta.album} score={item.score:.2f} reasons={','.join(item.reasons)}"
+            )
+            return meta
+        except Exception as e:
+            logger.warning(f"[{scraper.name}] Enrich failed for {filename}: {e}")
             continue
     return None
 
