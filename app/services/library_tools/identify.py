@@ -60,8 +60,10 @@ def _infer(file: MusicFile) -> dict[str, Any]:
     path_artist, path_album = _infer_from_library(file.file_path or "")
     stem = Path(file.file_path or "").stem
     parts = _infer_from_filename(stem, hint_artist=path_artist)
+    inferred_artist = path_artist or parts.get("artist") or file.artist or ""
     after = {
-        "artist": path_artist or parts.get("artist") or file.artist or "",
+        "artist": inferred_artist,
+        "album_artist": path_artist or file.album_artist or inferred_artist,
         "album": path_album or file.album or "",
         "title": parts.get("title") or file.title or stem,
         "track_number": int(parts["track_number"]) if parts.get("track_number") else file.track_number,
@@ -75,6 +77,7 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
     for f in files:
         before = {
             "artist": f.artist,
+            "album_artist": f.album_artist,
             "album": f.album,
             "title": f.title,
             "track_number": f.track_number,
@@ -103,7 +106,7 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any],
         try:
             after = _infer(f)
             changed_fields = []
-            for key in ("artist", "album", "title", "track_number"):
+            for key in ("artist", "album_artist", "album", "title", "track_number"):
                 value = after.get(key)
                 if value in (None, ""):
                     continue
@@ -116,8 +119,9 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any],
                 try:
                     import music_tag
                     audio = music_tag.load_file(f.file_path)
+                    tag_keys = {"album_artist": "albumartist", "track_number": "tracknumber"}
                     for key in changed_fields:
-                        audio[key] = getattr(f, key)
+                        audio[tag_keys.get(key, key)] = getattr(f, key)
                     audio.save()
                 except Exception as exc:
                     on_progress(idx, f"err:tag write failed: {exc}")
