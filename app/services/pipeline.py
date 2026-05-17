@@ -481,7 +481,9 @@ def _process_completed_torrent(torrent: dict):
                 meta_cache[os.path.basename(file_path)] = meta
             audio_meta = read_audio_metadata(file_path)
             if meta:
-                tag_file(file_path, meta)
+                tagged_path = tag_file(file_path, meta)
+                if isinstance(tagged_path, str) and tagged_path:
+                    file_path = tagged_path
                 # Re-read after tagging so duration/bitrate/sample-rate are cached with final file state.
                 audio_meta = {**audio_meta, **read_audio_metadata(file_path)}
                 if meta.lyrics:

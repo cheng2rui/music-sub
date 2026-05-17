@@ -8,6 +8,7 @@ Inspired by music-tag-web's update_ids.py:
 """
 import os
 import re
+import shutil
 import logging
 from pathlib import Path
 from typing import Optional
@@ -247,7 +248,7 @@ def read_sidecar_lyrics(file_path: str) -> str:
     return ""
 
 
-def tag_file(file_path: str, meta: MusicMeta) -> bool:
+def tag_file(file_path: str, meta: MusicMeta) -> str | bool:
     """Write metadata to an audio file.
 
     Respects config settings:
@@ -304,16 +305,16 @@ def tag_file(file_path: str, meta: MusicMeta) -> bool:
 
         # Rename file if configured
         if cfg.rename_file and cfg.rename_template:
-            _rename_file(file_path, meta)
+            return _rename_file(file_path, meta) or file_path
 
-        return True
+        return file_path
     except Exception as e:
         logger.error(f"Failed to tag {file_path}: {e}")
         return False
 
 
-def _rename_file(file_path: str, meta: MusicMeta):
-    """Rename file using template variables."""
+def _rename_file(file_path: str, meta: MusicMeta) -> str | None:
+    """Rename file using template variables and move sidecar files with it."""
     cfg = config.scraper
     p = Path(file_path)
     variables = {
@@ -325,15 +326,67 @@ def _rename_file(file_path: str, meta: MusicMeta):
     }
     new_name = _resolve_template(cfg.rename_template, variables)
     if not new_name:
-        return
+        return None
     new_path = p.parent / f"{new_name}{p.suffix}"
-    if new_path == p or new_path.exists():
-        return
+    if new_path == p:
+        return str(p)
+    if new_path.exists():
+        return None
     try:
         os.rename(file_path, str(new_path))
+        _move_sidecars(p, new_path)
         logger.info(f"Renamed: {p.name} -> {new_path.name}")
+        return str(new_path)
     except Exception as e:
         logger.error(f"Rename failed: {e}")
+        return None
+
+
+_SIDECAR_SUFFIXES = (".lrc", ".cue", ".log", ".nfo", ".txt")
+_ALBUM_SIDECAR_NAMES = ("cover.jpg", "cover.png", "folder.jpg", "front.jpg", "album.jpg", "album.nfo")
+
+
+def _move_sidecars(source: Path, target: Path, copy: bool = False) -> list[tuple[Path, Path]]:
+    """Move/copy common sidecar files next to an audio file."""
+    moved: list[tuple[Path, Path]] = []
+    op = shutil.copy2 if copy else shutil.move
+    for suffix in _SIDECAR_SUFFIXES:
+        src = source.with_suffix(suffix)
+        if not src.exists():
+            continue
+        dst = target.with_suffix(suffix)
+        if dst.exists():
+            continue
+        try:
+            op(str(src), str(dst))
+            moved.append((src, dst))
+        except Exception as e:
+            logger.warning(f"Failed to {'copy' if copy else 'move'} sidecar {src}: {e}")
+    return moved
+
+
+def copy_or_move_album_sidecars(source_dir: str | Path, target_dir: str | Path, copy: bool = False) -> int:
+    """Copy/move album-level sidecars such as cover.jpg and album.nfo."""
+    src_dir = Path(source_dir)
+    dst_dir = Path(target_dir)
+    if src_dir.resolve() == dst_dir.resolve():
+        return 0
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    op = shutil.copy2 if copy else shutil.move
+    count = 0
+    for name in _ALBUM_SIDECAR_NAMES:
+        src = src_dir / name
+        if not src.exists() or not src.is_file():
+            continue
+        dst = dst_dir / name
+        if dst.exists():
+            continue
+        try:
+            op(str(src), str(dst))
+            count += 1
+        except Exception as e:
+            logger.warning(f"Failed to {'copy' if copy else 'move'} album sidecar {src}: {e}")
+    return count
 
 
 def save_lyrics(file_path: str, lyrics: str) -> bool:

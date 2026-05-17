@@ -602,7 +602,10 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
             if locked_artist:
                 meta.album_artist = locked_artist
                 meta.artist = locked_artist
-            tag_file(f.file_path, meta)
+            tagged_path = tag_file(f.file_path, meta)
+            if isinstance(tagged_path, str) and tagged_path:
+                f.file_path = tagged_path
+                f.link_path = tagged_path
             if meta.lyrics:
                 save_lyrics(f.file_path, meta.lyrics)
             if meta.cover_data:

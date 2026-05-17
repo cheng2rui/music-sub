@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import config
 from app.models import MusicFile
+from app.scrapers.tagger import _move_sidecars, copy_or_move_album_sidecars
 from app.services.library_tools.base import PreviewItem, ToolPreview
 
 logger = logging.getLogger(__name__)
@@ -103,13 +104,17 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                     shutil.copy2(source, target)
                 else:
                     shutil.move(str(source), str(target))
+                sidecars = _move_sidecars(source, target, copy=keep_original)
+                album_sidecars = copy_or_move_album_sidecars(source.parent, target.parent, copy=keep_original)
             except Exception as exc:
                 on_progress(idx, f"err:move failed: {exc}")
                 continue
             f.file_path = str(target)
             f.link_path = str(target)
             moved += 1
-            on_progress(idx, f"-> {target.name}")
+            sidecar_count = len(sidecars) + album_sidecars
+            suffix = f" (+{sidecar_count} sidecars)" if sidecar_count else ""
+            on_progress(idx, f"-> {target.name}{suffix}")
         except Exception as exc:
             on_progress(idx, f"err:{exc}")
     return {"moved": moved, "total": len(files)}

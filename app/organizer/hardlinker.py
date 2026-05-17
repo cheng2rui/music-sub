@@ -8,6 +8,7 @@ from app.organizer.naming import build_library_path
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS = {".flac", ".mp3", ".ape", ".wav", ".aac", ".ogg", ".wma", ".m4a", ".dsf", ".dff"}
+SIDECAR_SUFFIXES = (".lrc", ".cue", ".log", ".nfo", ".txt")
 
 
 def is_audio_file(path: str) -> bool:
@@ -71,6 +72,7 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
         try:
             os.link(src_file, target_file)
             linked.append(target_file)
+            _copy_sidecars(src_file, target_file)
             logger.info(f"Hardlinked: {src_file} -> {target_file}")
         except OSError as e:
             if e.errno == 18:  # Cross-device link
@@ -78,6 +80,7 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
                 import shutil
                 shutil.copy2(src_file, target_file)
                 linked.append(target_file)
+                _copy_sidecars(src_file, target_file)
             else:
                 logger.error(f"Failed to hardlink {src_file}: {e}")
 
@@ -97,3 +100,21 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
 
     logger.info(f"Organized {len(linked)} files to {target_dir}")
     return linked
+
+
+def _copy_sidecars(src_file: str, target_file: str):
+    """Copy common sidecars (.lrc/.cue/.log/.nfo/.txt) next to linked audio."""
+    src = Path(src_file)
+    dst = Path(target_file)
+    for suffix in SIDECAR_SUFFIXES:
+        sidecar = src.with_suffix(suffix)
+        if not sidecar.exists() or not sidecar.is_file():
+            continue
+        target = dst.with_suffix(suffix)
+        if target.exists():
+            continue
+        try:
+            os.link(sidecar, target)
+        except OSError:
+            import shutil
+            shutil.copy2(sidecar, target)
