@@ -448,11 +448,15 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
             album_hint=album_hint,
         )
         if meta:
-            # 专辑定锁：保底主艺人与专辑名不被刮削源带偏
-            if locked_album and meta.album and meta.album != locked_album:
+            # 专辑定锁：保底主艺人与专辑名不被刮削源带偏。
+            # 目前 DB 没有 album_artist 字段，library 也是按 artist+album 分组，
+            # 所以专辑级重刮削时需要把 DB artist 固定为这张专辑的主艺人，
+            # 避免某首歌因 feat./同名候选导致专辑在前端被拆成多张。
+            if locked_album and meta.album != locked_album:
                 meta.album = locked_album
-            if locked_artist and not meta.album_artist:
+            if locked_artist:
                 meta.album_artist = locked_artist
+                meta.artist = locked_artist
             tag_file(f.file_path, meta)
             if meta.lyrics:
                 save_lyrics(f.file_path, meta.lyrics)

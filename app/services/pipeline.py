@@ -11,7 +11,7 @@ from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
 from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo, read_audio_metadata
 from app.scrapers.base import MusicMeta
-from app.scrapers.matcher import score_meta
+from app.scrapers.matcher import score_meta, text_score
 from app.services.notify import notify_download_complete, notify_scrape_complete, notify_error
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,16 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
                 break
 
     scored_candidates.sort(key=lambda item: (item.score, _source_priority(item.meta.source)), reverse=True)
+    if album_hint and scored_candidates:
+        # 专辑 hint 来自种子名/资料库路径时，比单曲名更可信。
+        # 如果存在同专辑候选，就只在这些候选里选；否则宁可进入较高阈值，避免
+        # “同艺人同歌名但其他专辑/Live/精选集”把整张专辑带偏。
+        album_matched = [item for item in scored_candidates if text_score(album_hint, item.meta.album) >= 0.5]
+        if album_matched:
+            dropped = len(scored_candidates) - len(album_matched)
+            if dropped:
+                logger.info(f"Album hint filtered {dropped} off-album candidates for {filename}: {album_hint}")
+            scored_candidates = album_matched
     if scored_candidates:
         preview = "; ".join(
             f"{item.meta.source}:{item.meta.title}/{item.meta.artist}/{item.meta.album}={item.score:.2f}"
