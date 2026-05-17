@@ -1,4 +1,9 @@
-"""Multi-site search aggregator."""
+"""Multi-site search aggregator.
+
+The heavy lifting now lives in :mod:`app.services.pt_search`. Legacy helpers in
+this module are kept so subscriptions and the existing /api/search endpoint keep
+working while the rest of the app migrates to the new chain.
+"""
 import logging
 from typing import Optional
 import app.config as cfg_module
@@ -7,6 +12,7 @@ from app.sites.mteam import MTeamSite
 from app.sites.opencd import OpenCDSite
 from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
+from app.services.pt_search import MusicSearchChain, SearchRequest, SearchResponse
 from app.services.subscription import get_all_subscriptions, update_last_search
 from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client, torrent_info_hash
@@ -70,34 +76,49 @@ def _get_site_instance(name: str) -> Optional[BaseSite]:
 
 def search_sites(keyword: str, site_names: list[str] = None,
                  *, exclude_video: bool = True) -> list[TorrentInfo]:
-    """Search multiple PT sites for a keyword.
+    """Legacy entry point. Now backed by :class:`MusicSearchChain`.
 
-    `exclude_video=True` (默认) 会从返回结果中刪除明显是视频的条目（mp4/mkv/h265/2160p/MV 等），
-    主要针对馈头这种会跨 category 返回视频的 PT 站点。调用方可以显式关闭。
+    The chain already filters out video-like releases via the ranker.
+    ``exclude_video=False`` keeps the previous "raw merge" behaviour for callers
+    that explicitly want unfiltered output, falling back to a simple parallel
+    site fan-out without music-aware penalties.
     """
-    results = []
-    sites_to_search = site_names or list(cfg_module.config.sites.keys())
+    if exclude_video:
+        response = search_with_chain(keyword, sites=site_names)
+        return response.to_legacy()
 
+    results: list[TorrentInfo] = []
+    sites_to_search = site_names or list(cfg_module.config.sites.keys())
     for name in sites_to_search:
         site = _get_site_instance(name)
         if not site:
             continue
         try:
-            site_results = site.search(keyword)
-            results.extend(site_results)
-            logger.info(f"[{name}] Found {len(site_results)} results for '{keyword}'")
+            results.extend(site.search(keyword) or [])
         except Exception as e:
             logger.error(f"[{name}] Search error: {e}")
-
-    if exclude_video and results:
-        before = len(results)
-        results = [r for r in results if not _looks_like_video(r.title)]
-        if len(results) != before:
-            logger.info(f"search_sites filtered out {before - len(results)} video results")
-
-    # Sort by seeders descending
     results.sort(key=lambda t: t.seeders, reverse=True)
     return results
+
+
+def search_with_chain(keyword: str, sites: list[str] | None = None,
+                      *, type: str = "keyword", artist: str = "", album: str = "",
+                      title: str = "", quality: str = "any", limit: int = 60,
+                      timeout: float = 15.0) -> SearchResponse:
+    """Run the new MusicSearchChain and return the structured response."""
+    request = SearchRequest(
+        keyword=keyword,
+        sites=sites or [],
+        type=type,
+        artist=artist,
+        album=album,
+        title=title,
+        quality=quality,
+        limit=limit,
+        timeout=timeout,
+    )
+    return MusicSearchChain().search(request)
+
 
 
 def _split_keywords(keyword: str) -> list[str]:

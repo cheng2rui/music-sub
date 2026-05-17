@@ -1,7 +1,7 @@
 """Search API routes."""
 from fastapi import APIRouter, HTTPException
-from app.schemas import SearchRequest, TorrentResult
-from app.services.searcher import search_sites, fetch_torrent_info_hash, download_torrent_content
+from app.schemas import SearchRequest, TorrentResult, SearchResponseV2, ScoredTorrentResult, SearchSiteStatus
+from app.services.searcher import search_sites, fetch_torrent_info_hash, download_torrent_content, search_with_chain
 from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client
 from app.db import SessionLocal
@@ -12,7 +12,7 @@ router = APIRouter()
 
 @router.post("/", response_model=list[TorrentResult])
 def search_torrents(req: SearchRequest):
-    """Search PT sites for music torrents."""
+    """Search PT sites for music torrents (legacy flat list)."""
     results = search_sites(req.keyword, req.sites or None)
     return [
         TorrentResult(
@@ -27,6 +27,58 @@ def search_torrents(req: SearchRequest):
         )
         for r in results
     ]
+
+
+@router.post("/v2", response_model=SearchResponseV2)
+def search_torrents_v2(req: SearchRequest):
+    """Run the new MusicSearchChain and return structured results + per-site status.
+
+    Front-ends can use this to render scored cards, format/quality badges,
+    and per-site search progress (similar to MoviePilot's resource search UI).
+    """
+    response = search_with_chain(
+        req.keyword,
+        sites=req.sites or None,
+        type=req.type or "keyword",
+        artist=req.artist,
+        album=req.album,
+        title=req.title,
+        quality=req.quality or "any",
+        limit=req.limit or 60,
+    )
+    return SearchResponseV2(
+        results=[
+            ScoredTorrentResult(
+                site=item.torrent.site,
+                title=item.torrent.title,
+                torrent_id=item.torrent.torrent_id,
+                size=item.torrent.size,
+                seeders=item.torrent.seeders,
+                leechers=item.torrent.leechers,
+                upload_time=item.torrent.upload_time,
+                free=item.torrent.free,
+                score=item.score,
+                quality=item.quality,
+                media_format=item.media_format,
+                is_video_like=item.is_video_like,
+                reasons=item.reasons,
+            )
+            for item in response.results
+        ],
+        sites=[
+            SearchSiteStatus(
+                site=s.site,
+                ok=s.ok,
+                count=s.count,
+                seconds=s.seconds,
+                error=s.error,
+                queries=s.queries,
+            )
+            for s in response.sites
+        ],
+        queries=[plan.keyword for plan in response.queries],
+        total=response.total,
+    )
 
 
 @router.post("/download")

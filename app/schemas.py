@@ -74,3 +74,33 @@ class DownloadTaskResponse(BaseModel):
 class SearchRequest(BaseModel):
     keyword: str
     sites: list[str] = []
+    type: str = "keyword"
+    artist: str = ""
+    album: str = ""
+    title: str = ""
+    quality: str = "any"
+    limit: int = 60
+
+
+class SearchSiteStatus(BaseModel):
+    site: str
+    ok: bool
+    count: int = 0
+    seconds: float = 0.0
+    error: str = ""
+    queries: list[str] = []
+
+
+class ScoredTorrentResult(TorrentResult):
+    score: float = 0.0
+    quality: str = ""
+    media_format: str = ""
+    is_video_like: bool = False
+    reasons: list[str] = []
+
+
+class SearchResponseV2(BaseModel):
+    results: list[ScoredTorrentResult]
+    sites: list[SearchSiteStatus]
+    queries: list[str]
+    total: int = 0
