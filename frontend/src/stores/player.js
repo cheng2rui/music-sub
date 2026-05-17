@@ -12,6 +12,7 @@ export const usePlayerStore = defineStore('player', () => {
   const hasNext = computed(() => queueIndex.value >= 0 && queueIndex.value < queue.value.length - 1)
   const isCollapsed = ref(false)
   const isQueueOpen = ref(false)
+  const currentTime = ref(0)
 
   function normalizeTrack(track) {
     return {
@@ -26,6 +27,7 @@ export const usePlayerStore = defineStore('player', () => {
   async function playTrack(trackOrId) {
     const track = typeof trackOrId === 'object' ? trackOrId : await getFile(trackOrId)
     const normalized = normalizeTrack(track)
+    currentTime.value = 0
     currentTrack.value = normalized
     const existingIndex = queue.value.findIndex(t => t.id === normalized.id)
     if (existingIndex >= 0) {
@@ -43,6 +45,7 @@ export const usePlayerStore = defineStore('player', () => {
     const safeIndex = Math.max(0, Math.min(startIndex, normalized.length - 1))
     queue.value = normalized
     queueIndex.value = safeIndex
+    currentTime.value = 0
     currentTrack.value = normalized[safeIndex]
     isCollapsed.value = false
   }
@@ -50,6 +53,7 @@ export const usePlayerStore = defineStore('player', () => {
   function playNext() {
     if (!hasNext.value) return false
     queueIndex.value += 1
+    currentTime.value = 0
     currentTrack.value = queue.value[queueIndex.value]
     isCollapsed.value = false
     return true
@@ -58,6 +62,7 @@ export const usePlayerStore = defineStore('player', () => {
   function playPrev() {
     if (!hasPrev.value) return false
     queueIndex.value -= 1
+    currentTime.value = 0
     currentTrack.value = queue.value[queueIndex.value]
     isCollapsed.value = false
     return true
@@ -66,9 +71,14 @@ export const usePlayerStore = defineStore('player', () => {
   function playAt(index) {
     if (index < 0 || index >= queue.value.length) return false
     queueIndex.value = index
+    currentTime.value = 0
     currentTrack.value = queue.value[index]
     isCollapsed.value = false
     return true
+  }
+
+  function setCurrentTime(t) {
+    currentTime.value = Number(t) || 0
   }
 
   function toggleQueue() {
@@ -101,6 +111,7 @@ export const usePlayerStore = defineStore('player', () => {
     queueIndex.value = -1
     isCollapsed.value = false
     isQueueOpen.value = false
+    currentTime.value = 0
   }
 
   return {
@@ -113,6 +124,7 @@ export const usePlayerStore = defineStore('player', () => {
     hasNext,
     isCollapsed,
     isQueueOpen,
+    currentTime,
     playTrack,
     playQueue,
     playNext,
@@ -120,6 +132,7 @@ export const usePlayerStore = defineStore('player', () => {
     playAt,
     toggleQueue,
     closeQueue,
+    setCurrentTime,
     streamUrl,
     collapse,
     expand,

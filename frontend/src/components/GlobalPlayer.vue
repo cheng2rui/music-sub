@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { getAlbumCover, getFile } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 
@@ -54,7 +54,68 @@ async function toggleNowPanel() {
 
 watch(() => player.currentId, () => {
   trackDetail.value = null
+  player.setCurrentTime(0)
   if (isNowOpen.value) loadTrackDetail()
+})
+
+const audioRef = ref(null)
+const lyricsListRef = ref(null)
+const parsedLyrics = computed(() => parseLrc(trackDetail.value?.lyrics))
+const activeLyricIndex = computed(() => {
+  const lines = parsedLyrics.value
+  if (!lines.length) return -1
+  const t = player.currentTime
+  let idx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].time <= t + 0.05) idx = i
+    else break
+  }
+  return idx
+})
+
+function parseLrc(text) {
+  if (!text || typeof text !== 'string') return []
+  const lines = []
+  const re = /\[(\d+):(\d+(?:[.:]\d+)?)\]/g
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw) continue
+    const matches = [...raw.matchAll(re)]
+    if (!matches.length) continue
+    const content = raw.replace(re, '').trim()
+    if (!content) continue
+    for (const m of matches) {
+      const min = Number(m[1])
+      const sec = Number(String(m[2]).replace(':', '.'))
+      if (Number.isFinite(min) && Number.isFinite(sec)) {
+        lines.push({ time: min * 60 + sec, text: content })
+      }
+    }
+  }
+  return lines.sort((a, b) => a.time - b.time)
+}
+
+function onTimeUpdate(e) {
+  player.setCurrentTime(e.target.currentTime || 0)
+}
+
+function onLoadedMeta(e) {
+  player.setCurrentTime(e.target.currentTime || 0)
+}
+
+function seekTo(time) {
+  if (audioRef.value && Number.isFinite(time)) {
+    audioRef.value.currentTime = time
+    audioRef.value.play?.()
+  }
+}
+
+watch(activeLyricIndex, async (idx) => {
+  if (idx < 0 || !lyricsListRef.value) return
+  await nextTick()
+  const el = lyricsListRef.value.querySelector(`[data-lyric-index='${idx}']`)
+  if (el && typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 })
 
 function formatDuration(seconds) {
@@ -86,12 +147,15 @@ function formatDuration(seconds) {
 
     <audio
       v-show="!player.isCollapsed"
+      ref="audioRef"
       :key="player.currentId"
       class="player-audio"
       controls
       autoplay
       :src="player.streamUrl()"
       @ended="player.playNext"
+      @timeupdate="onTimeUpdate"
+      @loadedmetadata="onLoadedMeta"
     />
 
     <div v-if="player.isCollapsed" class="mini-duration">{{ formatDuration(player.currentTrack?.duration) }}</div>
@@ -136,6 +200,15 @@ function formatDuration(seconds) {
           <span v-if="trackDetail?.genre">{{ trackDetail.genre }}</span>
         </div>
         <div v-if="detailLoading" class="lyrics-box muted">加载曲目信息中...</div>
+        <div v-else-if="parsedLyrics.length" ref="lyricsListRef" class="lyrics-box lyrics-list">
+          <button
+            v-for="(line, idx) in parsedLyrics"
+            :key="`${line.time}-${idx}`"
+            :data-lyric-index="idx"
+            :class="['lyric-line', { active: idx === activeLyricIndex }]"
+            @click="seekTo(line.time)"
+          >{{ line.text }}</button>
+        </div>
         <pre v-else-if="trackDetail?.lyrics" class="lyrics-box">{{ trackDetail.lyrics }}</pre>
         <div v-else class="lyrics-box muted">暂无歌词。可以在专辑详情里重新刮削补齐歌词。</div>
       </div>
@@ -297,6 +370,11 @@ function formatDuration(seconds) {
 .now-meta span:not(:last-child)::after { content: '·'; margin-left: 8px; color: var(--text-muted); }
 .lyrics-box { min-height: 128px; max-height: 220px; overflow-y: auto; margin: 0; padding: 12px; border-radius: 14px; background: var(--surface); color: var(--text-dim); font-size: 12px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
 .lyrics-box.muted { display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-muted); }
+.lyrics-list { display: flex; flex-direction: column; gap: 4px; padding: 12px 12px; }
+.lyric-line { width: 100%; text-align: center; border: 0; background: transparent; color: var(--text-muted); padding: 4px 6px; cursor: pointer; font-size: 13px; line-height: 1.6; transition: color .15s, transform .15s; }
+.lyric-line:hover { color: var(--text-dim); }
+.lyric-line.active { color: var(--text); font-weight: 800; transform: scale(1.04); }
+
 .queue-head div { display: flex; flex-direction: column; gap: 2px; }
 .queue-head strong { font-size: 14px; }
 .queue-head span { font-size: 12px; color: var(--text-dim); }
