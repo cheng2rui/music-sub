@@ -458,23 +458,84 @@ def rescan_metadata(file_ids: list[int] = [], album_artist: str = "", album_name
 
 @router.post("/rescrape_albums")
 def rescrape_albums(payload: dict = Body(default={}), db: Session = Depends(get_db)):
-    """Batch rescrape multiple albums. Body: {albums: [{artist, album}]}"""
+    """Batch rescrape multiple albums. Body: {albums: [{artist, album}], async?: bool}
+
+    Default async=true: enqueue a background job and return its id immediately.
+    Pass async=false to keep the legacy synchronous behaviour.
+    """
     albums = (payload or {}).get("albums") or []
+    is_async = (payload or {}).get("async", True)
     if not albums:
         return {"ok": True, "results": []}
-    results = []
+
+    cleaned = []
     for entry in albums:
         artist = (entry or {}).get("artist")
         album = (entry or {}).get("album")
-        if not artist or not album:
-            continue
+        if artist and album:
+            cleaned.append({"artist": artist, "album": album})
+    if not cleaned:
+        return {"ok": True, "results": []}
+
+    if not is_async:
+        results = []
+        for entry in cleaned:
+            try:
+                res = rescrape_files(file_ids=[], album_artist=entry["artist"], album_name=entry["album"], db=db)
+            except Exception as e:
+                results.append({**entry, "ok": False, "error": str(e)[:200]})
+                continue
+            results.append({**entry, **res})
+        return {"ok": True, "results": results}
+
+    from app.services.scrape_jobs import runner as job_runner, mark_step
+    from app.db import SessionLocal
+
+    step_labels = [f"{e['artist']} · {e['album']}" for e in cleaned]
+
+    def _run(job):
+        from app.api.library import rescrape_files as _rescrape
+        ok = 0
+        scraped_total = 0
+        track_total = 0
+        local_db = SessionLocal()
         try:
-            res = rescrape_files(file_ids=[], album_artist=artist, album_name=album, db=db)
-        except Exception as e:
-            results.append({"artist": artist, "album": album, "ok": False, "error": str(e)})
-            continue
-        results.append({"artist": artist, "album": album, **res})
-    return {"ok": True, "results": results}
+            for idx, entry in enumerate(cleaned):
+                step = job.steps[idx]
+                step.status = "running"
+                try:
+                    res = _rescrape(file_ids=[], album_artist=entry["artist"], album_name=entry["album"], db=local_db)
+                    scraped = int(res.get("scraped") or 0)
+                    total = int(res.get("total") or 0)
+                    scraped_total += scraped
+                    track_total += total
+                    msg = res.get("message") or f"{scraped}/{total}"
+                    mark_step(step, "ok" if total else "skipped", msg)
+                    ok += 1
+                except Exception as e:
+                    mark_step(step, "failed", str(e)[:200])
+                job.progress = idx + 1
+                job.summary = {"ok": ok, "scraped": scraped_total, "tracks": track_total}
+        finally:
+            local_db.close()
+
+    job = job_runner.submit("rescrape_albums", total=len(cleaned), runner=_run, step_labels=step_labels)
+    return {"ok": True, "job_id": job.id, "total": len(cleaned)}
+
+
+@router.get("/jobs")
+def list_jobs(limit: int = 20):
+    from app.services.scrape_jobs import runner as job_runner
+    return {"jobs": job_runner.list(limit=limit)}
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    from app.services.scrape_jobs import runner as job_runner
+    job = job_runner.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job.to_dict()
 
 
 @router.put("/file/{file_id}")

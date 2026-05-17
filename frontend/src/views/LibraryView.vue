@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, rescrapeAlbums, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -80,15 +80,42 @@ function openHealthAlbum(item) {
 }
 
 const batchBusy = ref(false)
+const batchJob = ref(null)
+let batchPollTimer = null
+
+async function pollBatchJob(jobId) {
+  try {
+    batchJob.value = await getLibraryJob(jobId)
+  } catch (e) {
+    console.warn('poll job failed', e)
+    return
+  }
+  if (batchJob.value && (batchJob.value.status === 'running' || batchJob.value.status === 'queued')) {
+    batchPollTimer = setTimeout(() => pollBatchJob(jobId), 1500)
+  } else {
+    batchBusy.value = false
+    await Promise.all([loadHealth(healthKind.value), loadStats()])
+  }
+}
+
 async function batchRescrapeCurrentKind() {
   if (!healthItems.value.length) return
   batchBusy.value = true
+  batchJob.value = null
+  if (batchPollTimer) { clearTimeout(batchPollTimer); batchPollTimer = null }
   try {
     const albums = healthItems.value.map(it => ({ artist: it.artist, album: it.album }))
-    await rescrapeAlbums(albums)
-    await Promise.all([loadHealth(healthKind.value), loadStats()])
-  } catch (e) { console.error(e) }
-  finally { batchBusy.value = false }
+    const res = await rescrapeAlbums(albums)
+    if (res?.job_id) {
+      pollBatchJob(res.job_id)
+    } else {
+      batchBusy.value = false
+      await Promise.all([loadHealth(healthKind.value), loadStats()])
+    }
+  } catch (e) {
+    console.error(e)
+    batchBusy.value = false
+  }
 }
 
 async function batchRescanMissingDuration() {
@@ -425,6 +452,26 @@ onMounted(() => { loadStats(); loadAlbums() })
             @click="batchRescrapeCurrentKind"
           >批量重刮削当前 {{ healthItems.length }} 项</AppButton>
         </div>
+        <div v-if="batchJob" class="job-progress">
+          <div class="job-progress-head">
+            <span>后台任务: {{ batchJob.status }}</span>
+            <span>{{ batchJob.progress }} / {{ batchJob.total }}</span>
+          </div>
+          <div class="job-progress-bar">
+            <div :style="`width:${batchJob.total ? Math.round(batchJob.progress * 100 / batchJob.total) : 0}%`"></div>
+          </div>
+          <div v-if="batchJob.steps?.length" class="job-progress-list">
+            <div
+              v-for="step in batchJob.steps"
+              :key="step.label"
+              :class="['job-step', step.status]"
+            >
+              <span class="job-step-status">{{ step.status }}</span>
+              <span class="job-step-label">{{ step.label }}</span>
+              <span v-if="step.message" class="job-step-msg">{{ step.message }}</span>
+            </div>
+          </div>
+        </div>
         <div v-if="healthLoading" class="loading-text">扫描中...</div>
         <div v-else-if="!healthItems.length" class="loading-text">该类别暂无问题，干净。</div>
         <div v-else class="health-list">
@@ -519,6 +566,18 @@ onMounted(() => { loadStats(); loadAlbums() })
 .health-sub { font-size: 12px; color: var(--text-dim); }
 .health-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .health-batch-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.job-progress { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.job-progress-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); }
+.job-progress-bar { height: 6px; background: var(--bg-elevated); border-radius: 999px; overflow: hidden; }
+.job-progress-bar > div { height: 100%; background: var(--accent); transition: width .25s; }
+.job-progress-list { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.job-step { display: grid; grid-template-columns: 64px minmax(0,1fr) auto; gap: 8px; align-items: center; font-size: 12px; }
+.job-step-status { text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
+.job-step.ok .job-step-status { color: var(--success, #4ade80); }
+.job-step.failed .job-step-status { color: var(--danger, #f87171); }
+.job-step.running .job-step-status { color: var(--accent); }
+.job-step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.job-step-msg { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }

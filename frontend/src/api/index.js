@@ -108,10 +108,12 @@ export const rescanLibraryMetadata = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/rescan_metadata${qs ? '?' + qs : ''}`, { method: 'POST' }).then(r => r.json())
 }
-export const rescrapeAlbums = (albums) => authFetch('/api/library/rescrape_albums', {
+export const rescrapeAlbums = (albums, opts = {}) => authFetch('/api/library/rescrape_albums', {
   method: 'POST',
-  body: JSON.stringify({ albums })
+  body: JSON.stringify({ albums, async: opts.async !== false })
 }).then(r => r.json())
+export const getLibraryJob = (id) => authFetch(`/api/library/jobs/${id}`).then(r => r.json())
+export const listLibraryJobs = (limit = 20) => authFetch(`/api/library/jobs?limit=${limit}`).then(r => r.json())
 export const getAlbumTracks = (artist, album) =>
   authFetch(`/api/library/album-tracks?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`).then(r => r.json())
 export const getAlbumCover = (artist, album) =>
