@@ -177,7 +177,7 @@ def search_kugou(keyword: str, limit: int = 20) -> list[OnlineSong]:
 
 
 def search_netease(keyword: str, limit: int = 20) -> list[OnlineSong]:
-    """Search NetEase using public APIs. Some songs may not expose a playable URL."""
+    """Search NetEase using public APIs. 优先试 lossless（FLAC），失败回落 standard mp3。"""
     try:
         resp = _SESSION.get(
             "https://music.163.com/api/search/get/web",
@@ -197,28 +197,42 @@ def search_netease(keyword: str, limit: int = 20) -> list[OnlineSong]:
             artists = row.get("artists") or []
             artist = "/".join(a.get("name", "") for a in artists)
             title = row.get("name", "")
-            player = _SESSION.get(
-                "https://music.163.com/api/song/enhance/player/url/v1",
-                params={"id": sid, "ids": f"[{sid}]", "level": "standard", "encodeType": "mp3"},
-                headers={"Referer": f"https://music.163.com/song?id={sid}"},
-                timeout=15,
-            ).json()
-            item = (player.get("data") or [{}])[0]
-            dl_url = item.get("url") or ""
-            size = int(item.get("size") or 0)
             album_data = row.get("album") or {}
             album_name = album_data.get("name", "") if isinstance(album_data, dict) else str(album_data or "")
+
+            dl_url, size, ext = "", 0, "mp3"
+            # 参考 music-lib netease: lossless > exhigh > standard。不带登录拿不到的会自动回落。
+            for level, expect_ext in (("lossless", "flac"), ("exhigh", "mp3"), ("standard", "mp3")):
+                try:
+                    player = _SESSION.get(
+                        "https://music.163.com/api/song/enhance/player/url/v1",
+                        params={"id": sid, "ids": f"[{sid}]", "level": level, "encodeType": expect_ext},
+                        headers={"Referer": f"https://music.163.com/song?id={sid}"},
+                        timeout=15,
+                    ).json()
+                except Exception:
+                    continue
+                item = (player.get("data") or [{}])[0]
+                url = item.get("url") or ""
+                if not url:
+                    continue
+                dl_url = url
+                size = int(item.get("size") or 0)
+                # 以返回 URL 为准判断格式，防止服务器静默降级
+                ext = "flac" if ".flac" in url.lower() else "mp3"
+                break
+
             results.append(OnlineSong(
                 source="netease",
                 song_id=str(sid),
                 title=title,
                 artist=artist,
                 album=album_name,
-                filename=f"{_clean_filename(title)} - {_clean_filename(artist)}.mp3",
+                filename=f"{_clean_filename(title)} - {_clean_filename(artist)}.{ext}",
                 url=dl_url,
                 lyric_url=f"https://music.163.com/api/song/lyric?id={sid}&lv=1&kv=1&tv=-1",
                 size=size,
-                format="mp3",
+                format=ext,
                 disabled=not bool(dl_url),
             ))
         except Exception as e:
@@ -226,8 +240,135 @@ def search_netease(keyword: str, limit: int = 20) -> list[OnlineSong]:
     return results
 
 
+def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
+    """Search QQ Music. 参考 music-lib qq: 先 search_for_qq_cp 拿 songmid，再 musicu.fcg 拿 vkey。
+
+    依次尝试质量档位 (FLAC → 320k → 128k)，不带 cookie 拿不到 VIP 资源、会静默回落。
+    """
+    try:
+        resp = _SESSION.get(
+            "https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp",
+            params={"w": keyword, "format": "json", "p": 1, "n": limit, "new_json": 1},
+            headers={"Referer": "https://y.qq.com/"},
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"[online:qq] search failed: {e}")
+        return []
+
+    rows = ((data.get("data") or {}).get("song") or {}).get("list") or []
+    if not rows:
+        return []
+
+    results: list[OnlineSong] = []
+    for row in rows[:limit]:
+        try:
+            song_mid = row.get("songmid") or row.get("mid") or ""
+            if not song_mid:
+                continue
+            # 跳过付费不免费试听的资源（拿到也只能下 30s 试听片段）
+            pay = row.get("pay") or {}
+            paydownload = int(pay.get("paydownload") or 0)
+            title = row.get("songname") or row.get("name") or row.get("title") or ""
+            album = row.get("albumname") or ""
+            album_mid = row.get("albummid") or ""
+            singers = row.get("singer") or []
+            artist = "/".join(s.get("name", "") for s in singers if s.get("name"))
+            cover = (
+                f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg"
+                if album_mid
+                else ""
+            )
+            url, ext, size = _qq_pick_download_url(song_mid)
+            disabled = (not bool(url)) or paydownload == 1
+            results.append(OnlineSong(
+                source="qq",
+                song_id=song_mid,
+                title=title,
+                artist=artist,
+                album=album,
+                filename=f"{_clean_filename(title)} - {_clean_filename(artist)}.{ext}",
+                url=url,
+                lyric_url=f"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={song_mid}&format=json&nobase64=1&g_tk=5381",
+                cover_url=cover,
+                size=size or int(row.get("size128") or 0),
+                format=ext,
+                disabled=disabled,
+            ))
+        except Exception as e:
+            logger.debug(f"[online:qq] skip item: {e}")
+    return results
+
+
+def _qq_pick_download_url(song_mid: str) -> tuple[str, str, int]:
+    """调 musicu.fcg 拿 vkey，按 FLAC>320k>128k 返回首个可用链接。
+
+    参考 music-lib/qq/download.go: 预生成 filename 列表，哪个 midurlinfo 返回了 purl 就走哪个。
+    """
+    import json
+    import random
+    guid = f"{random.randint(1000000000, 9999999999)}"
+    # Non-VIP 只能拿 320k/128k mp3。VIP 资源需要 cookie，暂不实现。
+    quality_map = [
+        ("F000", "flac"),
+        ("M800", "mp3"),
+        ("M500", "mp3"),
+    ]
+    filenames = [f"{p}{song_mid}{song_mid}.{ext}" for p, ext in quality_map]
+    payload = {
+        "comm": {
+            "cv": 4747474,
+            "ct": 24,
+            "format": "json",
+            "inCharset": "utf-8",
+            "outCharset": "utf-8",
+            "notice": 0,
+            "platform": "yqq.json",
+            "needNewCode": 1,
+            "uin": 0,
+        },
+        "req_1": {
+            "module": "music.vkey.GetVkey",
+            "method": "UrlGetVkey",
+            "param": {
+                "guid": guid,
+                "songmid": [song_mid] * len(filenames),
+                "songtype": [0] * len(filenames),
+                "uin": "0",
+                "loginflag": 1,
+                "platform": "20",
+                "filename": filenames,
+            },
+        },
+    }
+    try:
+        resp = _SESSION.post(
+            "https://u.y.qq.com/cgi-bin/musicu.fcg",
+            data=json.dumps(payload),
+            headers={
+                "Referer": "https://y.qq.com/",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as e:
+        logger.debug(f"[online:qq] vkey fetch failed: {e}")
+        return "", "mp3", 0
+
+    mid_url_info = ((data.get("req_1") or {}).get("data") or {}).get("midurlinfo") or []
+    purl_by_filename = {item.get("filename", ""): item.get("purl", "") for item in mid_url_info}
+    file_size_by_filename = {item.get("filename", ""): int(item.get("filesize") or 0) for item in mid_url_info}
+    for filename, ext in zip(filenames, [e for _, e in quality_map]):
+        purl = purl_by_filename.get(filename) or ""
+        if purl:
+            return f"https://ws.stream.qqmusic.qq.com/{purl}", ext, file_size_by_filename.get(filename, 0)
+    return "", "mp3", 0
+
+
 def search_online(keyword: str, sources: list[str] | None = None, limit: int = 20) -> list[dict]:
-    sources = sources or ["migu", "kugou", "netease"]
+    sources = sources or ["qq", "migu", "kugou", "netease"]
     results: list[OnlineSong] = []
     per_source = max(5, min(limit, 20))
     for src in sources:
@@ -237,6 +378,8 @@ def search_online(keyword: str, sources: list[str] | None = None, limit: int = 2
             results.extend(search_kugou(keyword, per_source))
         elif src == "netease":
             results.extend(search_netease(keyword, per_source))
+        elif src == "qq":
+            results.extend(search_qq(keyword, per_source))
     # Prefer enabled/downloadable first, then larger files.
     results.sort(key=lambda x: (x.disabled, -(x.size or 0)))
     return [r.to_dict() for r in results[:limit]]
