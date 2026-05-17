@@ -40,7 +40,52 @@ class MTeamSite(BaseSite):
         return headers
 
     def search(self, keyword: str) -> list[TorrentInfo]:
-        """Search M-Team for music torrents."""
+        """Search M-Team for music torrents.
+
+        馈头 keyword 是字面 substring 匹配，多词中间加连字符/多个空格会令命中为 0。
+        策略：
+          1. 原样 keyword 走一次
+          2. 如果 0 结果，归一化（多余空白/连字符合并、去掉中间“-”）再走一次
+          3. 如果仍为 0 且是多词，按最长词单独走一次，最后在本地过滤“所有词都出现”
+        """
+        results = self._search_one(keyword)
+        if results:
+            return results
+
+        normalized = self._normalize_keyword(keyword)
+        if normalized and normalized != keyword:
+            results = self._search_one(normalized)
+            if results:
+                return results
+
+        words = [w for w in self._split_words(keyword) if len(w) > 1]
+        if len(words) > 1:
+            # 按词长倒序依次尝试单词搜索，本地过滤“所有词都出现”
+            lowered_words = [w.lower() for w in words]
+            for word in sorted(words, key=len, reverse=True):
+                broad = self._search_one(word)
+                if not broad:
+                    continue
+                hits = [r for r in broad if all(w in r.title.lower() for w in lowered_words)]
+                if hits:
+                    return hits
+        return []
+
+    @staticmethod
+    def _normalize_keyword(keyword: str) -> str:
+        import re
+        # 合并多余空白，以及各种带连字符的分隔（包括中间“-”、全角“－”、点、斜杠等）
+        # 这里包括“蔡依林-什么什么”这种两侧没空格的连字符。
+        cleaned = re.sub(r"[\-\u2010-\u2015\uff0d\u30fb\\\/\|\u3001\u3002,\.;]+", " ", keyword)
+        cleaned = re.sub(r"[\s\u3000]+", " ", cleaned).strip()
+        return cleaned
+
+    @staticmethod
+    def _split_words(keyword: str) -> list[str]:
+        normalized = MTeamSite._normalize_keyword(keyword)
+        return [w for w in normalized.split() if w]
+
+    def _search_one(self, keyword: str) -> list[TorrentInfo]:
         url = f"{self._api_base}/api/torrent/search"
         payload = {
             "keyword": keyword,
@@ -54,12 +99,11 @@ class MTeamSite(BaseSite):
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            logger.error(f"[mteam] Search failed: {e}")
+            logger.error(f"[mteam] Search failed for {keyword!r}: {e}")
             return []
 
         results = []
         for item in data.get("data", {}).get("data", []):
-            # New M-Team API returns torrent fields at top-level; older wrappers may use {torrent, status}.
             torrent = item.get("torrent") or item
             status = item.get("status", {})
             results.append(TorrentInfo(

@@ -44,6 +44,15 @@ function formatSize(bytes) {
   if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB'
   return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'
 }
+
+function formatUploadTime(value) {
+  if (!value) return '-'
+  const text = String(value).trim()
+  if (!text) return '-'
+  // 例如 "2026-04-15 13:41:26" 直接显示日期；其他直接返回原文
+  const m = text.match(/^(\d{4}-\d{2}-\d{2})/)
+  return m ? m[1] : text.slice(0, 16)
+}
 </script>
 
 <template>
@@ -69,6 +78,7 @@ function formatSize(bytes) {
             <th>站点</th>
             <th>大小</th>
             <th>做种</th>
+            <th>上传时间</th>
             <th>下载</th>
           </tr>
         </thead>
@@ -81,6 +91,7 @@ function formatSize(bytes) {
             <td class="text-dim">{{ item.site }}</td>
             <td class="text-dim">{{ formatSize(item.size) }}</td>
             <td class="text-dim">{{ item.seeders ?? '-' }}</td>
+            <td class="text-dim">{{ formatUploadTime(item.upload_time) }}</td>
             <td>
               <AppButton
                 variant="primary"
