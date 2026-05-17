@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -34,6 +35,12 @@ const player = usePlayerStore()
 const scraping = ref(false)
 
 const showHealthModal = ref(false)
+const showToolsModal = ref(false)
+const toolsContext = ref({})
+function openToolbox(ctx = {}) {
+  toolsContext.value = ctx
+  showToolsModal.value = true
+}
 const healthLoading = ref(false)
 const healthRescraping = ref('')
 const healthKind = ref('missing_cover')
@@ -298,6 +305,9 @@ onMounted(() => { loadStats(); loadAlbums() })
       <AppButton variant="ghost" size="sm" @click="openHealthModal">
         治理
       </AppButton>
+      <AppButton variant="ghost" size="sm" @click="openToolbox()">
+        工具箱
+      </AppButton>
     </div>
 
     <!-- 加载状态 -->
@@ -354,6 +364,7 @@ onMounted(() => { loadStats(); loadAlbums() })
         <div class="modal-actions">
           <AppButton variant="primary" size="sm" @click="albumTracks[0] && playTrack(albumTracks[0])">播放第一首</AppButton>
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
+          <AppButton variant="ghost" size="sm" @click="openToolbox({ album_artist: selectedAlbum?.artist, album_name: selectedAlbum?.album })">工具箱</AppButton>
         </div>
         <div class="track-list">
           <div
@@ -495,6 +506,8 @@ onMounted(() => { loadStats(); loadAlbums() })
         </div>
       </div>
     </AppModal>
+
+    <LibraryToolsModal :open="showToolsModal" :context="toolsContext" @close="showToolsModal = false" />
   </div>
 </template>
 

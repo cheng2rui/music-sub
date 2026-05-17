@@ -134,6 +134,16 @@ export const rescrapeLibrary = (params = {}) => {
 }
 export const updateFile = (id, data) => authFetch(`/api/library/file/${id}?${new URLSearchParams(data).toString()}`, { method: 'PUT' }).then(r => r.json())
 
+export const listLibraryTools = () => authFetch('/api/library/tools').then(r => r.json())
+export const previewLibraryTool = (toolId, payload) => authFetch(`/api/library/tools/${toolId}/preview`, {
+  method: 'POST',
+  body: JSON.stringify(payload || {})
+}).then(r => r.json())
+export const applyLibraryTool = (toolId, payload) => authFetch(`/api/library/tools/${toolId}/apply`, {
+  method: 'POST',
+  body: JSON.stringify(payload || {})
+}).then(r => r.json())
+
 // ============ Settings ============
 export const getSettings = () => authFetch('/api/settings/').then(r => r.json())
 export const updateSettings = (data) => authFetch('/api/settings/', {

@@ -740,6 +740,51 @@ def get_job(job_id: str):
     return job.to_dict()
 
 
+@router.get("/tools")
+def list_library_tools():
+    """Available library tools (id/label/description)."""
+    from app.services.library_tools import list_tools
+    return {"tools": list_tools()}
+
+
+@router.post("/tools/{tool_id}/preview")
+def preview_library_tool(tool_id: str, payload: dict = Body(default={})):
+    """Run a library tool in dry-run mode and return the proposed changes."""
+    from app.services.library_tools import tool_preview, ToolError
+    try:
+        result = tool_preview(
+            tool_id,
+            file_ids=payload.get("file_ids") or None,
+            album_artist=payload.get("album_artist") or "",
+            album_name=payload.get("album_name") or "",
+            options=payload.get("options") or {},
+        )
+    except ToolError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result.to_dict()
+
+
+@router.post("/tools/{tool_id}/apply")
+def apply_library_tool(tool_id: str, payload: dict = Body(default={})):
+    """Apply a library tool. Defaults to async via the scrape-job runner."""
+    from app.services.library_tools import tool_apply, ToolError
+    async_mode = bool(payload.get("async", True))
+    try:
+        outcome = tool_apply(
+            tool_id,
+            file_ids=payload.get("file_ids") or None,
+            album_artist=payload.get("album_artist") or "",
+            album_name=payload.get("album_name") or "",
+            options=payload.get("options") or {},
+            async_mode=async_mode,
+        )
+    except ToolError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if async_mode:
+        return {"ok": True, "job_id": outcome.id, "total": outcome.total}
+    return {"ok": True, "summary": outcome}
+
+
 @router.put("/file/{file_id}")
 def update_file_tags(file_id: int, title: str = "", artist: str = "", album: str = "",
                     year: int = 0, genre: str = "", db: Session = Depends(get_db)):
