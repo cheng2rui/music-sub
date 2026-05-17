@@ -186,6 +186,82 @@ def get_album_cover(artist: str, album: str, db: Session = Depends(get_db)):
     return FileResponse(cover)
 
 
+def _has_lrc(file_path: str | None) -> bool:
+    if not file_path:
+        return False
+    try:
+        return Path(file_path).with_suffix(".lrc").exists()
+    except Exception:
+        return False
+
+
+def _is_unknown_artist(artist: str | None) -> bool:
+    if not artist:
+        return True
+    a = artist.strip().lower()
+    return a in {"", "unknown artist", "未知艺人", "unknown", "various artists"}
+
+
+_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped")
+
+
+@router.get("/health")
+def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_db)):
+    """Report library hygiene issues grouped by album."""
+    files = db.query(MusicFile).all()
+    limit = max(1, min(limit, 1000))
+    buckets: dict[str, dict[tuple[str, str], dict]] = {k: {} for k in _HEALTH_KINDS}
+    totals = {k: 0 for k in _HEALTH_KINDS}
+
+    def _add(bucket_key: str, f: MusicFile):
+        artist = (f.artist or "").strip() or "Unknown Artist"
+        album = _display_album(f.album)
+        key = (artist, album)
+        bucket = buckets[bucket_key]
+        if key not in bucket:
+            bucket[key] = {
+                "artist": artist,
+                "album": album,
+                "track_count": 0,
+                "sample_track_id": f.id,
+                "sample_path": f.file_path,
+                "has_cover": bool(_album_cover_path(f.file_path)),
+            }
+        bucket[key]["track_count"] += 1
+        totals[bucket_key] += 1
+
+    for f in files:
+        if not _album_cover_path(f.file_path):
+            _add("missing_cover", f)
+        if not _has_lrc(f.file_path):
+            _add("missing_lyrics", f)
+        if not f.duration or f.duration <= 0:
+            _add("missing_duration", f)
+        if _is_unknown_artist(f.artist):
+            _add("unknown_artist", f)
+        if not f.scraped:
+            _add("unscraped", f)
+
+    def _serialize(bucket_key: str):
+        items = list(buckets[bucket_key].values())
+        items.sort(key=lambda x: x["track_count"], reverse=True)
+        return items[:limit]
+
+    if kind:
+        if kind not in _HEALTH_KINDS:
+            raise HTTPException(status_code=400, detail="未知治理类别")
+        return {
+            "kind": kind,
+            "total": totals[kind],
+            "items": _serialize(kind),
+        }
+
+    return {
+        "totals": totals,
+        "samples": {k: _serialize(k)[:5] for k in _HEALTH_KINDS},
+    }
+
+
 @router.get("/stats")
 def library_stats(db: Session = Depends(get_db)):
     """Get library statistics."""

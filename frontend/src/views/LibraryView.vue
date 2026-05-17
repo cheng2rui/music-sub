@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -32,6 +32,52 @@ const savingTrack = ref(false)
 const player = usePlayerStore()
 
 const scraping = ref(false)
+
+const showHealthModal = ref(false)
+const healthLoading = ref(false)
+const healthRescraping = ref('')
+const healthKind = ref('missing_cover')
+const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0 })
+const healthItems = ref([])
+const healthKinds = [
+  { id: 'missing_cover', label: '缺封面' },
+  { id: 'missing_lyrics', label: '缺歌词' },
+  { id: 'missing_duration', label: '缺时长' },
+  { id: 'unknown_artist', label: '艺人异常' },
+  { id: 'unscraped', label: '未刮削' }
+]
+
+async function openHealthModal() {
+  showHealthModal.value = true
+  await loadHealth(healthKind.value)
+}
+
+async function loadHealth(kind) {
+  healthKind.value = kind
+  healthLoading.value = true
+  try {
+    const data = await getLibraryHealth({ kind, limit: 200 })
+    healthItems.value = Array.isArray(data?.items) ? data.items : []
+    if (data?.totals) healthTotals.value = { ...healthTotals.value, ...data.totals }
+    else healthTotals.value[kind] = data?.total ?? healthItems.value.length
+  } catch (e) { console.error(e) }
+  finally { healthLoading.value = false }
+}
+
+async function rescrapeHealthAlbum(item) {
+  const id = `${item.artist}::${item.album}`
+  healthRescraping.value = id
+  try {
+    await rescrapeLibrary({ album_artist: item.artist, album_name: item.album })
+    await Promise.all([loadHealth(healthKind.value), loadStats()])
+  } catch (e) { console.error(e) }
+  finally { healthRescraping.value = '' }
+}
+
+function openHealthAlbum(item) {
+  showHealthModal.value = false
+  router.push({ name: 'album', query: { artist: item.artist, album: item.album } })
+}
 
 async function loadStats() {
   try {
@@ -201,6 +247,9 @@ onMounted(() => { loadStats(); loadAlbums() })
       <AppButton variant="ghost" size="sm" :loading="scraping" @click="handleScrapeUnscraped">
         刮削未完成
       </AppButton>
+      <AppButton variant="ghost" size="sm" @click="openHealthModal">
+        治理
+      </AppButton>
     </div>
 
     <!-- 加载状态 -->
@@ -325,6 +374,43 @@ onMounted(() => { loadStats(); loadAlbums() })
         </div>
       </div>
     </AppModal>
+
+    <AppModal v-if="showHealthModal" title="音乐库治理" @close="showHealthModal = false">
+      <div class="health-modal">
+        <div class="health-tabs">
+          <button
+            v-for="k in healthKinds"
+            :key="k.id"
+            :class="['health-tab', { active: healthKind === k.id }]"
+            @click="loadHealth(k.id)"
+          >
+            {{ k.label }}
+            <span v-if="healthTotals[k.id]" class="health-count">{{ healthTotals[k.id] }}</span>
+          </button>
+        </div>
+        <div v-if="healthLoading" class="loading-text">扫描中...</div>
+        <div v-else-if="!healthItems.length" class="loading-text">该类别暂无问题，干净。</div>
+        <div v-else class="health-list">
+          <div v-for="item in healthItems" :key="`${item.artist}-${item.album}`" class="health-row">
+            <div class="health-info" @click="openHealthAlbum(item)">
+              <div class="health-album">{{ item.album }}</div>
+              <div class="health-sub">{{ item.artist }} · {{ item.track_count }} 首</div>
+            </div>
+            <div class="health-actions">
+              <AppBadge :color="item.has_cover ? 'green' : 'orange'">
+                {{ item.has_cover ? '有封面' : '无封面' }}
+              </AppBadge>
+              <AppButton
+                variant="primary"
+                size="sm"
+                :loading="healthRescraping === `${item.artist}::${item.album}`"
+                @click="rescrapeHealthAlbum(item)"
+              >重刮削</AppButton>
+            </div>
+          </div>
+        </div>
+      </div>
+    </AppModal>
   </div>
 </template>
 
@@ -382,6 +468,19 @@ onMounted(() => { loadStats(); loadAlbums() })
 .tag-row label { font-size: 13px; color: var(--text-dim); min-width: 50px; }
 .tag-row input { flex: 1; }
 .tag-actions { display: flex; gap: 8px; margin-top: 4px; }
+.health-modal { display: flex; flex-direction: column; gap: 14px; min-width: 460px; }
+.health-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.health-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; font-size: 12px; }
+.health-tab.active { background: var(--accent); border-color: var(--accent); color: #000; }
+.health-count { background: rgba(255,255,255,.18); border-radius: 999px; padding: 0 6px; font-size: 11px; }
+.health-tab.active .health-count { background: rgba(0,0,0,.18); }
+.health-list { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; }
+.health-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; border-radius: var(--radius-sm); }
+.health-row:hover { background: var(--surface-hover); }
+.health-info { flex: 1; min-width: 0; cursor: pointer; }
+.health-album { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.health-sub { font-size: 12px; color: var(--text-dim); }
+.health-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }

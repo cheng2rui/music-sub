@@ -100,6 +100,10 @@ export const getLibraryAlbums = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/albums${qs ? '?' + qs : ''}`).then(r => r.json())
 }
+export const getLibraryHealth = (params = {}) => {
+  const qs = new URLSearchParams(params).toString()
+  return authFetch(`/api/library/health${qs ? '?' + qs : ''}`).then(r => r.json())
+}
 export const getAlbumTracks = (artist, album) =>
   authFetch(`/api/library/album-tracks?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`).then(r => r.json())
 export const getAlbumCover = (artist, album) =>
