@@ -6,12 +6,14 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from app.auth import verify_token
+from app.config import config
 from app.db import get_db
 from app.models import MusicFile
 
 router = APIRouter()
 
 UNKNOWN_ALBUM = "单曲/未知专辑"
+UNKNOWN_ARTIST = "Unknown Artist"
 
 
 def _display_album(album: str | None) -> str:
@@ -110,7 +112,7 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
     result = []
     for r in rows:
         result.append({
-            "artist": r.artist or "Unknown Artist",
+            "artist": r.artist or UNKNOWN_ARTIST,
             "album": _display_album(r.album),
             "year": r.year,
             "track_count": int(r.track_count or 0),
@@ -127,7 +129,11 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
 @router.get("/album-tracks")
 def list_album_tracks(artist: str, album: str, db: Session = Depends(get_db)):
     """List tracks in a specific album."""
-    query = db.query(MusicFile).filter(MusicFile.artist == artist)
+    query = db.query(MusicFile)
+    if artist == UNKNOWN_ARTIST:
+        query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+    else:
+        query = query.filter(MusicFile.artist == artist)
     if album == UNKNOWN_ALBUM:
         query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
     else:
@@ -172,7 +178,11 @@ def get_cover(file_id: int, db: Session = Depends(get_db)):
 @router.get("/album-cover")
 def get_album_cover(artist: str, album: str, db: Session = Depends(get_db)):
     """Serve cover for an album by (artist, album)."""
-    query = db.query(MusicFile).filter(MusicFile.artist == artist)
+    query = db.query(MusicFile)
+    if artist == UNKNOWN_ARTIST:
+        query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+    else:
+        query = query.filter(MusicFile.artist == artist)
     if album == UNKNOWN_ALBUM:
         query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
     else:
@@ -214,7 +224,7 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
     totals = {k: 0 for k in _HEALTH_KINDS}
 
     def _add(bucket_key: str, f: MusicFile):
-        artist = (f.artist or "").strip() or "Unknown Artist"
+        artist = (f.artist or "").strip() or UNKNOWN_ARTIST
         album = _display_album(f.album)
         key = (artist, album)
         bucket = buckets[bucket_key]
@@ -363,6 +373,31 @@ def get_file_detail(file_id: int, db: Session = Depends(get_db)):
     return result
 
 
+def _infer_hints_from_library_path(file_path: str) -> tuple[str, str]:
+    """从 library 路径中推出 (artist, album) 作为 hint。
+
+    文件位于 `{library_root}/{artist}/{album}/{track}.ext` 时，父目录=album、
+    祖父目录=artist。如果父与祖父同名（刮削失败退化出的重复目录）
+    或者文件不在 library 下两层，返回空。
+    """
+    try:
+        path = Path(file_path).resolve()
+        library_root = Path(config.paths.library).resolve()
+    except Exception:
+        return "", ""
+    try:
+        rel = path.relative_to(library_root)
+    except ValueError:
+        return "", ""
+    parts = rel.parts
+    if len(parts) < 3:
+        return "", ""
+    artist, album = parts[0], parts[1]
+    if artist == album:
+        return "", ""
+    return artist, album
+
+
 @router.post("/rescrape")
 def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name: str = "",
                   db: Session = Depends(get_db)):
@@ -374,7 +409,11 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
     if file_ids:
         files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
     elif album_artist and album_name:
-        query = db.query(MusicFile).filter(MusicFile.artist == album_artist)
+        query = db.query(MusicFile)
+        if album_artist == UNKNOWN_ARTIST:
+            query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+        else:
+            query = query.filter(MusicFile.artist == album_artist)
         if album_name == UNKNOWN_ALBUM:
             query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
         else:
@@ -390,13 +429,18 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
     scraped_count = 0
     # 在专辑级重刮削时强制专辑/主艺人一致，避免某一首被同名专辑带走
     locked_album = album_name if album_name and album_name != UNKNOWN_ALBUM else ""
-    locked_artist = album_artist or ""
+    locked_artist = album_artist if album_artist and album_artist != UNKNOWN_ARTIST else ""
     for f in files:
         if not f.file_path or not os.path.exists(f.file_path):
             continue
         title_hint = (f.title or "").strip()
         artist_hint = (f.artist or "").strip() or locked_artist
         album_hint = (f.album or "").strip() or locked_album
+        # DB 字段缺失时，从 library 路径 (artist/album/track) 中补，比文件名推断准
+        if not artist_hint or not album_hint:
+            path_artist, path_album = _infer_hints_from_library_path(f.file_path)
+            artist_hint = artist_hint or path_artist
+            album_hint = album_hint or path_album
         meta = _scrape_file(
             f.file_path,
             title_hint=title_hint,
@@ -442,7 +486,11 @@ def rescan_metadata(file_ids: list[int] = [], album_artist: str = "", album_name
     if file_ids:
         files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
     elif album_artist and album_name:
-        query = db.query(MusicFile).filter(MusicFile.artist == album_artist)
+        query = db.query(MusicFile)
+        if album_artist == UNKNOWN_ARTIST:
+            query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+        else:
+            query = query.filter(MusicFile.artist == album_artist)
         if album_name == UNKNOWN_ALBUM:
             query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
         else:

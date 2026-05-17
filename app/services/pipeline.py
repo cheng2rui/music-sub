@@ -110,7 +110,8 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
                     if key in seen_keys:
                         continue
                     seen_keys.add(key)
-                    scored_candidates.append(score_meta(meta, title_hint, artist_hint, album_hint))
+                    # 使用本次搜索的 hint 评分，以便 fallback 反转顺序后能拿到高分
+                    scored_candidates.append(score_meta(meta, t_hint, a_hint, album_hint))
 
     _collect(title_hint, artist_hint)
 

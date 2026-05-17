@@ -1,6 +1,6 @@
 {
   "name": "music-sub-frontend",
-  "version": "0.5.32",
+  "version": "0.5.34",
   "private": true,
   "type": "module",
   "scripts": {
