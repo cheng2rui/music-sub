@@ -18,6 +18,9 @@ from app.services.library_tools import (
     split_meta as split_meta_mod,
     organize as organize_mod,
     dedupe as dedupe_mod,
+    split_audio as split_audio_mod,
+    zh_convert as zh_convert_mod,
+    fix_garble as fix_garble_mod,
 )
 from app.services.scrape_jobs import runner as job_runner, JobStep, mark_step
 
@@ -54,6 +57,30 @@ _TOOLS: dict[str, dict[str, Any]] = {
         "description": "\u68c0\u6d4b\u91cd\u590d\u66f2\u76ee\uff08artist/title/duration/size\uff09\u5e76\u63d0\u4f9b\u4fdd\u7559 / \u5220\u9664\u5efa\u8bae\u3002",
         "preview": dedupe_mod.preview,
         "apply": dedupe_mod.apply,
+    },
+    "split_audio": {
+        "label": "分割音轨",
+        "description": "根据同名 .cue 把整轨 FLAC/APE/WAV 用 ffmpeg 拆成分轨。",
+        "preview": split_audio_mod.preview,
+        "apply": split_audio_mod.apply,
+    },
+    "zh_t2s": {
+        "label": "繁体转简体",
+        "description": "用 OpenCC t2s 把标题/艺人/专辑/风格里的繁体中文转为简体。",
+        "preview": zh_convert_mod.preview_to_simplified,
+        "apply": zh_convert_mod.apply_to_simplified,
+    },
+    "zh_s2t": {
+        "label": "简体转繁体",
+        "description": "用 OpenCC s2t 把标题/艺人/专辑/风格里的简体中文转为繁体。",
+        "preview": zh_convert_mod.preview_to_traditional,
+        "apply": zh_convert_mod.apply_to_traditional,
+    },
+    "fix_garble": {
+        "label": "乱码修复",
+        "description": "检测 GBK/UTF-8 被 latin-1 误读产生的乱码，尝试还原。",
+        "preview": fix_garble_mod.preview,
+        "apply": fix_garble_mod.apply,
     },
 }
 
