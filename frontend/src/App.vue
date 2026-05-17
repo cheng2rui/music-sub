@@ -48,7 +48,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.5.23</div>
+        <div class="version-tag">v0.5.24</div>
       </div>
     </aside>
 

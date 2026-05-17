@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Music Sub",
     description="音乐订阅下载管理系统 - PT站搜索订阅 + QB下载 + 硬链接整理 + 自动刮削",
-    version="0.5.23",
+    version="0.5.24",
     lifespan=lifespan,
 )
 
@@ -94,7 +94,7 @@ app.include_router(online.router, prefix="/api/online", tags=["online"])
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.5.23"}
+    return {"status": "ok", "version": "0.5.24"}
 
 
 # Serve new Vue SPA (web/dist/) with fallback to legacy (web/index.html)
