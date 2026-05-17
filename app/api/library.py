@@ -629,6 +629,35 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
     return {"ok": True, "message": f"刮削完成 {scraped_count}/{len(files)}", "scraped": scraped_count, "total": len(files)}
 
 
+@router.post("/scan")
+def scan_library_endpoint(payload: dict = Body(default={})):
+    """Import/rescan the configured library directory from local files/tags."""
+    from app.config import config
+    from app.db import SessionLocal
+    from app.services.library_scan import scan_library as _scan_library
+    from app.services.scrape_jobs import runner as job_runner
+
+    root = (payload or {}).get("root") or config.paths.library
+    remove_missing = bool((payload or {}).get("remove_missing", False))
+
+    def _run(job):
+        local_db = SessionLocal()
+        try:
+            def progress(done: int, total: int, label: str):
+                job.total = total
+                job.progress = done
+                if done % 25 == 0 or done == total:
+                    job.summary = {"current": label, "scanned": done, "total": total}
+            job.summary = _scan_library(local_db, root=root, remove_missing=remove_missing, progress=progress)
+            job.total = job.summary.get("total", job.total)
+            job.progress = job.total
+        finally:
+            local_db.close()
+
+    job = job_runner.submit("library_scan", total=0, runner=_run, step_labels=[])
+    return {"ok": True, "job_id": job.id, "root": root}
+
+
 @router.post("/rescan_metadata")
 def rescan_metadata(file_ids: list[int] = [], album_artist: str = "", album_name: str = "",
                     db: Session = Depends(get_db)):

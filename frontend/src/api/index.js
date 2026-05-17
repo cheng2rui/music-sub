@@ -113,6 +113,10 @@ export const rescanLibraryMetadata = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/rescan_metadata${qs ? '?' + qs : ''}`, { method: 'POST' }).then(r => r.json())
 }
+export const scanLibrary = (payload = {}) => authFetch('/api/library/scan', {
+  method: 'POST',
+  body: JSON.stringify(payload)
+}).then(r => r.json())
 export const rescrapeAlbums = (albums, opts = {}) => authFetch('/api/library/rescrape_albums', {
   method: 'POST',
   body: JSON.stringify({ albums, async: opts.async !== false })

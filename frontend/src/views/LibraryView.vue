@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -33,6 +33,9 @@ const savingTrack = ref(false)
 const player = usePlayerStore()
 
 const scraping = ref(false)
+const scanning = ref(false)
+const scanJob = ref(null)
+let scanPollTimer = null
 
 const showHealthModal = ref(false)
 const showToolsModal = ref(false)
@@ -132,6 +135,36 @@ async function batchRescanMissingDuration() {
     await Promise.all([loadHealth(healthKind.value), loadStats()])
   } catch (e) { console.error(e) }
   finally { batchBusy.value = false }
+}
+
+async function pollScanJob(jobId) {
+  try {
+    scanJob.value = await getLibraryJob(jobId)
+  } catch (e) {
+    console.warn('poll scan job failed', e)
+    scanning.value = false
+    return
+  }
+  if (scanJob.value && (scanJob.value.status === 'running' || scanJob.value.status === 'queued')) {
+    scanPollTimer = setTimeout(() => pollScanJob(jobId), 1500)
+  } else {
+    scanning.value = false
+    await Promise.all([loadStats(), loadAlbums(true)])
+  }
+}
+
+async function runLibraryScan() {
+  scanning.value = true
+  scanJob.value = null
+  if (scanPollTimer) { clearTimeout(scanPollTimer); scanPollTimer = null }
+  try {
+    const res = await scanLibrary({})
+    if (res?.job_id) pollScanJob(res.job_id)
+    else scanning.value = false
+  } catch (e) {
+    console.error(e)
+    scanning.value = false
+  }
 }
 
 async function loadStats() {
@@ -302,12 +335,21 @@ onMounted(() => { loadStats(); loadAlbums() })
       <AppButton variant="ghost" size="sm" :loading="scraping" @click="handleScrapeUnscraped">
         刮削未完成
       </AppButton>
+      <AppButton variant="ghost" size="sm" :loading="scanning" @click="runLibraryScan">
+        扫描资料库
+      </AppButton>
       <AppButton variant="ghost" size="sm" @click="openHealthModal">
         治理
       </AppButton>
       <AppButton variant="ghost" size="sm" @click="openToolbox()">
         工具箱
       </AppButton>
+    </div>
+
+    <div v-if="scanJob" class="scan-status">
+      资料库扫描：{{ scanJob.status }} · {{ scanJob.progress }} / {{ scanJob.total || '?' }}
+      <span v-if="scanJob.summary?.created !== undefined"> · 新增 {{ scanJob.summary.created }} · 更新 {{ scanJob.summary.updated }} · 错误 {{ scanJob.summary.errors }}</span>
+      <span v-else-if="scanJob.summary?.current"> · {{ scanJob.summary.current }}</span>
     </div>
 
     <!-- 加载状态 -->
@@ -518,6 +560,7 @@ onMounted(() => { loadStats(); loadAlbums() })
 .stat-val { font-size: 24px; font-weight: 700; }
 .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.scan-status { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text-dim); font-size: 12px; }
 .search-input { flex: 1; min-width: 220px; }
 .sort-select { min-width: 120px; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-md); padding: 8px 10px; }
 .view-toggles { display: flex; gap: 4px; }
