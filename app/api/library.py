@@ -1,8 +1,8 @@
 """Library API routes."""
 import os
 from pathlib import Path
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from app.auth import verify_token
@@ -300,27 +300,89 @@ def library_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/stream/{file_id}")
-def stream_file(file_id: int, token: str = Query(""), db: Session = Depends(get_db)):
-    """Stream an audio file for in-browser playback.
+def stream_file(request: Request, file_id: int, token: str = Query(""), db: Session = Depends(get_db)):
+    """Stream an audio file with HTTP Range support for seekable playback.
 
-    The endpoint accepts a JWT token query parameter because native audio elements
-    cannot attach Authorization headers.
+    HTML audio elements rely on `Range: bytes=...` for seeking, and Safari/Chrome
+    are especially strict for MP4/M4A containers. FastAPI's FileResponse may send
+    the full file with 200 in this stack, so implement byte ranges explicitly.
     """
     if not verify_token(token):
         raise HTTPException(status_code=401, detail="登录已过期")
     f = db.query(MusicFile).filter(MusicFile.id == file_id).first()
     if not f or not f.file_path or not os.path.exists(f.file_path):
         raise HTTPException(status_code=404, detail="Not found")
+
+    file_path = Path(f.file_path)
+    file_size = file_path.stat().st_size
+    ext = (f.format or file_path.suffix.lstrip(".")).lower()
     media_type = {
         "mp3": "audio/mpeg",
         "flac": "audio/flac",
         "wav": "audio/wav",
         "m4a": "audio/mp4",
+        "mp4": "audio/mp4",
         "aac": "audio/aac",
         "ogg": "audio/ogg",
         "ape": "audio/ape",
-    }.get((f.format or Path(f.file_path).suffix.lstrip(".")).lower(), "application/octet-stream")
-    return FileResponse(f.file_path, media_type=media_type, filename=Path(f.file_path).name)
+    }.get(ext, "application/octet-stream")
+
+    def iter_file(start: int, end: int, chunk_size: int = 1024 * 1024):
+        with open(file_path, "rb") as fh:
+            fh.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = fh.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    range_header = request.headers.get("range")
+    from urllib.parse import quote
+    common_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(file_path.name)}",
+    }
+    if range_header:
+        import re
+        m = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if not m:
+            raise HTTPException(status_code=416, detail="Invalid range")
+        start_s, end_s = m.groups()
+        if start_s:
+            start = int(start_s)
+            end = int(end_s) if end_s else file_size - 1
+        else:
+            # suffix range: bytes=-500 means last 500 bytes
+            suffix = int(end_s or 0)
+            start = max(file_size - suffix, 0)
+            end = file_size - 1
+        if start >= file_size or end < start:
+            return StreamingResponse(
+                iter(()),
+                status_code=416,
+                headers={**common_headers, "Content-Range": f"bytes */{file_size}"},
+                media_type=media_type,
+            )
+        end = min(end, file_size - 1)
+        length = end - start + 1
+        return StreamingResponse(
+            iter_file(start, end),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                **common_headers,
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Content-Length": str(length),
+            },
+        )
+
+    return StreamingResponse(
+        iter_file(0, file_size - 1),
+        media_type=media_type,
+        headers={**common_headers, "Content-Length": str(file_size)},
+    )
 
 
 @router.get("/file/{file_id}")
