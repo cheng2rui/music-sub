@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { getLibraryStats, getLibraryAlbums, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -7,6 +8,7 @@ import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
 import { usePlayerStore } from '@/stores/player.js'
 
+const router = useRouter()
 const stats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
 const albums = ref([])
 const searchQ = ref('')
@@ -61,10 +63,8 @@ async function loadMoreAlbums() {
   await loadAlbums(false)
 }
 
-async function openAlbum(artist, album) {
-  selectedAlbum.value = { artist, album }
-  albumTracks.value = await getAlbumTracks(artist, album)
-  showAlbumModal.value = true
+function openAlbum(artist, album) {
+  router.push({ name: 'album', query: { artist, album } })
 }
 
 async function rescrapeAlbum() {

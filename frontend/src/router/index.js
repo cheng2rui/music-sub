@@ -40,6 +40,12 @@ const routes = [
     component: () => import('@/views/LibraryView.vue')
   },
   {
+    path: '/album',
+    name: 'album',
+    meta: { title: '专辑详情' },
+    component: () => import('@/views/AlbumView.vue')
+  },
+  {
     path: '/settings',
     name: 'settings',
     meta: { title: '设置' },

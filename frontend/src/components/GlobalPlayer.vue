@@ -26,6 +26,11 @@ function formatDuration(seconds) {
       <div class="player-sub">{{ subtitle || '未知来源' }}</div>
     </div>
 
+    <div v-show="!player.isCollapsed" class="transport">
+      <button class="transport-btn" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev">⏮</button>
+      <button class="transport-btn" title="下一首" :disabled="!player.hasNext" @click="player.playNext">⏭</button>
+    </div>
+
     <audio
       v-show="!player.isCollapsed"
       :key="player.currentId"
@@ -33,9 +38,11 @@ function formatDuration(seconds) {
       controls
       autoplay
       :src="player.streamUrl()"
+      @ended="player.playNext"
     />
 
     <div v-if="player.isCollapsed" class="mini-duration">{{ formatDuration(player.currentTrack?.duration) }}</div>
+    <div v-else-if="player.queueSize > 1" class="queue-hint">{{ player.queueIndex + 1 }}/{{ player.queueSize }}</div>
 
     <button class="player-close" title="关闭播放器" @click="player.close">×</button>
   </div>
@@ -68,7 +75,8 @@ function formatDuration(seconds) {
   padding: 8px 10px;
 }
 .collapse-toggle,
-.player-close {
+.player-close,
+.transport-btn {
   flex-shrink: 0;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -84,8 +92,11 @@ function formatDuration(seconds) {
   line-height: 1;
 }
 .collapse-toggle:hover,
-.player-close:hover { color: var(--text); background: var(--surface-hover); }
+.player-close:hover,
+.transport-btn:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.transport-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .player-close:hover { color: var(--danger); }
+.transport { display: flex; gap: 6px; align-items: center; }
 .player-info {
   min-width: 180px;
   max-width: 360px;
@@ -111,7 +122,8 @@ function formatDuration(seconds) {
   flex: 1;
   min-width: 260px;
 }
-.mini-duration {
+.mini-duration,
+.queue-hint {
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-muted);
