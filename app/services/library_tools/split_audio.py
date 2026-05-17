@@ -325,6 +325,7 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                 row.format = out_path.suffix.lstrip(".")
                 row.scraped = True
                 row.artist = meta.artist
+                row.album_artist = meta.album_artist or meta.artist
                 row.album = meta.album
                 row.title = meta.title
                 row.year = meta.year

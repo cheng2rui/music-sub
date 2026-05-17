@@ -370,6 +370,7 @@ def _upsert_music_file(db, *, task_id: int | None, file_path: str, link_path: st
 
     if meta:
         music_file.artist = meta.artist
+        music_file.album_artist = meta.album_artist or meta.artist
         music_file.album = meta.album
         music_file.title = meta.title
         music_file.year = meta.year
@@ -555,15 +556,16 @@ def _process_completed_torrent(torrent: dict):
                 ) or _meta_from_hint(_merge_hints(use_hint, {"album": shared_album, "album_artist": shared_artist}))
                 if meta:
                     _enrich_from_local_assets(file_path, meta)
-                # 同专辑下接选中的 meta 专辑名不一致（例如刮到翻唱/Live 版本），强制覆盖为共享专辑
+                # 同专辑下接选中的 meta 专辑名不一致（例如刮到翻唱/Live 版本），强制覆盖为共享专辑。
+                # album_artist 也锁到首曲/专辑 hint；track artist 保留原始歌手，前端用 album_artist 分组。
                 if meta and shared_album and meta.album and meta.album != shared_album:
                     logger.info(
                         f"Override album for {os.path.basename(file_path)}: "
                         f"{meta.album} -> {shared_album}"
                     )
                     meta.album = shared_album
-                    if shared_artist and not meta.album_artist:
-                        meta.album_artist = shared_artist
+                if meta and shared_artist:
+                    meta.album_artist = shared_artist
                 meta_cache[os.path.basename(file_path)] = meta
             audio_meta = read_audio_metadata(file_path)
             if meta:

@@ -22,6 +22,16 @@ def _display_album(album: str | None) -> str:
     return album or UNKNOWN_ALBUM
 
 
+def _display_album_artist(row: MusicFile) -> str:
+    """Album grouping artist: albumartist first, then track artist."""
+    return (getattr(row, "album_artist", None) or row.artist or UNKNOWN_ARTIST)
+
+
+def _album_artist_group():
+    """SQL expression matching _display_album_artist for grouping/filtering."""
+    return func.coalesce(func.nullif(MusicFile.album_artist, ""), func.nullif(MusicFile.artist, ""), UNKNOWN_ARTIST)
+
+
 def _album_cover_path(file_path: str) -> str | None:
     """Find cover image alongside an audio file."""
     if not file_path:
@@ -75,7 +85,8 @@ def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50
     """Browse music library."""
     query = db.query(MusicFile).order_by(MusicFile.created_at.desc())
     if artist:
-        query = query.filter(MusicFile.artist.ilike(f"%{artist}%"))
+        like_artist = f"%{artist}%"
+        query = query.filter((MusicFile.artist.ilike(like_artist)) | (MusicFile.album_artist.ilike(like_artist)))
     if album:
         if album == UNKNOWN_ALBUM:
             query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
@@ -86,6 +97,7 @@ def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50
         query = query.filter(
             (MusicFile.title.ilike(like)) |
             (MusicFile.artist.ilike(like)) |
+            (MusicFile.album_artist.ilike(like)) |
             (MusicFile.album.ilike(like)) |
             (MusicFile.file_path.ilike(like))
         )
@@ -96,6 +108,7 @@ def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50
             "id": f.id,
             "file_path": f.file_path,
             "artist": f.artist,
+            "album_artist": _display_album_artist(f),
             "album": _display_album(f.album),
             "title": f.title,
             "year": f.year,
@@ -116,13 +129,14 @@ def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50
 @router.get("/albums")
 def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int = 200, offset: int = 0,
                 db: Session = Depends(get_db)):
-    """List unique albums grouped by (artist, album), with library-friendly stats."""
+    """List unique albums grouped by (album_artist, album), with library-friendly stats."""
+    artist_group = _album_artist_group()
     album_group = func.coalesce(func.nullif(MusicFile.album, ""), UNKNOWN_ALBUM)
     latest_at = func.max(MusicFile.created_at)
     track_count = func.count(MusicFile.id)
     query = (
         db.query(
-            MusicFile.artist.label("artist"),
+            artist_group.label("artist"),
             album_group.label("album"),
             func.min(MusicFile.year).label("year"),
             track_count.label("track_count"),
@@ -134,14 +148,16 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
             func.min(MusicFile.file_path).label("sample_path"),
             latest_at.label("updated_at"),
         )
-        .group_by(MusicFile.artist, album_group)
+        .group_by(artist_group, album_group)
     )
     if artist:
-        query = query.filter(MusicFile.artist.ilike(f"%{artist}%"))
+        like_artist = f"%{artist}%"
+        query = query.filter((MusicFile.artist.ilike(like_artist)) | (MusicFile.album_artist.ilike(like_artist)))
     if q:
         query = query.filter(
             (MusicFile.album.ilike(f"%{q}%")) |
             (MusicFile.artist.ilike(f"%{q}%")) |
+            (MusicFile.album_artist.ilike(f"%{q}%")) |
             (MusicFile.title.ilike(f"%{q}%"))
         )
     limit = max(1, min(limit, 500))
@@ -149,7 +165,7 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
     sort_map = {
         "updated": latest_at.desc(),
         "name": album_group.asc(),
-        "artist": MusicFile.artist.asc(),
+        "artist": artist_group.asc(),
         "tracks": track_count.desc(),
         "year": func.min(MusicFile.year).desc(),
     }
@@ -175,10 +191,11 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
 def list_album_tracks(artist: str, album: str, db: Session = Depends(get_db)):
     """List tracks in a specific album."""
     query = db.query(MusicFile)
+    artist_group = _album_artist_group()
     if artist == UNKNOWN_ARTIST:
-        query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+        query = query.filter(artist_group == UNKNOWN_ARTIST)
     else:
-        query = query.filter(MusicFile.artist == artist)
+        query = query.filter(artist_group == artist)
     if album == UNKNOWN_ALBUM:
         query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
     else:
@@ -195,6 +212,7 @@ def list_album_tracks(artist: str, album: str, db: Session = Depends(get_db)):
             "id": f.id,
             "title": f.title or Path(f.file_path).stem,
             "artist": f.artist,
+            "album_artist": _display_album_artist(f),
             "album": _display_album(f.album),
             "year": f.year,
             "track_number": f.track_number,
@@ -219,12 +237,13 @@ def get_cover(file_id: int, db: Session = Depends(get_db)):
 
 @router.get("/album-cover")
 def get_album_cover(artist: str, album: str, db: Session = Depends(get_db)):
-    """Serve cover for an album by (artist, album)."""
+    """Serve cover for an album by (album_artist, album)."""
     query = db.query(MusicFile)
+    artist_group = _album_artist_group()
     if artist == UNKNOWN_ARTIST:
-        query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+        query = query.filter(artist_group == UNKNOWN_ARTIST)
     else:
-        query = query.filter(MusicFile.artist == artist)
+        query = query.filter(artist_group == artist)
     if album == UNKNOWN_ALBUM:
         query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
     else:
@@ -274,7 +293,7 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
             return False
 
     def _add(bucket_key: str, f: MusicFile):
-        artist = (f.artist or "").strip() or UNKNOWN_ARTIST
+        artist = _display_album_artist(f)
         album = _display_album(f.album)
         key = (artist, album)
         bucket = buckets[bucket_key]
@@ -297,7 +316,7 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
             _add("missing_lyrics", f)
         if not f.duration or f.duration <= 0:
             _add("missing_duration", f)
-        if _is_unknown_artist(f.artist):
+        if _is_unknown_artist(f.album_artist or f.artist):
             _add("unknown_artist", f)
         if not f.scraped:
             _add("unscraped", f)
@@ -329,19 +348,10 @@ def library_stats(db: Session = Depends(get_db)):
     """Get library statistics."""
     total = db.query(MusicFile).count()
     scraped = db.query(MusicFile).filter(MusicFile.scraped == True).count()
-    artists = (
-        db.query(MusicFile.artist)
-        .filter(MusicFile.artist.isnot(None))
-        .filter(MusicFile.artist != "")
-        .distinct()
-        .count()
-    )
+    artist_group = _album_artist_group()
+    artists = db.query(artist_group).distinct().count()
     album_group = func.coalesce(func.nullif(MusicFile.album, ""), UNKNOWN_ALBUM)
-    albums = (
-        db.query(MusicFile.artist, album_group)
-        .distinct()
-        .count()
-    )
+    albums = db.query(artist_group, album_group).distinct().count()
     return {
         "total_files": total,
         "scraped": scraped,
@@ -521,6 +531,7 @@ def get_file_detail(file_id: int, db: Session = Depends(get_db)):
         "id": f.id,
         "file_path": f.file_path,
         "artist": f.artist,
+        "album_artist": _display_album_artist(f),
         "album": _display_album(f.album),
         "title": f.title,
         "year": f.year,
@@ -597,10 +608,11 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
         files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
     elif album_artist and album_name:
         query = db.query(MusicFile)
+        artist_group = _album_artist_group()
         if album_artist == UNKNOWN_ARTIST:
-            query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+            query = query.filter(artist_group == UNKNOWN_ARTIST)
         else:
-            query = query.filter(MusicFile.artist == album_artist)
+            query = query.filter(artist_group == album_artist)
         if album_name == UNKNOWN_ALBUM:
             query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
         else:
@@ -643,14 +655,11 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
             _enrich_from_local_assets(f.file_path, meta)
         if meta:
             # 专辑定锁：保底主艺人与专辑名不被刮削源带偏。
-            # 目前 DB 没有 album_artist 字段，library 也是按 artist+album 分组，
-            # 所以专辑级重刮削时需要把 DB artist 固定为这张专辑的主艺人，
-            # 避免某首歌因 feat./同名候选导致专辑在前端被拆成多张。
+            # track artist 保留单曲艺人/feat. 信息；前端按 album_artist + album 分组。
             if locked_album and meta.album != locked_album:
                 meta.album = locked_album
             if locked_artist:
                 meta.album_artist = locked_artist
-                meta.artist = locked_artist
             tagged_path = tag_file(f.file_path, meta)
             if isinstance(tagged_path, str) and tagged_path:
                 f.file_path = tagged_path
@@ -660,6 +669,7 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
             if meta.cover_data:
                 save_cover(str(Path(f.file_path).parent), meta.cover_data)
             f.artist = meta.artist
+            f.album_artist = meta.album_artist or meta.artist
             f.album = meta.album
             f.title = meta.title
             f.year = meta.year
@@ -717,10 +727,11 @@ def rescan_metadata(file_ids: list[int] = [], album_artist: str = "", album_name
         files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
     elif album_artist and album_name:
         query = db.query(MusicFile)
+        artist_group = _album_artist_group()
         if album_artist == UNKNOWN_ARTIST:
-            query = query.filter((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+            query = query.filter(artist_group == UNKNOWN_ARTIST)
         else:
-            query = query.filter(MusicFile.artist == album_artist)
+            query = query.filter(artist_group == album_artist)
         if album_name == UNKNOWN_ALBUM:
             query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
         else:

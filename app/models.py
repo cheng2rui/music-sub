@@ -41,6 +41,7 @@ class MusicFile(Base):
     file_path = Column(String(1000), nullable=False)
     link_path = Column(String(1000), nullable=True)
     artist = Column(String(255), nullable=True)
+    album_artist = Column(String(255), nullable=True)
     album = Column(String(255), nullable=True)
     title = Column(String(255), nullable=True)
     year = Column(Integer, nullable=True)

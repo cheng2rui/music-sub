@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import MusicFile
@@ -69,9 +70,8 @@ def resolve_files(db: Session, *, file_ids: Optional[list[int]] = None,
 
     query = db.query(MusicFile)
     if album_artist:
-        artist_filter = (MusicFile.artist == album_artist)
-        if album_artist == "Unknown Artist":
-            artist_filter = ((MusicFile.artist.is_(None)) | (MusicFile.artist == ""))
+        artist_group = func.coalesce(func.nullif(MusicFile.album_artist, ""), func.nullif(MusicFile.artist, ""), "Unknown Artist")
+        artist_filter = (artist_group == album_artist)
         query = query.filter(artist_filter)
     if album_name:
         if album_name == "\u5355\u66f2/\u672a\u77e5\u4e13\u8f91":

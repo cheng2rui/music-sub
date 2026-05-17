@@ -34,11 +34,24 @@ def _dedupe_music_files():
         """))
 
 
+def _backfill_album_artist():
+    """Initialize album_artist for older rows so album grouping remains stable after upgrade."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE music_files
+            SET album_artist = artist
+            WHERE (album_artist IS NULL OR album_artist = '')
+              AND artist IS NOT NULL
+              AND artist != ''
+        """))
+
+
 def _run_lightweight_migrations():
     """Apply additive SQLite migrations for deployments without Alembic."""
     if engine.dialect.name != "sqlite":
         return
     for column, ddl in {
+        "album_artist": "VARCHAR(255)",
         "track_number": "INTEGER",
         "disc_number": "INTEGER",
         "duration": "FLOAT",
@@ -48,6 +61,7 @@ def _run_lightweight_migrations():
     }.items():
         _ensure_column("music_files", column, ddl)
     _dedupe_music_files()
+    _backfill_album_artist()
 
 
 def init_db():
