@@ -1,6 +1,14 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { listLibraryTools, previewLibraryTool, applyLibraryTool, getLibraryJob } from '@/api/index.js'
+import { computed, ref, watch } from 'vue'
+import {
+  listLibraryTools,
+  previewLibraryTool,
+  applyLibraryTool,
+  getLibraryJob,
+  getLibrary,
+  getAlbumTracks,
+  getFile,
+} from '@/api/index.js'
 import AppModal from '@/components/AppModal.vue'
 import AppButton from '@/components/AppButton.vue'
 
@@ -19,6 +27,10 @@ const job = ref(null)
 const optionText = ref('{}')
 const optionError = ref('')
 const deleteIds = ref(new Set())
+const fileSearch = ref('')
+const fileRows = ref([])
+const loadingFiles = ref(false)
+const selectedFileIds = ref(new Set())
 
 const optionPlaceholder = computed(() => {
   if (!activeTool.value) return '{}'
@@ -34,12 +46,23 @@ const optionPlaceholder = computed(() => {
   return '{}'
 })
 
+const scopeLabel = computed(() => {
+  const ctx = props.context || {}
+  if (selectedFileIds.value.size) return `已选择 ${selectedFileIds.value.size} 个文件`
+  if (Array.isArray(ctx.file_ids) && ctx.file_ids.length) return `传入的 ${ctx.file_ids.length} 个文件`
+  if (ctx.album_artist || ctx.album_name) return `当前专辑：${[ctx.album_artist, ctx.album_name].filter(Boolean).join(' / ')}`
+  return '最近入库文件（最多 500 个；建议先勾选要处理的文件）'
+})
+
 watch(() => props.open, async (val) => {
   if (val && tools.value.length === 0) {
     const data = await listLibraryTools()
     tools.value = data.tools || []
   }
-  if (val) reset()
+  if (val) {
+    reset()
+    await loadScopeFiles()
+  }
 })
 
 function reset() {
@@ -49,6 +72,73 @@ function reset() {
   optionText.value = '{}'
   optionError.value = ''
   deleteIds.value = new Set()
+  selectedFileIds.value = new Set()
+}
+
+function normalizeFile(row) {
+  return {
+    id: Number(row.id),
+    title: row.title || row.file_path || `#${row.id}`,
+    artist: row.artist || '未知艺人',
+    album: row.album || '未知专辑',
+    file_path: row.file_path || '',
+    format: row.format || '',
+    duration: row.duration || 0,
+  }
+}
+
+async function loadScopeFiles() {
+  loadingFiles.value = true
+  try {
+    const ctx = props.context || {}
+    if (Array.isArray(ctx.file_ids) && ctx.file_ids.length) {
+      const rows = await Promise.all(ctx.file_ids.slice(0, 100).map(id => getFile(id).catch(() => null)))
+      fileRows.value = rows.filter(Boolean).map(normalizeFile)
+      selectedFileIds.value = new Set(fileRows.value.map(f => f.id))
+      return
+    }
+    if (ctx.album_artist || ctx.album_name) {
+      fileRows.value = (await getAlbumTracks(ctx.album_artist || '', ctx.album_name || '')).map(normalizeFile)
+      return
+    }
+    await searchFiles()
+  } finally {
+    loadingFiles.value = false
+  }
+}
+
+async function searchFiles() {
+  loadingFiles.value = true
+  try {
+    const rows = await getLibrary({ q: fileSearch.value.trim(), limit: 100 })
+    fileRows.value = (rows || []).map(normalizeFile)
+  } finally {
+    loadingFiles.value = false
+  }
+}
+
+function toggleFile(id) {
+  const next = new Set(selectedFileIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedFileIds.value = next
+}
+
+function selectAllFiles() {
+  selectedFileIds.value = new Set(fileRows.value.map(f => f.id))
+}
+
+function clearSelectedFiles() {
+  selectedFileIds.value = new Set()
+}
+
+function buildToolPayload(options) {
+  const payload = { ...props.context, options }
+  if (selectedFileIds.value.size) {
+    payload.file_ids = Array.from(selectedFileIds.value)
+    delete payload.album_artist
+    delete payload.album_name
+  }
+  return payload
 }
 
 function parseOptions() {
@@ -57,7 +147,7 @@ function parseOptions() {
   try {
     return JSON.parse(optionText.value)
   } catch (err) {
-    optionError.value = '选项 JSON 解析失败：' + err.message
+    optionError.value = '高级选项 JSON 解析失败：' + err.message
     return null
   }
 }
@@ -71,7 +161,7 @@ async function runPreview() {
   job.value = null
   deleteIds.value = new Set()
   try {
-    previewData.value = await previewLibraryTool(activeTool.value.id, { ...props.context, options })
+    previewData.value = await previewLibraryTool(activeTool.value.id, buildToolPayload(options))
   } catch (err) {
     previewData.value = { error: err.message }
   } finally {
@@ -92,7 +182,7 @@ async function runApply() {
   }
   applying.value = true
   try {
-    const res = await applyLibraryTool(activeTool.value.id, { ...props.context, options, async: true })
+    const res = await applyLibraryTool(activeTool.value.id, { ...buildToolPayload(options), async: true })
     if (res.job_id) await pollJob(res.job_id)
   } catch (err) {
     alert(err.message || '执行失败')
@@ -102,7 +192,7 @@ async function runApply() {
 }
 
 async function pollJob(id) {
-  job.value = { id, status: 'queued', progress: 0, total: previewData.value?.items?.length || 0 }
+  job.value = { id, status: 'queued', progress: 0, total: previewData.value?.items?.length || selectedFileIds.value.size || 0 }
   while (true) {
     const data = await getLibraryJob(id)
     job.value = data
@@ -133,6 +223,36 @@ function handleClose() {
 <template>
   <AppModal v-if="open" title="库工具箱" @close="handleClose">
     <div class="tools-modal">
+      <div class="scope-panel">
+        <div class="scope-head">
+          <div>
+            <strong>操作范围</strong>
+            <span>{{ scopeLabel }}</span>
+          </div>
+          <div class="scope-actions">
+            <AppButton variant="ghost" size="sm" @click="selectAllFiles">全选当前列表</AppButton>
+            <AppButton variant="ghost" size="sm" @click="clearSelectedFiles">清空选择</AppButton>
+          </div>
+        </div>
+        <div class="file-search-row" v-if="!(context.album_artist || context.album_name || context.file_ids?.length)">
+          <input v-model="fileSearch" class="file-search" placeholder="搜索标题 / 艺人 / 专辑 / 路径" @keyup.enter="searchFiles" />
+          <AppButton variant="ghost" size="sm" :loading="loadingFiles" @click="searchFiles">搜索</AppButton>
+        </div>
+        <div v-if="loadingFiles" class="info-line">加载文件中...</div>
+        <div v-else class="file-picker">
+          <label v-for="file in fileRows" :key="file.id" class="file-option">
+            <input type="checkbox" :checked="selectedFileIds.has(file.id)" @change="toggleFile(file.id)" />
+            <span class="file-option-main">
+              <strong>{{ file.title }}</strong>
+              <em>{{ file.artist }} · {{ file.album }} <template v-if="file.format">· {{ file.format }}</template></em>
+              <small>{{ file.file_path }}</small>
+            </span>
+          </label>
+          <div v-if="!fileRows.length" class="info-line">没有可选择的文件。</div>
+        </div>
+        <div class="scope-hint">不勾选文件时，会按当前专辑/传入范围处理；勾选后只处理选中的文件。</div>
+      </div>
+
       <div class="tool-grid" v-if="!activeTool">
         <button v-for="t in tools" :key="t.id" class="tool-card" @click="selectTool(t)">
           <strong>{{ t.label }}</strong>
@@ -147,16 +267,17 @@ function handleClose() {
           <span class="detail-desc">{{ activeTool.description }}</span>
         </div>
 
-        <div class="tool-options">
+        <details class="tool-options">
+          <summary>高级选项（可选）</summary>
           <label class="opt-label">
-            选项 (JSON)
+            JSON 参数
             <textarea v-model="optionText" rows="5" class="opt-area" :placeholder="optionPlaceholder"></textarea>
             <span v-if="optionError" class="opt-error">{{ optionError }}</span>
           </label>
-          <div class="opt-actions">
-            <AppButton variant="ghost" :loading="previewing" @click="runPreview">预览</AppButton>
-            <AppButton variant="primary" :loading="applying" :disabled="!previewData || previewData.error" @click="runApply">应用</AppButton>
-          </div>
+        </details>
+        <div class="opt-actions">
+          <AppButton variant="ghost" :loading="previewing" @click="runPreview">预览</AppButton>
+          <AppButton variant="primary" :loading="applying" :disabled="!previewData || previewData.error" @click="runApply">应用</AppButton>
         </div>
 
         <div v-if="previewing" class="info-line">预览中...</div>
@@ -206,7 +327,23 @@ function handleClose() {
 </template>
 
 <style scoped>
-.tools-modal { display: flex; flex-direction: column; gap: 14px; min-width: 520px; max-width: 900px; }
+.tools-modal { display: flex; flex-direction: column; gap: 14px; min-width: 560px; max-width: 980px; }
+.scope-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.scope-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.scope-head strong { display: block; font-size: 14px; }
+.scope-head span { display: block; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.scope-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.file-search-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.file-search { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text); }
+.file-picker { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 2px; }
+.file-option { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: flex-start; padding: 9px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); cursor: pointer; }
+.file-option:hover { border-color: var(--accent); }
+.file-option input { margin-top: 3px; }
+.file-option-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.file-option-main strong { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-option-main em { font-style: normal; font-size: 12px; color: var(--text-dim); }
+.file-option-main small { font-size: 11px; color: var(--text-muted); word-break: break-all; }
+.scope-hint { font-size: 11px; color: var(--text-muted); }
 .tool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .tool-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
 .tool-card:hover { background: var(--surface-hover); border-color: var(--accent); }
@@ -220,8 +357,9 @@ function handleClose() {
 .link-back { background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 0; align-self: flex-start; font-size: 12px; }
 .link-back:hover { color: var(--text); }
 
-.tool-options { display: flex; flex-direction: column; gap: 8px; }
-.opt-label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.tool-options { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); }
+.tool-options summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
+.opt-label { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--text-dim); }
 .opt-area { width: 100%; min-height: 90px; resize: vertical; font-family: 'Source Code Pro', monospace; font-size: 12px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); }
 .opt-error { color: var(--danger); font-size: 12px; }
 .opt-actions { display: flex; gap: 8px; justify-content: flex-end; }
@@ -245,4 +383,10 @@ function handleClose() {
 .job-bar > div { height: 100%; background: var(--accent); transition: width .25s; }
 .job-summary { white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; font-size: 11px; color: var(--text-dim); margin: 0; }
 .job-summary.err { color: var(--danger); }
+
+@media (max-width: 720px) {
+  .tools-modal { min-width: 0; max-width: 100%; }
+  .scope-head { flex-direction: column; }
+  .scope-actions { justify-content: flex-start; }
+}
 </style>

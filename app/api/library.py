@@ -35,18 +35,27 @@ def _album_cover_path(file_path: str) -> str | None:
 
 
 @router.get("/")
-def list_library(artist: str = "", album: str = "", limit: int = 50,
+def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50,
                  db: Session = Depends(get_db)):
     """Browse music library."""
-    q = db.query(MusicFile).order_by(MusicFile.created_at.desc())
+    query = db.query(MusicFile).order_by(MusicFile.created_at.desc())
     if artist:
-        q = q.filter(MusicFile.artist.ilike(f"%{artist}%"))
+        query = query.filter(MusicFile.artist.ilike(f"%{artist}%"))
     if album:
         if album == UNKNOWN_ALBUM:
-            q = q.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
+            query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
         else:
-            q = q.filter(MusicFile.album.ilike(f"%{album}%"))
-    files = q.limit(limit).all()
+            query = query.filter(MusicFile.album.ilike(f"%{album}%"))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            (MusicFile.title.ilike(like)) |
+            (MusicFile.artist.ilike(like)) |
+            (MusicFile.album.ilike(like)) |
+            (MusicFile.file_path.ilike(like))
+        )
+    limit = max(1, min(limit, 500))
+    files = query.limit(limit).all()
     return [
         {
             "id": f.id,
