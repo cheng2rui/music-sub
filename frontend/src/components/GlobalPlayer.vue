@@ -6,11 +6,15 @@ const player = usePlayerStore()
 
 const title = computed(() => player.currentTrack?.title || '正在播放')
 const subtitle = computed(() => [player.currentTrack?.artist, player.currentTrack?.album].filter(Boolean).join(' · '))
+const queueLabel = computed(() => player.queueSize > 1 ? `${player.queueIndex + 1}/${player.queueSize}` : '队列')
 
 function formatDuration(seconds) {
   if (!seconds) return '--:--'
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
+  const total = Math.floor(seconds)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 </script>
@@ -42,9 +46,42 @@ function formatDuration(seconds) {
     />
 
     <div v-if="player.isCollapsed" class="mini-duration">{{ formatDuration(player.currentTrack?.duration) }}</div>
-    <div v-else-if="player.queueSize > 1" class="queue-hint">{{ player.queueIndex + 1 }}/{{ player.queueSize }}</div>
+
+    <button
+      v-show="!player.isCollapsed"
+      :class="['queue-toggle', { active: player.isQueueOpen }]"
+      title="播放队列"
+      @click="player.toggleQueue"
+    >
+      ☰ {{ queueLabel }}
+    </button>
 
     <button class="player-close" title="关闭播放器" @click="player.close">×</button>
+
+    <div v-if="player.isQueueOpen && !player.isCollapsed" class="queue-panel">
+      <div class="queue-head">
+        <div>
+          <strong>播放队列</strong>
+          <span>{{ player.queueSize }} 首</span>
+        </div>
+        <button class="queue-close" @click="player.closeQueue">×</button>
+      </div>
+      <div class="queue-list">
+        <button
+          v-for="(track, index) in player.queue"
+          :key="`${track.id}-${index}`"
+          :class="['queue-item', { active: index === player.queueIndex }]"
+          @click="player.playAt(index)"
+        >
+          <span class="queue-index">{{ index + 1 }}</span>
+          <span class="queue-main">
+            <strong>{{ track.title }}</strong>
+            <em>{{ [track.artist, track.album].filter(Boolean).join(' · ') }}</em>
+          </span>
+          <span class="queue-duration">{{ formatDuration(track.duration) }}</span>
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -76,7 +113,8 @@ function formatDuration(seconds) {
 }
 .collapse-toggle,
 .player-close,
-.transport-btn {
+.transport-btn,
+.queue-close {
   flex-shrink: 0;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -93,7 +131,8 @@ function formatDuration(seconds) {
 }
 .collapse-toggle:hover,
 .player-close:hover,
-.transport-btn:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.transport-btn:hover:not(:disabled),
+.queue-close:hover { color: var(--text); background: var(--surface-hover); }
 .transport-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .player-close:hover { color: var(--danger); }
 .transport { display: flex; gap: 6px; align-items: center; }
@@ -122,12 +161,50 @@ function formatDuration(seconds) {
   flex: 1;
   min-width: 260px;
 }
-.mini-duration,
-.queue-hint {
+.mini-duration {
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-muted);
 }
+.queue-toggle {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  border-radius: 999px;
+  height: 32px;
+  padding: 0 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.queue-toggle:hover, .queue-toggle.active { color: var(--text); background: var(--surface-hover); }
+.queue-panel {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 10px);
+  width: min(420px, calc(100vw - 48px));
+  max-height: min(460px, calc(100vh - 160px));
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg-elevated) 98%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.42);
+  overflow: hidden;
+}
+.queue-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
+.queue-head div { display: flex; flex-direction: column; gap: 2px; }
+.queue-head strong { font-size: 14px; }
+.queue-head span { font-size: 12px; color: var(--text-dim); }
+.queue-list { overflow-y: auto; padding: 6px; }
+.queue-item { width: 100%; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px; align-items: center; border: 0; background: transparent; color: var(--text-dim); border-radius: 12px; padding: 9px 10px; cursor: pointer; text-align: left; }
+.queue-item:hover, .queue-item.active { background: var(--surface-hover); color: var(--text); }
+.queue-index, .queue-duration { font-size: 12px; color: var(--text-muted); }
+.queue-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.queue-main strong, .queue-main em { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-main strong { font-size: 13px; color: var(--text); }
+.queue-main em { font-style: normal; font-size: 12px; color: var(--text-dim); }
 
 @media (max-width: 768px) {
   .global-player {
@@ -147,5 +224,7 @@ function formatDuration(seconds) {
   }
   .player-info { min-width: 0; max-width: none; flex: 1; }
   .player-audio { min-width: 120px; }
+  .queue-toggle { padding: 0 9px; }
+  .queue-panel { left: 0; right: 0; width: auto; max-height: min(420px, calc(100vh - 180px)); }
 }
 </style>

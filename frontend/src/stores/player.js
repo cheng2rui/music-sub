@@ -11,6 +11,7 @@ export const usePlayerStore = defineStore('player', () => {
   const hasPrev = computed(() => queueIndex.value > 0)
   const hasNext = computed(() => queueIndex.value >= 0 && queueIndex.value < queue.value.length - 1)
   const isCollapsed = ref(false)
+  const isQueueOpen = ref(false)
 
   function normalizeTrack(track) {
     return {
@@ -62,6 +63,22 @@ export const usePlayerStore = defineStore('player', () => {
     return true
   }
 
+  function playAt(index) {
+    if (index < 0 || index >= queue.value.length) return false
+    queueIndex.value = index
+    currentTrack.value = queue.value[index]
+    isCollapsed.value = false
+    return true
+  }
+
+  function toggleQueue() {
+    isQueueOpen.value = !isQueueOpen.value
+  }
+
+  function closeQueue() {
+    isQueueOpen.value = false
+  }
+
   function streamUrl(id = currentId.value) {
     return id ? getStreamUrl(id) : ''
   }
@@ -83,6 +100,7 @@ export const usePlayerStore = defineStore('player', () => {
     queue.value = []
     queueIndex.value = -1
     isCollapsed.value = false
+    isQueueOpen.value = false
   }
 
   return {
@@ -94,10 +112,14 @@ export const usePlayerStore = defineStore('player', () => {
     hasPrev,
     hasNext,
     isCollapsed,
+    isQueueOpen,
     playTrack,
     playQueue,
     playNext,
     playPrev,
+    playAt,
+    toggleQueue,
+    closeQueue,
     streamUrl,
     collapse,
     expand,
