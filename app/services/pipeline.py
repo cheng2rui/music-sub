@@ -22,7 +22,7 @@ from app.scrapers.tagger import (
     repair_garble_hint,
 )
 from app.scrapers.base import MusicMeta
-from app.scrapers.matcher import score_meta, text_score
+from app.scrapers.matcher import score_meta, text_score, normalize_text, artist_score
 from app.services.notify import notify_download_complete, notify_scrape_complete, notify_error
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,25 @@ def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str) -> l
     except Exception as e:
         logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")
         return []
+
+
+def _search_all_scrapers(title_hint: str, artist_hint: str, filename: str) -> list[MusicMeta]:
+    scrapers = _get_scraper_chain()
+    if not scrapers:
+        return []
+    out: list[MusicMeta] = []
+    seen: set[tuple] = set()
+    max_workers = max(1, min(len(scrapers), 6))
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="album-cluster") as ex:
+        futures = {ex.submit(_safe_search, scraper, title_hint, artist_hint, filename): scraper for scraper in scrapers}
+        for fut in as_completed(futures):
+            for meta in fut.result() or []:
+                key = (meta.source, getattr(meta, "song_id", "") or "", meta.title, meta.artist, meta.album)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(meta)
+    return out
 
 
 def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
@@ -269,6 +288,70 @@ def _album_hint_from_existing_tags(files: list[str]) -> dict:
     return out
 
 
+def _title_hint_for_file(path: str) -> dict:
+    tags = read_existing_tags(path)
+    if tags.get("title"):
+        return tags
+    import re as _re
+    title = _re.sub(r"^\s*\d+\s*[.\-_）)、．]?\s*", "", Path(path).stem).strip()
+    if title:
+        tags["title"] = title
+    return tags
+
+
+def _album_cluster_hint(files: list[str], base_hint: dict | None = None, sample_size: int = 5) -> dict:
+    """Pick album/artist by clustering multi-track online candidates.
+
+    This reduces drifting into compilation/live albums: several local track
+    titles must point to the same online album before we lock album_hint.
+    """
+    if len(files) < 2:
+        return {}
+    base_hint = base_hint or {}
+    sample = files[:sample_size]
+    clusters: dict[tuple[str, str], dict] = {}
+    for path in sample:
+        hint = _merge_hints(base_hint, _title_hint_for_file(path))
+        title = hint.get("title") or ""
+        if not title:
+            continue
+        artist = hint.get("artist") or hint.get("album_artist") or base_hint.get("artist") or ""
+        audio_meta = read_audio_metadata(path)
+        candidates = _search_all_scrapers(title, artist, Path(path).stem)
+        for meta in candidates:
+            if not meta.album:
+                continue
+            scored = score_meta(
+                meta,
+                title,
+                artist,
+                base_hint.get("album") or "",
+                year_hint=hint.get("year") or base_hint.get("year"),
+                duration_hint=audio_meta.get("duration"),
+                track_hint=hint.get("track_number"),
+            )
+            if scored.score < 0.45:
+                continue
+            key = (normalize_text(meta.album), normalize_text(meta.album_artist or meta.artist))
+            bucket = clusters.setdefault(key, {"album": meta.album, "artist": meta.album_artist or meta.artist, "hits": 0, "score": 0.0, "sources": set()})
+            bucket["hits"] += 1
+            bucket["score"] += scored.score
+            bucket["sources"].add(meta.source)
+    if not clusters:
+        return {}
+    ranked = sorted(clusters.values(), key=lambda x: (x["hits"], x["score"], len(x["sources"])), reverse=True)
+    best = ranked[0]
+    # Require at least two agreeing tracks, or a dominant source score on tiny albums.
+    if best["hits"] < 2:
+        return {}
+    out = {"album": best["album"], "artist": best["artist"], "album_artist": best["artist"], "source": "album-cluster"}
+    logger.info(
+        f"Album cluster selected: artist={out['artist']} album={out['album']} "
+        f"hits={best['hits']} score={best['score']:.2f}"
+    )
+    return out
+
+
 def _upsert_music_file(db, *, task_id: int | None, file_path: str, link_path: str | None, scraped: bool, meta: MusicMeta | None, audio_meta: dict):
     """Create or update a music_files row keyed by file_path to keep retries idempotent."""
     music_file = db.query(MusicFile).filter(MusicFile.file_path == file_path).first()
@@ -397,6 +480,9 @@ def _process_completed_torrent(torrent: dict):
             f"Album-level local hints: artist={metadata_hint.get('artist')} "
             f"album={metadata_hint.get('album')} year={metadata_hint.get('year')}"
         )
+    cluster_hint = _album_cluster_hint(source_audio_files, metadata_hint)
+    if cluster_hint:
+        metadata_hint = _merge_hints(cluster_hint, metadata_hint)
     first_existing_hint = read_existing_tags(source_audio_files[0])
     first_hint = _merge_hints(metadata_hint, first_existing_hint)
     first_audio_meta = read_audio_metadata(source_audio_files[0])
