@@ -1,21 +1,51 @@
 <script setup>
-import { ref } from 'vue'
-import { searchMusic, downloadTorrent } from '@/api/index.js'
+import { computed, ref } from 'vue'
+import { searchMusicV2, downloadTorrent } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
 const keyword = ref('')
-const results = ref([])
+const searchType = ref('keyword')   // keyword/artist/album
+const quality = ref('any')          // any/flac/mp3
+const formatFilter = ref('all')     // all/lossless/lossy
+const sortBy = ref('score')         // score/seeders/size
+const siteFilter = ref('')
+
 const loading = ref(false)
 const downloading = ref(null)
+const lastResp = ref(null)
+
+const sites = computed(() => lastResp.value?.sites || [])
+const queries = computed(() => lastResp.value?.queries || [])
+const total = computed(() => lastResp.value?.total || 0)
+
+const filteredResults = computed(() => {
+  const list = (lastResp.value?.results || []).slice()
+  const filtered = list.filter(item => {
+    if (siteFilter.value && item.site !== siteFilter.value) return false
+    if (formatFilter.value === 'lossless') {
+      return ['FLAC', 'ALAC', 'APE', 'WAV', 'DSD'].includes(item.media_format)
+    }
+    if (formatFilter.value === 'lossy') {
+      return ['MP3', 'AAC', 'M4A', 'OGG'].includes(item.media_format)
+    }
+    return true
+  })
+  if (sortBy.value === 'seeders') filtered.sort((a, b) => (b.seeders || 0) - (a.seeders || 0))
+  else if (sortBy.value === 'size') filtered.sort((a, b) => (b.size || 0) - (a.size || 0))
+  else filtered.sort((a, b) => (b.score || 0) - (a.score || 0))
+  return filtered
+})
 
 async function handleSearch() {
   if (!keyword.value.trim()) return
   loading.value = true
-  results.value = []
+  lastResp.value = null
   try {
-    const data = await searchMusic(keyword.value.trim())
-    results.value = Array.isArray(data) ? data : []
+    const params = { keyword: keyword.value.trim(), type: searchType.value, quality: quality.value, limit: 80 }
+    if (searchType.value === 'album') params.album = keyword.value.trim()
+    if (searchType.value === 'artist') params.artist = keyword.value.trim()
+    lastResp.value = await searchMusicV2(params)
   } catch (e) {
     console.error(e)
   } finally {
@@ -23,14 +53,13 @@ async function handleSearch() {
   }
 }
 
-async function handleDownload(site, torrentId, title) {
-  downloading.value = `${site}-${torrentId}`
+async function handleDownload(item) {
+  downloading.value = `${item.site}-${item.torrent_id}`
   try {
-    const res = await downloadTorrent(site, torrentId, title)
-    alert(res.already_exists ? '任务已存在，已跳过重复添加' : '已添加到下载任务')
+    const res = await downloadTorrent(item.site, item.torrent_id, item.title)
+    alert(res.already_exists ? '任务已存在，跳过重复添加' : '已添加到下载任务')
   } catch (e) {
     alert(e.message || '下载失败')
-    console.error(e)
   } finally {
     downloading.value = null
   }
@@ -38,7 +67,6 @@ async function handleDownload(site, torrentId, title) {
 
 function formatSize(bytes) {
   if (!bytes) return '-'
-  if (typeof bytes === 'string') return bytes
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB'
@@ -48,10 +76,12 @@ function formatSize(bytes) {
 function formatUploadTime(value) {
   if (!value) return '-'
   const text = String(value).trim()
-  if (!text) return '-'
-  // 例如 "2026-04-15 13:41:26" 直接显示日期；其他直接返回原文
   const m = text.match(/^(\d{4}-\d{2}-\d{2})/)
   return m ? m[1] : text.slice(0, 16)
+}
+
+function toggleSite(name) {
+  siteFilter.value = siteFilter.value === name ? '' : name
 }
 </script>
 
@@ -60,20 +90,63 @@ function formatUploadTime(value) {
     <div class="search-bar">
       <input
         v-model="keyword"
-        placeholder="搜索音乐、专辑、艺人..."
+        placeholder="搜索专辑/艺人/歌单..."
         class="search-input"
         @keyup.enter="handleSearch"
       />
+      <select v-model="searchType" class="sel">
+        <option value="keyword">关键字</option>
+        <option value="artist">艺人</option>
+        <option value="album">专辑</option>
+      </select>
+      <select v-model="quality" class="sel">
+        <option value="any">不限质量</option>
+        <option value="flac">无损</option>
+        <option value="mp3">MP3</option>
+      </select>
       <AppButton variant="primary" :loading="loading" @click="handleSearch">搜索</AppButton>
     </div>
 
+    <div v-if="sites.length" class="site-row">
+      <span class="site-label">站点</span>
+      <button
+        v-for="s in sites"
+        :key="s.site"
+        :class="['site-chip', { active: siteFilter === s.site, error: !s.ok }]"
+        @click="toggleSite(s.site)"
+      >
+        <strong>{{ s.site }}</strong>
+        <span class="site-meta">{{ s.ok ? `${s.count} 条` : (s.error || '失败') }} · {{ s.seconds.toFixed(1) }}s</span>
+      </button>
+      <span v-if="queries.length" class="queries">queries: {{ queries.join('  ,  ') }}</span>
+    </div>
+
+    <div v-if="lastResp" class="toolbar">
+      <div class="left">共 {{ filteredResults.length }} / {{ total }} 条</div>
+      <div class="right">
+        <select v-model="formatFilter" class="sel">
+          <option value="all">全部格式</option>
+          <option value="lossless">仅无损</option>
+          <option value="lossy">仅有损</option>
+        </select>
+        <select v-model="sortBy" class="sel">
+          <option value="score">智能评分</option>
+          <option value="seeders">做种数</option>
+          <option value="size">文件大小</option>
+        </select>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading-text">搜索中...</div>
-    <div v-else-if="results.length === 0 && keyword" class="empty-text">未找到结果</div>
-    <div v-else-if="results.length > 0" class="results-table-wrap">
+    <div v-else-if="lastResp && filteredResults.length === 0" class="empty-text">未找到符合条件的资源</div>
+    <div v-else-if="filteredResults.length" class="results-table-wrap">
       <table class="results-table">
         <thead>
           <tr>
+            <th>评分</th>
             <th>标题</th>
+            <th>格式</th>
+            <th>质量</th>
             <th>FREE</th>
             <th>站点</th>
             <th>大小</th>
@@ -83,11 +156,15 @@ function formatUploadTime(value) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(item, idx) in results" :key="idx">
-            <td class="title-cell">{{ item.title }}</td>
-            <td>
-              <AppBadge v-if="item.free || item.upload_time?.toLowerCase?.()?.includes('free')" color="green">FREE</AppBadge>
+          <tr v-for="item in filteredResults" :key="`${item.site}-${item.torrent_id}`">
+            <td><AppBadge :color="item.score >= 80 ? 'green' : (item.score >= 50 ? 'orange' : 'dim')">{{ Math.round(item.score) }}</AppBadge></td>
+            <td class="title-cell">
+              <div class="title-text">{{ item.title }}</div>
+              <div v-if="item.reasons?.length" class="title-reasons">{{ item.reasons.join(' · ') }}</div>
             </td>
+            <td class="text-dim">{{ item.media_format || '-' }}</td>
+            <td class="text-dim">{{ item.quality || '-' }}</td>
+            <td><AppBadge v-if="item.free" color="green">FREE</AppBadge></td>
             <td class="text-dim">{{ item.site }}</td>
             <td class="text-dim">{{ formatSize(item.size) }}</td>
             <td class="text-dim">{{ item.seeders ?? '-' }}</td>
@@ -97,10 +174,8 @@ function formatUploadTime(value) {
                 variant="primary"
                 size="sm"
                 :loading="downloading === `${item.site}-${item.torrent_id}`"
-                @click="handleDownload(item.site, item.torrent_id, item.title)"
-              >
-                下载
-              </AppButton>
+                @click="handleDownload(item)"
+              >下载</AppButton>
             </td>
           </tr>
         </tbody>
@@ -110,14 +185,37 @@ function formatUploadTime(value) {
 </template>
 
 <style scoped>
-.search-view { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; height: 100%; }
-.search-bar { display: flex; gap: 10px; }
-.search-input { flex: 1; }
+.search-view { padding: 24px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; height: 100%; }
+.search-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.search-input { flex: 1; min-width: 220px; }
+.sel { padding: 6px 10px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 13px; }
+.site-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.site-label { color: var(--text-dim); font-size: 12px; }
+.site-chip { display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; font-size: 12px; }
+.site-chip strong { color: var(--text); font-size: 13px; }
+.site-chip.active { background: var(--surface-hover); color: var(--text); border-color: var(--accent); }
+.site-chip.error { color: var(--danger); border-color: var(--danger); }
+.site-meta { font-size: 11px; color: var(--text-muted); }
+.queries { color: var(--text-muted); font-size: 12px; margin-left: 6px; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar .left { color: var(--text-dim); font-size: 13px; }
+.toolbar .right { display: flex; gap: 8px; }
 .loading-text, .empty-text { color: var(--text-dim); padding: 20px 0; }
 .results-table-wrap { overflow-x: auto; }
 .results-table { width: 100%; border-collapse: collapse; }
 .results-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
-.results-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); }
+.results-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .results-table tr:hover td { background: var(--surface-hover); }
-.title-cell { font-weight: 500; max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-cell { max-width: 360px; }
+.title-text { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-reasons { margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 768px) {
+  .search-view { padding: 16px; }
+  .results-table th:nth-child(4),
+  .results-table td:nth-child(4),
+  .results-table th:nth-child(8),
+  .results-table td:nth-child(8),
+  .results-table th:nth-child(9),
+  .results-table td:nth-child(9) { display: none; }
+}
 </style>
