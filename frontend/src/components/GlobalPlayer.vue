@@ -54,12 +54,21 @@ async function toggleNowPanel() {
 
 watch(() => player.currentId, () => {
   trackDetail.value = null
+  duration.value = 0
+  seekValue.value = 0
+  isSeeking.value = false
+  isPlaying.value = false
   player.setCurrentTime(0)
   if (isNowOpen.value) loadTrackDetail()
 })
 
 const audioRef = ref(null)
 const lyricsListRef = ref(null)
+const isPlaying = ref(false)
+const duration = ref(0)
+const isSeeking = ref(false)
+const seekValue = ref(0)
+const effectiveDuration = computed(() => duration.value || Number(player.currentTrack?.duration) || 0)
 const parsedLyrics = computed(() => parseLrc(trackDetail.value?.lyrics))
 const activeLyricIndex = computed(() => {
   const lines = parsedLyrics.value
@@ -95,16 +104,51 @@ function parseLrc(text) {
 }
 
 function onTimeUpdate(e) {
-  player.setCurrentTime(e.target.currentTime || 0)
+  const time = e.target.currentTime || 0
+  if (!isSeeking.value) {
+    player.setCurrentTime(time)
+    seekValue.value = time
+  }
 }
 
 function onLoadedMeta(e) {
-  player.setCurrentTime(e.target.currentTime || 0)
+  const audio = e.target
+  duration.value = Number.isFinite(audio.duration) ? audio.duration : (Number(player.currentTrack?.duration) || 0)
+  player.setCurrentTime(audio.currentTime || 0)
+  seekValue.value = audio.currentTime || 0
+}
+
+async function togglePlay() {
+  const audio = audioRef.value
+  if (!audio) return
+  if (audio.paused) {
+    try { await audio.play() } catch (err) { console.warn('play failed', err) }
+  } else {
+    audio.pause()
+  }
+}
+
+function beginSeek() {
+  isSeeking.value = true
+}
+
+function inputSeek(value) {
+  const time = Number(value) || 0
+  seekValue.value = time
+  player.setCurrentTime(time)
+}
+
+function commitSeek(value = seekValue.value) {
+  const time = Math.max(0, Math.min(Number(value) || 0, effectiveDuration.value || Number.MAX_SAFE_INTEGER))
+  seekValue.value = time
+  player.setCurrentTime(time)
+  if (audioRef.value) audioRef.value.currentTime = time
+  isSeeking.value = false
 }
 
 function seekTo(time) {
   if (audioRef.value && Number.isFinite(time)) {
-    audioRef.value.currentTime = time
+    commitSeek(time)
     audioRef.value.play?.()
   }
 }
@@ -142,20 +186,41 @@ function formatDuration(seconds) {
 
     <div v-show="!player.isCollapsed" class="transport">
       <button class="transport-btn" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev">⏮</button>
+      <button class="transport-btn" :title="isPlaying ? '暂停' : '播放'" @click="togglePlay">{{ isPlaying ? '⏸' : '▶' }}</button>
       <button class="transport-btn" title="下一首" :disabled="!player.hasNext" @click="player.playNext">⏭</button>
     </div>
 
+    <div v-show="!player.isCollapsed" class="seek-wrap">
+      <span class="seek-time">{{ formatDuration(player.currentTime) }}</span>
+      <input
+        class="seek-range"
+        type="range"
+        min="0"
+        :max="effectiveDuration || 0"
+        step="0.1"
+        :value="isSeeking ? seekValue : player.currentTime"
+        :disabled="!effectiveDuration"
+        @pointerdown="beginSeek"
+        @touchstart="beginSeek"
+        @input="inputSeek($event.target.value)"
+        @change="commitSeek($event.target.value)"
+        @pointerup="commitSeek($event.target.value)"
+        @keyup.enter="commitSeek($event.target.value)"
+      />
+      <span class="seek-time">{{ formatDuration(effectiveDuration) }}</span>
+    </div>
+
     <audio
-      v-show="!player.isCollapsed"
       ref="audioRef"
       :key="player.currentId"
       class="player-audio"
-      controls
       autoplay
       :src="player.streamUrl()"
       @ended="player.playNext"
       @timeupdate="onTimeUpdate"
       @loadedmetadata="onLoadedMeta"
+      @play="isPlaying = true"
+      @pause="isPlaying = false"
     />
 
     <div v-if="player.isCollapsed" class="mini-duration">{{ formatDuration(player.currentTrack?.duration) }}</div>
@@ -313,9 +378,30 @@ function formatDuration(seconds) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.player-audio {
+.seek-wrap {
   flex: 1;
   min-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.seek-time {
+  width: 42px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.seek-range {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.seek-range:disabled { opacity: 0.45; cursor: not-allowed; }
+.player-audio {
+  display: none;
 }
 .mini-duration {
   flex-shrink: 0;
@@ -404,7 +490,7 @@ function formatDuration(seconds) {
     width: auto;
   }
   .player-info { min-width: 0; max-width: none; flex: 1; }
-  .player-audio { min-width: 120px; }
+  .seek-wrap { min-width: 120px; }
   .panel-toggle { padding: 0 9px; }
   .queue-panel { left: 0; right: 0; width: auto; max-height: min(420px, calc(100vh - 180px)); }
   .now-panel { left: 0; right: 0; width: auto; grid-template-columns: 92px minmax(0, 1fr); max-height: min(520px, calc(100vh - 180px)); overflow-y: auto; }
