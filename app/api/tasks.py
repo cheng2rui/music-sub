@@ -61,7 +61,7 @@ def _task_to_response(task: DownloadTask, qb_info: dict | None = None) -> dict:
         "torrent_hash": task.torrent_hash,
         "site": task.site,
         "status": status,
-        "size": task.size or 0,
+        "size": qb_info.get("size") or task.size or 0,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
         "qb_state": qb_state,

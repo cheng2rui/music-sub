@@ -124,16 +124,21 @@ onMounted(loadTracks)
       <div class="table-head">
         <span>#</span><span>歌曲</span><span>格式</span><span>时长</span><span>状态</span><span></span>
       </div>
-      <div v-for="(track, index) in tracks" :key="track.id" :class="['track-row', { active: player.currentId === track.id }]">
+      <div
+        v-for="(track, index) in tracks"
+        :key="track.id"
+        :class="['track-row', { active: player.currentId === track.id, 'is-unscraped': !track.scraped }]"
+        @click="openTrack(track.id)"
+      >
         <div class="track-index">{{ track.track_number || index + 1 }}</div>
-        <div class="track-main" @click="openTrack(track.id)">
-          <div class="track-title">{{ track.title }}</div>
-          <div class="track-sub">{{ track.artist }} · {{ track.album }}</div>
+        <div class="track-main">
+          <div class="track-title">{{ track.title || track.file_path?.split('/').pop() || '未命名曲目' }}</div>
+          <div class="track-sub">{{ [track.artist, track.album].filter(Boolean).join(' · ') || '待完善元数据' }}</div>
         </div>
         <div class="track-format">{{ track.format || '-' }}</div>
         <div class="track-duration">{{ formatDuration(track.duration) }}</div>
         <AppBadge :color="track.scraped ? 'green' : 'orange'">{{ track.scraped ? '已刮削' : '未刮削' }}</AppBadge>
-        <button class="play-btn" @click="playTrack(track)">{{ player.currentId === track.id ? '播放中' : '播放' }}</button>
+        <button class="play-btn" @click.stop="playTrack(track)">{{ player.currentId === track.id ? '播放中' : '播放' }}</button>
       </div>
     </div>
 
@@ -178,8 +183,10 @@ h2 { font-size: clamp(28px, 5vw, 56px); line-height: 1; margin: 0; word-break: b
 .track-table { display: flex; flex-direction: column; gap: 4px; }
 .table-head, .track-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 80px 80px 88px 72px; align-items: center; gap: 10px; }
 .table-head { padding: 0 12px 8px; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border); }
-.track-row { padding: 10px 12px; border-radius: var(--radius-md); }
+.track-row { padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer; }
 .track-row:hover, .track-row.active { background: var(--surface-hover); }
+.track-row.is-unscraped { opacity: 0.95; }
+.track-row.is-unscraped .track-title { color: var(--text); }
 .track-index, .track-format, .track-duration { color: var(--text-dim); font-size: 13px; }
 .track-main { min-width: 0; cursor: pointer; }
 .track-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
