@@ -102,8 +102,12 @@ def score_meta(meta: MusicMeta, title_hint: str, artist_hint: str = "", album_hi
         score += title_artist * 0.10
         reasons.append(f"title_artist={title_artist:.2f}")
     if album_hint:
-        score += album * 0.10
+        # 专辑作为强信号：完全匹配加 0.18，未命中且得分低于 0.5 时明显扣分，防止同名其他专辑被选上
+        score += album * 0.18
         reasons.append(f"album={album:.2f}")
+        if album < 0.5:
+            score -= 0.15
+            reasons.append("album_mismatch")
     else:
         score += 0.04 if (meta.album or "").strip() else 0.0
 

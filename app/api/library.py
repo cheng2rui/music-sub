@@ -388,13 +388,27 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
         return {"ok": True, "message": "没有需要刮削的文件", "scraped": 0, "total": 0}
 
     scraped_count = 0
+    # 在专辑级重刮削时强制专辑/主艺人一致，避免某一首被同名专辑带走
+    locked_album = album_name if album_name and album_name != UNKNOWN_ALBUM else ""
+    locked_artist = album_artist or ""
     for f in files:
         if not f.file_path or not os.path.exists(f.file_path):
             continue
         title_hint = (f.title or "").strip()
-        artist_hint = (f.artist or "").strip()
-        meta = _scrape_file(f.file_path, title_hint=title_hint, artist_hint=artist_hint)
+        artist_hint = (f.artist or "").strip() or locked_artist
+        album_hint = (f.album or "").strip() or locked_album
+        meta = _scrape_file(
+            f.file_path,
+            title_hint=title_hint,
+            artist_hint=artist_hint,
+            album_hint=album_hint,
+        )
         if meta:
+            # 专辑定锁：保底主艺人与专辑名不被刮削源带偏
+            if locked_album and meta.album and meta.album != locked_album:
+                meta.album = locked_album
+            if locked_artist and not meta.album_artist:
+                meta.album_artist = locked_artist
             tag_file(f.file_path, meta)
             if meta.lyrics:
                 save_lyrics(f.file_path, meta.lyrics)

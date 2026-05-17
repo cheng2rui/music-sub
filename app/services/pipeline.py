@@ -64,7 +64,8 @@ def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str) -> l
         return []
 
 
-def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") -> MusicMeta | None:
+def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
+                 album_hint: str = "") -> MusicMeta | None:
     """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
     filename = Path(file_path).stem
     fallback_pairs: list[tuple[str, str]] = []
@@ -106,13 +107,16 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") ->
                     if key in seen_keys:
                         continue
                     seen_keys.add(key)
-                    scored_candidates.append(score_meta(meta, title_hint, artist_hint))
+                    scored_candidates.append(score_meta(meta, title_hint, artist_hint, album_hint))
 
     _collect(title_hint, artist_hint)
 
     # If primary search yielded nothing useful, try alternate hint orderings to fix
     # "title - artist" filenames or rescrape calls with reversed DB fields.
     threshold = 0.48 if artist_hint else 0.42
+    # 带 album_hint 调用时，同专辑余下主要走 title 区分，阈值可以略高点以避免跳走另一个专辑
+    if album_hint:
+        threshold = max(threshold, 0.5)
     if not scored_candidates or max((c.score for c in scored_candidates), default=0.0) < threshold:
         for alt_title, alt_artist in fallback_pairs:
             if not alt_title:
@@ -132,6 +136,8 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") ->
         logger.info(f"Smart scrape candidates for {filename}: {preview}")
 
     threshold = 0.48 if artist_hint else 0.42
+    if album_hint:
+        threshold = max(threshold, 0.5)
     for item in scored_candidates:
         if item.score < threshold:
             break
@@ -279,11 +285,27 @@ def _process_completed_torrent(torrent: dict):
                 # For single-file online downloads, the source result has correct title/artist
                 # while the filename may be "title - artist", not "artist - title".
                 use_hint = metadata_hint if len(linked_files) == 1 else {}
+                # 同一专辑下的后续曲目，用第一首确定下来的 album/artist 当强约束，
+                # 避免被其他专辑同名的高分候选带走
+                shared_album = (first_meta.album if first_meta else "") or ""
+                shared_artist = (
+                    (first_meta.album_artist or first_meta.artist) if first_meta else ""
+                ) or ""
                 meta = _scrape_file(
                     file_path,
                     title_hint=use_hint.get("title") or "",
-                    artist_hint=use_hint.get("artist") or "",
+                    artist_hint=use_hint.get("artist") or shared_artist,
+                    album_hint=shared_album,
                 ) or _meta_from_hint(use_hint)
+                # 同专辑下接选中的 meta 专辑名不一致（例如刮到翻唱/Live 版本），强制覆盖为共享专辑
+                if meta and shared_album and meta.album and meta.album != shared_album:
+                    logger.info(
+                        f"Override album for {os.path.basename(file_path)}: "
+                        f"{meta.album} -> {shared_album}"
+                    )
+                    meta.album = shared_album
+                    if shared_artist and not meta.album_artist:
+                        meta.album_artist = shared_artist
                 meta_cache[os.path.basename(file_path)] = meta
             audio_meta = read_audio_metadata(file_path)
             if meta:
