@@ -3,7 +3,7 @@ import os
 import subprocess
 from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from app.auth import verify_token
@@ -32,6 +32,41 @@ def _album_cover_path(file_path: str) -> str | None:
         if p.exists():
             return str(p)
     return None
+
+
+def _embedded_cover_data(file_path: str | None) -> bytes | None:
+    """Return embedded artwork bytes, if readable."""
+    if not file_path or not os.path.exists(file_path):
+        return None
+    try:
+        from app.scrapers.tagger import read_embedded_cover
+        return read_embedded_cover(file_path)
+    except Exception:
+        return None
+
+
+def _has_cover(file_path: str | None) -> bool:
+    """Cover availability used by API/UI health checks: sidecar first, then embedded artwork."""
+    return bool(file_path and (_album_cover_path(file_path) or _embedded_cover_data(file_path)))
+
+
+def _cover_response(file_path: str | None):
+    """Serve sidecar cover, falling back to embedded artwork bytes."""
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No cover")
+    cover = _album_cover_path(file_path)
+    if cover:
+        return FileResponse(cover)
+    data = _embedded_cover_data(file_path)
+    if not data:
+        raise HTTPException(status_code=404, detail="No cover")
+    head = data[:12]
+    media_type = "image/jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        media_type = "image/png"
+    elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        media_type = "image/webp"
+    return Response(content=data, media_type=media_type)
 
 
 @router.get("/")
@@ -72,7 +107,7 @@ def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50
             "bitrate": f.bitrate,
             "sample_rate": f.sample_rate,
             "channels": f.channels,
-            "has_cover": bool(_album_cover_path(f.file_path)),
+            "has_cover": _has_cover(f.file_path),
         }
         for f in files
     ]
@@ -130,7 +165,7 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
             "total_duration": float(r.total_duration or 0),
             "avg_bitrate": int(r.avg_bitrate or 0) if r.avg_bitrate else None,
             "formats": [x for x in (r.formats or "").split(",") if x],
-            "has_cover": bool(_album_cover_path(r.sample_path)),
+            "has_cover": _has_cover(r.sample_path),
             "sample_id": r.sample_id,
         })
     return result
@@ -175,14 +210,11 @@ def list_album_tracks(artist: str, album: str, db: Session = Depends(get_db)):
 
 @router.get("/cover/{file_id}")
 def get_cover(file_id: int, db: Session = Depends(get_db)):
-    """Serve cover image for a music file's album folder."""
+    """Serve cover image for a music file: sidecar first, embedded artwork second."""
     f = db.query(MusicFile).filter(MusicFile.id == file_id).first()
     if not f:
         raise HTTPException(status_code=404, detail="Not found")
-    cover = _album_cover_path(f.file_path)
-    if not cover:
-        raise HTTPException(status_code=404, detail="No cover")
-    return FileResponse(cover)
+    return _cover_response(f.file_path)
 
 
 @router.get("/album-cover")
@@ -200,10 +232,7 @@ def get_album_cover(artist: str, album: str, db: Session = Depends(get_db)):
     f = query.first()
     if not f:
         raise HTTPException(status_code=404, detail="Not found")
-    cover = _album_cover_path(f.file_path)
-    if not cover:
-        raise HTTPException(status_code=404, detail="No cover")
-    return FileResponse(cover)
+    return _cover_response(f.file_path)
 
 
 def _has_lrc(file_path: str | None) -> bool:
@@ -256,13 +285,13 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
                 "track_count": 0,
                 "sample_track_id": f.id,
                 "sample_path": f.file_path,
-                "has_cover": bool(_album_cover_path(f.file_path)),
+                "has_cover": _has_cover(f.file_path),
             }
         bucket[key]["track_count"] += 1
         totals[bucket_key] += 1
 
     for f in files:
-        if not _album_cover_path(f.file_path):
+        if not _has_cover(f.file_path):
             _add("missing_cover", f)
         if not _has_lrc(f.file_path):
             _add("missing_lyrics", f)
@@ -498,7 +527,7 @@ def get_file_detail(file_id: int, db: Session = Depends(get_db)):
         "genre": f.genre,
         "format": f.format,
         "scraped": f.scraped,
-        "has_cover": bool(_album_cover_path(f.file_path)),
+        "has_cover": _has_cover(f.file_path),
         "track_number": f.track_number,
         "disc_number": f.disc_number,
         "bitrate": f.bitrate,
@@ -560,8 +589,8 @@ def _infer_hints_from_library_path(file_path: str) -> tuple[str, str]:
 def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name: str = "",
                   db: Session = Depends(get_db)):
     """Re-scrape metadata for specified files or an entire album."""
-    from app.services.pipeline import _scrape_file
-    from app.scrapers.tagger import tag_file, save_lyrics, save_cover, read_audio_metadata
+    from app.services.pipeline import _scrape_file, _enrich_from_local_assets
+    from app.scrapers.tagger import tag_file, save_lyrics, save_cover, read_audio_metadata, read_existing_tags
 
     # Get files to rescrape
     if file_ids:
@@ -591,20 +620,27 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
     for f in files:
         if not f.file_path or not os.path.exists(f.file_path):
             continue
-        title_hint = (f.title or "").strip()
-        artist_hint = (f.artist or "").strip() or locked_artist
-        album_hint = (f.album or "").strip() or locked_album
+        local_tags = read_existing_tags(f.file_path)
+        title_hint = (f.title or local_tags.get("title") or "").strip()
+        artist_hint = (f.artist or local_tags.get("artist") or local_tags.get("album_artist") or "").strip() or locked_artist
+        album_hint = (f.album or local_tags.get("album") or "").strip() or locked_album
         # DB 字段缺失时，从 library 路径 (artist/album/track) 中补，比文件名推断准
         if not artist_hint or not album_hint:
             path_artist, path_album = _infer_hints_from_library_path(f.file_path)
             artist_hint = artist_hint or path_artist
             album_hint = album_hint or path_album
+        audio_meta_hint = read_audio_metadata(f.file_path)
         meta = _scrape_file(
             f.file_path,
             title_hint=title_hint,
             artist_hint=artist_hint,
             album_hint=album_hint,
+            year_hint=local_tags.get("year") or f.year,
+            duration_hint=audio_meta_hint.get("duration") or f.duration,
+            track_hint=local_tags.get("track_number") or f.track_number,
         )
+        if meta:
+            _enrich_from_local_assets(f.file_path, meta)
         if meta:
             # 专辑定锁：保底主艺人与专辑名不被刮削源带偏。
             # 目前 DB 没有 album_artist 字段，library 也是按 artist+album 分组，
