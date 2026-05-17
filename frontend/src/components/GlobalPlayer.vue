@@ -69,6 +69,11 @@ const duration = ref(0)
 const isSeeking = ref(false)
 const seekValue = ref(0)
 const effectiveDuration = computed(() => duration.value || Number(player.currentTrack?.duration) || 0)
+const seekPercent = computed(() => {
+  const d = effectiveDuration.value
+  if (!d) return 0
+  return Math.max(0, Math.min(100, ((isSeeking.value ? seekValue.value : player.currentTime) / d) * 100))
+})
 const parsedLyrics = computed(() => parseLrc(trackDetail.value?.lyrics))
 const activeLyricIndex = computed(() => {
   const lines = parsedLyrics.value
@@ -128,22 +133,39 @@ async function togglePlay() {
   }
 }
 
+function valueToTime(value) {
+  const raw = Number(value) || 0
+  const max = effectiveDuration.value || 0
+  // 兼容旧前端缓存/浏览器行为：如果传入像百分比一样的 0-100 值，也能转成时间。
+  if (max > 100 && raw <= 100) return raw * max / 100
+  return raw
+}
+
 function beginSeek() {
   isSeeking.value = true
+  seekValue.value = player.currentTime
 }
 
 function inputSeek(value) {
-  const time = Number(value) || 0
+  const time = valueToTime(value)
   seekValue.value = time
   player.setCurrentTime(time)
 }
 
 function commitSeek(value = seekValue.value) {
-  const time = Math.max(0, Math.min(Number(value) || 0, effectiveDuration.value || Number.MAX_SAFE_INTEGER))
+  const time = Math.max(0, Math.min(valueToTime(value), effectiveDuration.value || Number.MAX_SAFE_INTEGER))
   seekValue.value = time
   player.setCurrentTime(time)
   if (audioRef.value) audioRef.value.currentTime = time
   isSeeking.value = false
+}
+
+function seekByPointer(event) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  const clientX = event.touches?.[0]?.clientX ?? event.clientX
+  const ratio = rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0
+  const time = ratio * (effectiveDuration.value || 0)
+  commitSeek(time)
 }
 
 function seekTo(time) {
@@ -192,19 +214,31 @@ function formatDuration(seconds) {
 
     <div v-show="!player.isCollapsed" class="seek-wrap">
       <span class="seek-time">{{ formatDuration(player.currentTime) }}</span>
+      <div
+        class="seek-track"
+        :class="{ disabled: !effectiveDuration }"
+        @click="seekByPointer"
+        @pointerdown="seekByPointer"
+        @touchstart.prevent="seekByPointer"
+      >
+        <div class="seek-fill" :style="{ width: seekPercent + '%' }"></div>
+        <div class="seek-thumb" :style="{ left: seekPercent + '%' }"></div>
+      </div>
       <input
         class="seek-range"
         type="range"
         min="0"
-        :max="effectiveDuration || 0"
+        max="100"
         step="0.1"
-        :value="isSeeking ? seekValue : player.currentTime"
+        :value="seekPercent"
         :disabled="!effectiveDuration"
+        aria-label="播放进度"
         @pointerdown="beginSeek"
         @touchstart="beginSeek"
         @input="inputSeek($event.target.value)"
         @change="commitSeek($event.target.value)"
         @pointerup="commitSeek($event.target.value)"
+        @touchend="commitSeek($event.target.value)"
         @keyup.enter="commitSeek($event.target.value)"
       />
       <span class="seek-time">{{ formatDuration(effectiveDuration) }}</span>
@@ -393,13 +427,53 @@ function formatDuration(seconds) {
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
-.seek-range {
+.seek-track {
+  position: relative;
   flex: 1;
+  height: 18px;
   min-width: 120px;
-  accent-color: var(--accent);
   cursor: pointer;
+  display: flex;
+  align-items: center;
 }
-.seek-range:disabled { opacity: 0.45; cursor: not-allowed; }
+.seek-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.seek-fill {
+  position: absolute;
+  left: 0;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.seek-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 2px solid var(--accent);
+  transform: translateX(-50%);
+  box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  pointer-events: none;
+}
+.seek-track.disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.seek-range {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.seek-range:disabled { opacity: 0; }
 .player-audio {
   display: none;
 }
