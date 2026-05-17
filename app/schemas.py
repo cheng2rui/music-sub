@@ -65,6 +65,7 @@ class DownloadTaskResponse(BaseModel):
     save_path: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[str] = None
+    tracker_msg: Optional[str] = ""
 
     class Config:
         from_attributes = True

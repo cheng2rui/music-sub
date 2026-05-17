@@ -23,15 +23,22 @@ SITE_CLASSES = {
 }
 
 VIDEO_EXCLUDE_TERMS = [
-    "mv", "music video", "mp4", "mkv", "avi", "web-dl", "webrip", "bluray",
-    "bdrip", "dvdrip", "h264", "h265", "x264", "x265", "hevc", "2160p",
-    "1080p", "720p", "4k", "60fps", "ac3", "remux", "演唱会", "演唱會",
-    "concert", "live concert", "dvd", "中字", "字幕", "修复", "修復", "repair",
+    # 容器/编码/分辨率 — 出现这些词几乎肯定是视频
+    "mp4", "mkv", "avi", "web-dl", "webrip", "bluray", "blu-ray",
+    "bdrip", "dvdrip", "hdtv", "hdrip", "dvdiso", "dvd-iso", "bdiso", "bd-iso",
+    "h.264", "h264", "h.265", "h265", "x264", "x265", "hevc", "avc",
+    "2160p", "1080p", "720p", "480p", "576p", "4k uhd", "4kuhd", " 4k ", "uhd ", "60fps", "hdr",
+    "remux", "3d-bd",
+    # 字幕/修复类也几乎都是视频资源
+    "中字", "字幕", "修复版", "修復版",
+    # 明确是 MV / 视频类型
+    "music video", " mv ", "[mv]", "：mv", "｜mv", "·mv",
 ]
 
 AUDIO_HINT_TERMS = [
-    "flac", "mp3", "ape", "wav", "m4a", "aac", "alac", "cue", "cd", "hi-res",
+    "flac", "mp3", "ape", "wav", "m4a", "aac", "alac", "cue", "hi-res",
     "hires", "lossless", "无损", "無損", "320", "24bit", "16bit",
+    "dsd", "dsf", "dff", "整轨", "分轨", "web flac", "web-flac",
 ]
 
 TYPE_MAX_SIZE_BYTES = {
@@ -61,8 +68,13 @@ def _get_site_instance(name: str) -> Optional[BaseSite]:
     return cls(**kwargs)
 
 
-def search_sites(keyword: str, site_names: list[str] = None) -> list[TorrentInfo]:
-    """Search multiple PT sites for a keyword."""
+def search_sites(keyword: str, site_names: list[str] = None,
+                 *, exclude_video: bool = True) -> list[TorrentInfo]:
+    """Search multiple PT sites for a keyword.
+
+    `exclude_video=True` (默认) 会从返回结果中刪除明显是视频的条目（mp4/mkv/h265/2160p/MV 等），
+    主要针对馈头这种会跨 category 返回视频的 PT 站点。调用方可以显式关闭。
+    """
     results = []
     sites_to_search = site_names or list(cfg_module.config.sites.keys())
 
@@ -77,6 +89,12 @@ def search_sites(keyword: str, site_names: list[str] = None) -> list[TorrentInfo
         except Exception as e:
             logger.error(f"[{name}] Search error: {e}")
 
+    if exclude_video and results:
+        before = len(results)
+        results = [r for r in results if not _looks_like_video(r.title)]
+        if len(results) != before:
+            logger.info(f"search_sites filtered out {before - len(results)} video results")
+
     # Sort by seeders descending
     results.sort(key=lambda t: t.seeders, reverse=True)
     return results
@@ -88,8 +106,12 @@ def _split_keywords(keyword: str) -> list[str]:
 
 
 def _looks_like_video(title: str) -> bool:
-    """Return True when a torrent title is very likely video instead of an audio release."""
-    lower = title.lower()
+    """Return True when a torrent title is very likely video instead of an audio release.
+
+    仅依赖“容器/编码/分辨率/MV”这种硬信号，不再把“演唱会”这种体裁
+    字眼当作死判（蔡依林 《唯舞独尊演唱会纪实》 依然是面向音频的专辑）。
+    """
+    lower = " " + title.lower() + " "  # 加边界便于“ mv ”之类的词边界检测
     return any(term in lower for term in VIDEO_EXCLUDE_TERMS)
 
 

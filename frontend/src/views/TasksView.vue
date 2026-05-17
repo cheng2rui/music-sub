@@ -315,7 +315,10 @@ onUnmounted(() => {
                 {{ statusLabel(task.status).label }}
               </AppBadge>
             </td>
-            <td class="text-dim">{{ task.qb_state || '-' }}</td>
+            <td class="text-dim">
+              <div>{{ task.qb_state || '-' }}</div>
+              <div v-if="task.tracker_msg" class="tracker-msg" :title="task.tracker_msg">{{ task.tracker_msg }}</div>
+            </td>
             <td class="progress-cell">
               <template v-if="progressPercent(task) !== null">
                 <div class="progress-bar"><span :style="{ width: progressPercent(task) + '%' }"></span></div>
@@ -409,6 +412,7 @@ onUnmounted(() => {
 .tasks-table tr:hover td { background: var(--surface-hover); }
 .name-cell { font-weight: 500; max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .external-qb-tag { margin-top: 3px; font-size: 11px; color: var(--warning); overflow: hidden; text-overflow: ellipsis; }
+.tracker-msg { margin-top: 2px; font-size: 11px; color: var(--danger, #f87171); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress-cell { min-width: 150px; }
 .progress-bar { width: 120px; height: 6px; background: var(--surface); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
 .progress-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }

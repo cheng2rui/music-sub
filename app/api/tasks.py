@@ -76,6 +76,7 @@ def _task_to_response(task: DownloadTask, qb_info: dict | None = None) -> dict:
         "save_path": qb_info.get("save_path"),
         "category": qb_info.get("category"),
         "tags": qb_info.get("tags"),
+        "tracker_msg": qb_info.get("tracker_msg") or "",
     }
 
 
@@ -111,6 +112,7 @@ def _qb_info_to_response(torrent_hash: str, qb_info: dict) -> dict:
         "save_path": qb_info.get("save_path"),
         "category": qb_info.get("category"),
         "tags": qb_info.get("tags"),
+        "tracker_msg": qb_info.get("tracker_msg") or "",
     }
 
 

@@ -202,26 +202,51 @@ class QBClient:
             return {}
         try:
             torrents = self.client.torrents_info(torrent_hashes="|".join(hashes))
-            return {
-                t.hash.lower(): {
-                    "qb_state": t.state,
-                    "progress": float(t.progress or 0),
-                    "download_speed": float(getattr(t, "dlspeed", 0) or 0),
-                    "upload_speed": float(getattr(t, "upspeed", 0) or 0),
-                    "eta": int(getattr(t, "eta", 0) or 0),
-                    "amount_left": float(getattr(t, "amount_left", 0) or 0),
-                    "size": float(getattr(t, "size", 0) or 0),
-                    "category": getattr(t, "category", "") or "",
-                    "tags": getattr(t, "tags", "") or "",
-                    "save_path": t.save_path,
-                    "content_path": t.content_path,
-                    "name": t.name,
-                }
-                for t in torrents
-            }
         except Exception as e:
             logger.error(f"Failed to get torrent states: {e}")
             return {}
+
+        result: dict[str, dict] = {}
+        for t in torrents:
+            tracker_msg = self._best_tracker_message(t.hash)
+            result[t.hash.lower()] = {
+                "qb_state": t.state,
+                "progress": float(t.progress or 0),
+                "download_speed": float(getattr(t, "dlspeed", 0) or 0),
+                "upload_speed": float(getattr(t, "upspeed", 0) or 0),
+                "eta": int(getattr(t, "eta", 0) or 0),
+                "amount_left": float(getattr(t, "amount_left", 0) or 0),
+                "size": float(getattr(t, "size", 0) or 0),
+                "category": getattr(t, "category", "") or "",
+                "tags": getattr(t, "tags", "") or "",
+                "save_path": t.save_path,
+                "content_path": t.content_path,
+                "name": t.name,
+                "tracker_msg": tracker_msg,
+            }
+        return result
+
+    def _best_tracker_message(self, torrent_hash: str) -> str:
+        """Return the most informative non-empty tracker message for diagnostics."""
+        try:
+            trks = self.client.torrents_trackers(torrent_hash=torrent_hash)
+        except Exception:
+            return ""
+        # status: 0=disabled, 1=not contacted, 2=working, 3=updating, 4=not working
+        # 优先拿“出错但有 msg”的那一条（如 Port 6881 is blacklisted）
+        broken_msgs = []
+        info_msgs = []
+        for t in trks:
+            url = t.get("url") or ""
+            msg = (t.get("msg") or "").strip()
+            status = t.get("status")
+            if url.startswith("** ["):  # DHT/PeX/LSD pseudo trackers
+                continue
+            if status in (4,) and msg:
+                broken_msgs.append(msg)
+            elif msg:
+                info_msgs.append(msg)
+        return (broken_msgs or info_msgs or [""])[0][:200]
 
     def get_torrent_files(self, torrent_hash: str) -> list[dict]:
         """Get files in a torrent."""
