@@ -32,6 +32,8 @@ const fileRows = ref([])
 const loadingFiles = ref(false)
 const selectedFileIds = ref(new Set())
 
+const isCueTool = computed(() => activeTool.value && ['split_audio', 'cue_candidates'].includes(activeTool.value.id))
+
 const optionPlaceholder = computed(() => {
   if (!activeTool.value) return '{}'
   const id = activeTool.value.id
@@ -289,7 +291,10 @@ function handleClose() {
         <div v-if="previewing" class="info-line">预览中...</div>
         <div v-else-if="previewData?.error" class="info-line err">{{ previewData.error }}</div>
         <div v-else-if="previewData?.items?.length" class="preview-table-wrap">
-          <div class="preview-summary">{{ previewData.summary?.changed ?? '?' }} / {{ previewData.summary?.total ?? previewData.items.length }} 项需要变更</div>
+          <div class="preview-summary">
+            {{ previewData.summary?.changed ?? '?' }} / {{ previewData.summary?.total ?? previewData.items.length }} 项需要变更
+            <template v-if="previewData.summary?.tracks"> · 预计拆出 {{ previewData.summary.tracks }} 首</template>
+          </div>
           <table class="preview-table">
             <thead>
               <tr>
@@ -310,7 +315,18 @@ function handleClose() {
                   <div class="file-name">{{ item.label }}</div>
                   <div class="file-path">{{ item.file_path }}</div>
                 </td>
-                <td class="reason-cell">{{ item.reason || (item.would_change ? '需变更' : '无变化') }}</td>
+                <td class="reason-cell">
+                  <div>{{ item.reason || (item.would_change ? '需变更' : '无变化') }}</div>
+                  <div v-if="isCueTool && item.after?.tracks?.length" class="cue-track-list">
+                    <div v-for="track in item.after.tracks.slice(0, 12)" :key="track.index" class="cue-track-row">
+                      <span>{{ String(track.index).padStart(2, '0') }}</span>
+                      <strong>{{ track.title }}</strong>
+                      <em>{{ track.performer }}</em>
+                      <small>{{ track.out }}</small>
+                    </div>
+                    <div v-if="item.after.tracks.length > 12" class="cue-more">还有 {{ item.after.tracks.length - 12 }} 首未显示</div>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -381,6 +397,13 @@ function handleClose() {
 .file-name { font-weight: 600; }
 .file-path { color: var(--text-muted); font-size: 11px; word-break: break-all; }
 .reason-cell { color: var(--text-dim); }
+.cue-track-list { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow-y: auto; }
+.cue-track-row { display: grid; grid-template-columns: 32px minmax(90px, 1.2fr) minmax(70px, .8fr); gap: 8px; align-items: baseline; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); }
+.cue-track-row span { color: var(--accent); font-weight: 700; }
+.cue-track-row strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cue-track-row em { font-style: normal; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cue-track-row small { grid-column: 2 / 4; color: var(--text-muted); word-break: break-all; font-size: 10px; }
+.cue-more { padding: 4px 8px; color: var(--text-muted); font-size: 11px; }
 .dedupe-keep { color: var(--accent); font-weight: 700; font-size: 11px; }
 
 .job-progress { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
