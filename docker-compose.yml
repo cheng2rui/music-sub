@@ -29,8 +29,8 @@ services:
     container_name: music-sub-qb
     ports:
       - "8401:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
+      - "57881:57881"
+      - "57881:57881/udp"
     volumes:
       - ./data/qb-config:/config
       - ./data/downloads:/downloads/music
@@ -39,4 +39,5 @@ services:
       - PGID=1000
       - TZ=Asia/Shanghai
       - WEBUI_PORT=8080
+      - TORRENTING_PORT=57881
     restart: unless-stopped
