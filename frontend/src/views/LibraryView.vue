@@ -10,8 +10,10 @@ import { usePlayerStore } from '@/stores/player.js'
 const stats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
 const albums = ref([])
 const searchQ = ref('')
+const sortMode = ref('updated')
 const viewMode = ref('grid')
 const loading = ref(false)
+let searchTimer = null
 const loadingMore = ref(false)
 const albumLimit = 200
 const albumOffset = ref(0)
@@ -43,8 +45,8 @@ async function loadAlbums(reset = true) {
     loadingMore.value = true
   }
   try {
-    const params = { limit: albumLimit, offset: reset ? 0 : albumOffset.value }
-    if (searchQ.value) params.q = searchQ.value
+    const params = { limit: albumLimit, offset: reset ? 0 : albumOffset.value, sort: sortMode.value }
+    if (searchQ.value.trim()) params.q = searchQ.value.trim()
     const data = await getLibraryAlbums(params)
     const rows = Array.isArray(data) ? data : []
     albums.value = reset ? rows : albums.value.concat(rows)
@@ -128,11 +130,29 @@ function coverUrl(artist, album) {
   return getAlbumCover(artist, album)
 }
 
+function debounceLoadAlbums() {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadAlbums(true), 300)
+}
+
 function formatDuration(s) {
   if (!s) return '-'
-  const m = Math.floor(s / 60)
-  const sec = Math.floor(s % 60)
+  const total = Math.floor(s)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const sec = total % 60
+  if (h) return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
   return `${m}:${sec.toString().padStart(2, '0')}`
+}
+
+function formatAlbumMeta(item) {
+  const parts = []
+  if (item.year) parts.push(item.year)
+  parts.push(`${item.track_count} 首`)
+  if (item.total_duration) parts.push(formatDuration(item.total_duration))
+  if (item.formats?.length) parts.push(item.formats.slice(0, 2).join('/'))
+  if (item.avg_bitrate) parts.push(`${item.avg_bitrate}kbps`)
+  return parts.join(' · ')
 }
 
 onMounted(() => { loadStats(); loadAlbums() })
@@ -166,7 +186,14 @@ onMounted(() => { loadStats(); loadAlbums() })
 
     <!-- 工具栏 -->
     <div class="toolbar">
-      <input v-model="searchQ" placeholder="搜索专辑或艺术家..." class="search-input" @input="loadAlbums(true)" />
+      <input v-model="searchQ" placeholder="搜索专辑 / 艺术家 / 歌名..." class="search-input" @input="debounceLoadAlbums" />
+      <select v-model="sortMode" class="sort-select" @change="loadAlbums(true)">
+        <option value="updated">最近入库</option>
+        <option value="name">专辑名</option>
+        <option value="artist">艺术家</option>
+        <option value="tracks">曲目数</option>
+        <option value="year">年份</option>
+      </select>
       <div class="view-toggles">
         <button :class="['view-btn', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'">▦</button>
         <button :class="['view-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'">☰</button>
@@ -191,7 +218,7 @@ onMounted(() => { loadStats(); loadAlbums() })
         <div class="album-info">
           <div class="album-name">{{ item.album }}</div>
           <div class="album-artist">{{ item.artist }}</div>
-          <div class="album-meta">{{ item.year }} · {{ item.track_count }} 首</div>
+          <div class="album-meta">{{ formatAlbumMeta(item) }}</div>
         </div>
       </div>
     </div>
@@ -207,7 +234,7 @@ onMounted(() => { loadStats(); loadAlbums() })
         <MusicCover :src="coverUrl(item.artist, item.album)" class="row-cover" />
         <div class="row-info">
           <div class="row-name">{{ item.album }}</div>
-          <div class="row-sub">{{ item.artist }} · {{ item.year }}</div>
+          <div class="row-sub">{{ item.artist }} · {{ formatAlbumMeta(item) }}</div>
         </div>
         <div class="row-count">{{ item.track_count }} 首</div>
         <AppBadge :color="item.scraped_count === item.track_count ? 'green' : 'orange'">
@@ -227,7 +254,10 @@ onMounted(() => { loadStats(); loadAlbums() })
       <div class="album-modal">
         <img :src="coverUrl(selectedAlbum?.artist, selectedAlbum?.album)" class="modal-cover" />
         <div class="modal-meta">{{ selectedAlbum?.artist }} · {{ selectedAlbum?.album }}</div>
-        <AppButton variant="primary" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
+        <div class="modal-actions">
+          <AppButton variant="primary" size="sm" @click="albumTracks[0] && playTrack(albumTracks[0])">播放第一首</AppButton>
+          <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
+        </div>
         <div class="track-list">
           <div
             v-for="track in albumTracks"
@@ -304,8 +334,9 @@ onMounted(() => { loadStats(); loadAlbums() })
 .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; text-align: center; }
 .stat-val { font-size: 24px; font-weight: 700; }
 .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
-.toolbar { display: flex; gap: 10px; align-items: center; }
-.search-input { flex: 1; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.search-input { flex: 1; min-width: 220px; }
+.sort-select { min-width: 120px; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-md); padding: 8px 10px; }
 .view-toggles { display: flex; gap: 4px; }
 .view-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; padding: 6px 10px; border-radius: var(--radius-md); font-size: 14px; }
 .view-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
@@ -328,6 +359,7 @@ onMounted(() => { loadStats(); loadAlbums() })
 .album-modal { display: flex; flex-direction: column; gap: 14px; min-width: 440px; }
 .modal-cover { width: 180px; height: 180px; border-radius: var(--radius-lg); object-fit: cover; }
 .modal-meta { font-size: 14px; color: var(--text-dim); }
+.modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .track-list { display: flex; flex-direction: column; gap: 4px; max-height: 350px; overflow-y: auto; }
 .track-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
 .track-row:hover { background: var(--surface-hover); }
@@ -353,6 +385,8 @@ onMounted(() => { loadStats(); loadAlbums() })
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .toolbar { align-items: stretch; }
+  .sort-select { width: 100%; }
   .album-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
   .track-modal { min-width: unset; width: 100%; }
   .tag-row { flex-direction: column; align-items: stretch; gap: 4px; }

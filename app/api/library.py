@@ -67,21 +67,25 @@ def list_library(artist: str = "", album: str = "", limit: int = 50,
 
 
 @router.get("/albums")
-def list_albums(artist: str = "", q: str = "", limit: int = 200, offset: int = 0,
+def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int = 200, offset: int = 0,
                 db: Session = Depends(get_db)):
-    """List unique albums grouped by (artist, album), with track counts."""
+    """List unique albums grouped by (artist, album), with library-friendly stats."""
     album_group = func.coalesce(func.nullif(MusicFile.album, ""), UNKNOWN_ALBUM)
+    latest_at = func.max(MusicFile.created_at)
+    track_count = func.count(MusicFile.id)
     query = (
         db.query(
             MusicFile.artist.label("artist"),
             album_group.label("album"),
             func.min(MusicFile.year).label("year"),
-            func.count(MusicFile.id).label("track_count"),
-            func.sum(
-                case((MusicFile.scraped == True, 1), else_=0)
-            ).label("scraped_count"),
+            track_count.label("track_count"),
+            func.sum(case((MusicFile.scraped == True, 1), else_=0)).label("scraped_count"),
+            func.sum(func.coalesce(MusicFile.duration, 0)).label("total_duration"),
+            func.avg(MusicFile.bitrate).label("avg_bitrate"),
+            func.group_concat(func.distinct(func.upper(MusicFile.format))).label("formats"),
+            func.min(MusicFile.id).label("sample_id"),
             func.min(MusicFile.file_path).label("sample_path"),
-            func.max(MusicFile.created_at).label("updated_at"),
+            latest_at.label("updated_at"),
         )
         .group_by(MusicFile.artist, album_group)
     )
@@ -89,11 +93,20 @@ def list_albums(artist: str = "", q: str = "", limit: int = 200, offset: int = 0
         query = query.filter(MusicFile.artist.ilike(f"%{artist}%"))
     if q:
         query = query.filter(
-            (MusicFile.album.ilike(f"%{q}%")) | (MusicFile.artist.ilike(f"%{q}%"))
+            (MusicFile.album.ilike(f"%{q}%")) |
+            (MusicFile.artist.ilike(f"%{q}%")) |
+            (MusicFile.title.ilike(f"%{q}%"))
         )
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
-    rows = query.order_by(func.max(MusicFile.created_at).desc()).offset(offset).limit(limit).all()
+    sort_map = {
+        "updated": latest_at.desc(),
+        "name": album_group.asc(),
+        "artist": MusicFile.artist.asc(),
+        "tracks": track_count.desc(),
+        "year": func.min(MusicFile.year).desc(),
+    }
+    rows = query.order_by(sort_map.get(sort, latest_at.desc())).offset(offset).limit(limit).all()
     result = []
     for r in rows:
         result.append({
@@ -102,8 +115,11 @@ def list_albums(artist: str = "", q: str = "", limit: int = 200, offset: int = 0
             "year": r.year,
             "track_count": int(r.track_count or 0),
             "scraped_count": int(r.scraped_count or 0),
+            "total_duration": float(r.total_duration or 0),
+            "avg_bitrate": int(r.avg_bitrate or 0) if r.avg_bitrate else None,
+            "formats": [x for x in (r.formats or "").split(",") if x],
             "has_cover": bool(_album_cover_path(r.sample_path)),
-            "sample_id": None,
+            "sample_id": r.sample_id,
         })
     return result
 
