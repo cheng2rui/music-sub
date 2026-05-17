@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, rescrapeAlbums, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -77,6 +77,27 @@ async function rescrapeHealthAlbum(item) {
 function openHealthAlbum(item) {
   showHealthModal.value = false
   router.push({ name: 'album', query: { artist: item.artist, album: item.album } })
+}
+
+const batchBusy = ref(false)
+async function batchRescrapeCurrentKind() {
+  if (!healthItems.value.length) return
+  batchBusy.value = true
+  try {
+    const albums = healthItems.value.map(it => ({ artist: it.artist, album: it.album }))
+    await rescrapeAlbums(albums)
+    await Promise.all([loadHealth(healthKind.value), loadStats()])
+  } catch (e) { console.error(e) }
+  finally { batchBusy.value = false }
+}
+
+async function batchRescanMissingDuration() {
+  batchBusy.value = true
+  try {
+    await rescanLibraryMetadata({})
+    await Promise.all([loadHealth(healthKind.value), loadStats()])
+  } catch (e) { console.error(e) }
+  finally { batchBusy.value = false }
 }
 
 async function loadStats() {
@@ -388,6 +409,22 @@ onMounted(() => { loadStats(); loadAlbums() })
             <span v-if="healthTotals[k.id]" class="health-count">{{ healthTotals[k.id] }}</span>
           </button>
         </div>
+        <div class="health-batch-row">
+          <AppButton
+            v-if="healthKind === 'missing_duration'"
+            variant="primary"
+            size="sm"
+            :loading="batchBusy"
+            @click="batchRescanMissingDuration"
+          >重读本地元数据</AppButton>
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :disabled="!healthItems.length"
+            :loading="batchBusy"
+            @click="batchRescrapeCurrentKind"
+          >批量重刮削当前 {{ healthItems.length }} 项</AppButton>
+        </div>
         <div v-if="healthLoading" class="loading-text">扫描中...</div>
         <div v-else-if="!healthItems.length" class="loading-text">该类别暂无问题，干净。</div>
         <div v-else class="health-list">
@@ -481,6 +518,7 @@ onMounted(() => { loadStats(); loadAlbums() })
 .health-album { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .health-sub { font-size: 12px; color: var(--text-dim); }
 .health-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.health-batch-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }

@@ -44,26 +44,55 @@ def _get_scraper_chain():
 def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "") -> MusicMeta | None:
     """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
     filename = Path(file_path).stem
+    fallback_pairs: list[tuple[str, str]] = []
     if not title_hint:
-        # Try to extract artist - title from filename.
+        # Try `A - B` decomposition both ways since downloads can be either order.
         parts = filename.split(" - ", 1)
         if len(parts) == 2:
-            artist_hint, title_hint = parts[0].strip(), parts[1].strip()
+            left, right = parts[0].strip(), parts[1].strip()
+            artist_hint, title_hint = left, right
+            fallback_pairs.append((right, left))  # also try title=A artist=B
+            fallback_pairs.append((right, ""))    # bare title fallback
+            fallback_pairs.append((left, ""))     # bare other-side fallback
         else:
             artist_hint, title_hint = artist_hint or "", filename
+            fallback_pairs.append((filename, ""))
+    fallback_pairs.append((title_hint, ""))  # always allow bare title retry
 
     scrapers = _get_scraper_chain()
     scored_candidates = []
     scraper_by_name = {}
-    for scraper in scrapers:
-        scraper_by_name[scraper.name] = scraper
-        try:
-            results = scraper.search(title_hint, artist_hint)
+    seen_keys: set[tuple] = set()
+
+    def _collect(t_hint: str, a_hint: str):
+        for scraper in scrapers:
+            scraper_by_name[scraper.name] = scraper
+            try:
+                results = scraper.search(t_hint, a_hint)
+            except Exception as e:
+                logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")
+                continue
             for meta in results:
+                key = (meta.source, getattr(meta, "song_id", "") or "", meta.title, meta.artist, meta.album)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
                 scored_candidates.append(score_meta(meta, title_hint, artist_hint))
-        except Exception as e:
-            logger.warning(f"[{scraper.name}] Scrape failed for {filename}: {e}")
-            continue
+
+    _collect(title_hint, artist_hint)
+
+    # If primary search yielded nothing useful, try alternate hint orderings to fix
+    # "title - artist" filenames or rescrape calls with reversed DB fields.
+    threshold = 0.48 if artist_hint else 0.42
+    if not scored_candidates or max((c.score for c in scored_candidates), default=0.0) < threshold:
+        for alt_title, alt_artist in fallback_pairs:
+            if not alt_title:
+                continue
+            if alt_title == title_hint and alt_artist == artist_hint:
+                continue
+            _collect(alt_title, alt_artist)
+            if scored_candidates and max(c.score for c in scored_candidates) >= threshold:
+                break
 
     scored_candidates.sort(key=lambda item: item.score, reverse=True)
     if scored_candidates:

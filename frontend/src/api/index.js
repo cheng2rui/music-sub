@@ -104,6 +104,14 @@ export const getLibraryHealth = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/health${qs ? '?' + qs : ''}`).then(r => r.json())
 }
+export const rescanLibraryMetadata = (params = {}) => {
+  const qs = new URLSearchParams(params).toString()
+  return authFetch(`/api/library/rescan_metadata${qs ? '?' + qs : ''}`, { method: 'POST' }).then(r => r.json())
+}
+export const rescrapeAlbums = (albums) => authFetch('/api/library/rescrape_albums', {
+  method: 'POST',
+  body: JSON.stringify({ albums })
+}).then(r => r.json())
 export const getAlbumTracks = (artist, album) =>
   authFetch(`/api/library/album-tracks?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`).then(r => r.json())
 export const getAlbumCover = (artist, album) =>

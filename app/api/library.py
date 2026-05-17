@@ -1,7 +1,7 @@
 """Library API routes."""
 import os
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
@@ -391,7 +391,9 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
     for f in files:
         if not f.file_path or not os.path.exists(f.file_path):
             continue
-        meta = _scrape_file(f.file_path)
+        title_hint = (f.title or "").strip()
+        artist_hint = (f.artist or "").strip()
+        meta = _scrape_file(f.file_path, title_hint=title_hint, artist_hint=artist_hint)
         if meta:
             tag_file(f.file_path, meta)
             if meta.lyrics:
@@ -415,6 +417,64 @@ def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name:
 
     db.commit()
     return {"ok": True, "message": f"刮削完成 {scraped_count}/{len(files)}", "scraped": scraped_count, "total": len(files)}
+
+
+@router.post("/rescan_metadata")
+def rescan_metadata(file_ids: list[int] = [], album_artist: str = "", album_name: str = "",
+                    db: Session = Depends(get_db)):
+    """Re-read local audio metadata (duration/bitrate/etc.) for a file or whole album."""
+    from app.scrapers.tagger import read_audio_metadata
+
+    if file_ids:
+        files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
+    elif album_artist and album_name:
+        query = db.query(MusicFile).filter(MusicFile.artist == album_artist)
+        if album_name == UNKNOWN_ALBUM:
+            query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
+        else:
+            query = query.filter(MusicFile.album == album_name)
+        files = query.all()
+    else:
+        files = db.query(MusicFile).filter(
+            (MusicFile.duration.is_(None)) | (MusicFile.duration == 0)
+        ).limit(500).all()
+
+    updated = 0
+    for f in files:
+        if not f.file_path or not os.path.exists(f.file_path):
+            continue
+        try:
+            audio_meta = read_audio_metadata(f.file_path)
+        except Exception:
+            continue
+        for k in ("duration", "bitrate", "sample_rate", "channels"):
+            v = audio_meta.get(k)
+            if v is not None:
+                setattr(f, k, v)
+        updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated, "total": len(files)}
+
+
+@router.post("/rescrape_albums")
+def rescrape_albums(payload: dict = Body(default={}), db: Session = Depends(get_db)):
+    """Batch rescrape multiple albums. Body: {albums: [{artist, album}]}"""
+    albums = (payload or {}).get("albums") or []
+    if not albums:
+        return {"ok": True, "results": []}
+    results = []
+    for entry in albums:
+        artist = (entry or {}).get("artist")
+        album = (entry or {}).get("album")
+        if not artist or not album:
+            continue
+        try:
+            res = rescrape_files(file_ids=[], album_artist=artist, album_name=album, db=db)
+        except Exception as e:
+            results.append({"artist": artist, "album": album, "ok": False, "error": str(e)})
+            continue
+        results.append({"artist": artist, "album": album, **res})
+    return {"ok": True, "results": results}
 
 
 @router.put("/file/{file_id}")
