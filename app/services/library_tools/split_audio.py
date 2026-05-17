@@ -13,6 +13,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import MusicFile
+from app.scrapers.base import MusicMeta
+from app.scrapers.tagger import tag_file, read_audio_metadata
 from app.services.library_tools.base import PreviewItem, ToolPreview
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,27 @@ def _matched_cue(audio_path: Path) -> Path | None:
     return cues[0] if len(cues) == 1 else None
 
 
+def _parse_year(value: str | None) -> int:
+    if not value:
+        return 0
+    m = re.search(r"\d{4}", str(value))
+    return int(m.group(0)) if m else 0
+
+
+def _track_meta(track: dict[str, Any], album: dict[str, str]) -> MusicMeta:
+    return MusicMeta(
+        title=track.get("title") or f"Track {track.get('index', 0):02d}",
+        artist=track.get("performer") or album.get("performer", ""),
+        album=album.get("title", ""),
+        album_artist=album.get("performer", ""),
+        year=_parse_year(album.get("date")),
+        genre=album.get("genre", ""),
+        track_number=int(track.get("index") or 0),
+        disc_number=1,
+        source="cue",
+    )
+
+
 def _propose(file: MusicFile, options: dict[str, Any]) -> dict[str, Any] | None:
     if not file.file_path:
         return None
@@ -202,15 +225,37 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                 start = float(track["start_seconds"])
                 end = float(tracks[ti + 1]["start_seconds"]) if ti + 1 < len(tracks) else 0.0
                 args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                        "-i", str(audio_path),
-                        "-ss", f"{start:.3f}"]
-                if end > start:
-                    args.extend(["-to", f"{end:.3f}"])
+                        "-ss", f"{start:.3f}",
+                        "-i", str(audio_path)]
+                duration = end - start if end > start else 0.0
+                if duration > 0:
+                    args.extend(["-t", f"{duration:.3f}"])
                 args.extend(["-c", "copy", str(out_path)])
                 proc = subprocess.run(args, capture_output=True, text=True)
                 if proc.returncode != 0:
                     on_progress(idx, f"err:track {track['index']} ffmpeg failed: {proc.stderr.strip()[:200]}")
                     continue
+                meta = _track_meta(track, plan["album"])
+                tag_file(str(out_path), meta)
+                audio_meta = read_audio_metadata(str(out_path))
+                row = db.query(MusicFile).filter(MusicFile.file_path == str(out_path)).first()
+                if not row:
+                    row = MusicFile(file_path=str(out_path))
+                    db.add(row)
+                row.link_path = str(out_path)
+                row.format = out_path.suffix.lstrip(".")
+                row.scraped = True
+                row.artist = meta.artist
+                row.album = meta.album
+                row.title = meta.title
+                row.year = meta.year
+                row.genre = meta.genre
+                row.track_number = meta.track_number or None
+                row.disc_number = meta.disc_number or None
+                row.duration = audio_meta.get("duration")
+                row.bitrate = audio_meta.get("bitrate")
+                row.sample_rate = audio_meta.get("sample_rate")
+                row.channels = audio_meta.get("channels")
             if not keep_original:
                 trash_dir = audio_path.parent / ".originals"
                 trash_dir.mkdir(exist_ok=True)

@@ -9,7 +9,17 @@ from app.db import SessionLocal
 from app.models import DownloadTask, MusicFile
 from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
-from app.scrapers.tagger import tag_file, save_lyrics, save_cover, save_album_nfo, read_audio_metadata
+from app.scrapers.tagger import (
+    tag_file,
+    save_lyrics,
+    save_cover,
+    save_album_nfo,
+    read_audio_metadata,
+    read_existing_tags,
+    read_sidecar_lyrics,
+    find_local_cover_data,
+    read_embedded_cover,
+)
 from app.scrapers.base import MusicMeta
 from app.scrapers.matcher import score_meta, text_score
 from app.services.notify import notify_download_complete, notify_scrape_complete, notify_error
@@ -175,6 +185,16 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
     return None
 
 
+def _merge_hints(*hints: dict | None) -> dict:
+    """Merge hints by priority. Earlier hints win over later hints."""
+    merged: dict = {}
+    for hint in reversed([h for h in hints if h]):
+        for key, value in hint.items():
+            if value not in (None, "", 0, False):
+                merged[key] = value
+    return merged
+
+
 def _meta_from_hint(hint: dict) -> MusicMeta | None:
     """Build a fallback metadata object from trusted source/search result fields."""
     title = (hint or {}).get("title") or ""
@@ -185,9 +205,24 @@ def _meta_from_hint(hint: dict) -> MusicMeta | None:
         title=title,
         artist=artist,
         album=(hint or {}).get("album") or "",
+        album_artist=(hint or {}).get("album_artist") or "",
+        year=int((hint or {}).get("year") or 0),
+        genre=(hint or {}).get("genre") or "",
+        track_number=int((hint or {}).get("track_number") or 0),
+        disc_number=int((hint or {}).get("disc_number") or 0) or 1,
         song_id=str((hint or {}).get("song_id") or ""),
-        source=(hint or {}).get("source") or "online",
+        lyrics=(hint or {}).get("lyrics") or "",
+        source=(hint or {}).get("source") or "local-tag",
     )
+
+
+def _enrich_from_local_assets(file_path: str, meta: MusicMeta) -> MusicMeta:
+    """Prefer local sidecar/embedded assets before online assets when missing."""
+    if not meta.lyrics:
+        meta.lyrics = read_sidecar_lyrics(file_path)
+    if not meta.cover_data:
+        meta.cover_data = find_local_cover_data(Path(file_path).parent) or read_embedded_cover(file_path)
+    return meta
 
 
 def _upsert_music_file(db, *, task_id: int | None, file_path: str, link_path: str | None, scraped: bool, meta: MusicMeta | None, audio_meta: dict):
@@ -311,12 +346,16 @@ def _process_completed_torrent(torrent: dict):
         return
 
     meta_cache: dict[str, MusicMeta | None] = {}
+    first_existing_hint = read_existing_tags(source_audio_files[0])
+    first_hint = _merge_hints(metadata_hint, first_existing_hint)
     first_meta = _scrape_file(
         source_audio_files[0],
-        title_hint=metadata_hint.get("title") or "",
-        artist_hint=metadata_hint.get("artist") or "",
-        album_hint=metadata_hint.get("album") or "",
-    ) or _meta_from_hint(metadata_hint)
+        title_hint=first_hint.get("title") or "",
+        artist_hint=first_hint.get("artist") or first_hint.get("album_artist") or "",
+        album_hint=first_hint.get("album") or "",
+    ) or _meta_from_hint(first_hint)
+    if first_meta:
+        _enrich_from_local_assets(source_audio_files[0], first_meta)
     meta_cache[os.path.basename(source_audio_files[0])] = first_meta
     organize_artist = (first_meta.album_artist or first_meta.artist) if first_meta else ""
     organize_album = first_meta.album if first_meta else ""
@@ -354,19 +393,23 @@ def _process_completed_torrent(torrent: dict):
             if os.path.basename(file_path) not in meta_cache:
                 # For single-file online downloads, the source result has correct title/artist
                 # while the filename may be "title - artist", not "artist - title".
-                use_hint = metadata_hint if len(linked_files) == 1 else {}
+                online_hint = metadata_hint if len(linked_files) == 1 else {}
+                existing_hint = read_existing_tags(file_path)
+                use_hint = _merge_hints(online_hint, existing_hint)
                 # 同一专辑下的后续曲目，用第一首确定下来的 album/artist 当强约束，
                 # 避免被其他专辑同名的高分候选带走
-                shared_album = (first_meta.album if first_meta else "") or ""
+                shared_album = (first_meta.album if first_meta else "") or use_hint.get("album") or ""
                 shared_artist = (
                     (first_meta.album_artist or first_meta.artist) if first_meta else ""
-                ) or ""
+                ) or use_hint.get("album_artist") or ""
                 meta = _scrape_file(
                     file_path,
                     title_hint=use_hint.get("title") or "",
                     artist_hint=use_hint.get("artist") or shared_artist,
                     album_hint=shared_album,
-                ) or _meta_from_hint(use_hint)
+                ) or _meta_from_hint(_merge_hints(use_hint, {"album": shared_album, "album_artist": shared_artist}))
+                if meta:
+                    _enrich_from_local_assets(file_path, meta)
                 # 同专辑下接选中的 meta 专辑名不一致（例如刮到翻唱/Live 版本），强制覆盖为共享专辑
                 if meta and shared_album and meta.album and meta.album != shared_album:
                     logger.info(

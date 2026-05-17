@@ -105,11 +105,122 @@ def read_audio_metadata(file_path: str) -> dict:
         return {}
 
 
+def _tag_value(file_tags, key: str):
+    try:
+        value = file_tags[key].value
+    except Exception:
+        return None
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else None
+    return value
+
+
+def _clean_str(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _parse_int(value) -> int:
+    text = _clean_str(value)
+    if not text:
+        return 0
+    m = re.search(r"\d+", text)
+    return int(m.group(0)) if m else 0
+
+
+def _has_artwork(file_tags) -> bool:
+    try:
+        art = file_tags["artwork"].value
+        return bool(art)
+    except Exception:
+        return False
+
+
+def read_embedded_cover(file_path: str) -> Optional[bytes]:
+    """Read embedded artwork bytes when present."""
+    try:
+        f = music_tag.load_file(file_path)
+        artwork = f["artwork"].value
+        if not artwork:
+            return None
+        first = artwork[0] if isinstance(artwork, (list, tuple)) else artwork
+        if isinstance(first, bytes):
+            return first
+        raw = getattr(first, "raw", None)
+        if raw:
+            return raw
+        data = getattr(first, "data", None)
+        if data:
+            return data
+    except Exception as e:
+        logger.debug(f"No embedded cover readable from {file_path}: {e}")
+    return None
+
+
+def read_existing_tags(file_path: str) -> dict:
+    """Read existing musical tags as high-confidence scrape hints."""
+    try:
+        f = music_tag.load_file(file_path)
+    except Exception as e:
+        logger.debug(f"Cannot read existing tags {file_path}: {e}")
+        return {}
+    data = {
+        "title": _clean_str(_tag_value(f, "title")),
+        "artist": _clean_str(_tag_value(f, "artist")),
+        "album": _clean_str(_tag_value(f, "album")),
+        "album_artist": _clean_str(_tag_value(f, "albumartist")),
+        "year": _parse_int(_tag_value(f, "year")),
+        "genre": _clean_str(_tag_value(f, "genre")),
+        "track_number": _parse_int(_tag_value(f, "tracknumber")),
+        "disc_number": _parse_int(_tag_value(f, "discnumber")),
+        "lyrics": _clean_str(_tag_value(f, "lyrics")),
+        "has_artwork": _has_artwork(f),
+    }
+    return {k: v for k, v in data.items() if v not in ("", 0, False, None)}
+
+
+_COVER_FILENAMES = ("cover.jpg", "cover.png", "folder.jpg", "front.jpg", "album.jpg")
+
+
+def find_local_cover_data(directory: str | Path) -> Optional[bytes]:
+    """Find existing album cover bytes in a directory before falling back to online covers."""
+    base = Path(directory)
+    for name in _COVER_FILENAMES:
+        path = base / name
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+            if len(data) > 100:
+                return data
+        except Exception as e:
+            logger.debug(f"Cannot read local cover {path}: {e}")
+    return None
+
+
+def read_sidecar_lyrics(file_path: str) -> str:
+    """Read .lrc sidecar lyrics if present."""
+    lrc_path = Path(file_path).with_suffix(".lrc")
+    if not lrc_path.exists():
+        return ""
+    for enc in ("utf-8", "utf-8-sig", "gb18030", "latin-1"):
+        try:
+            return lrc_path.read_text(encoding=enc).strip()
+        except UnicodeDecodeError:
+            continue
+        except Exception as e:
+            logger.debug(f"Cannot read sidecar lyrics {lrc_path}: {e}")
+            break
+    return ""
+
+
 def tag_file(file_path: str, meta: MusicMeta) -> bool:
     """Write metadata to an audio file.
 
     Respects config settings:
-    - overwrite_tag: skip if file already has tags
+    - overwrite_tag=True: overwrite fields
+    - overwrite_tag=False: fill missing fields only
     - embed_cover + cover_max_size
     - save_lyrics_to_tag
     - rename_file + rename_template
@@ -122,34 +233,29 @@ def tag_file(file_path: str, meta: MusicMeta) -> bool:
         return False
 
     try:
-        # Check if we should skip (already tagged and overwrite disabled)
-        if not cfg.overwrite_tag:
-            existing_title = f["title"].value
-            existing_artist = f["artist"].value
-            if existing_title and existing_artist:
-                logger.debug(f"Skipping already tagged: {file_path}")
-                return True
+        def should_write(key: str) -> bool:
+            return bool(cfg.overwrite_tag) or not _clean_str(_tag_value(f, key))
 
-        # Write tags
-        if meta.title:
+        # Write tags. overwrite_tag=False now means fill-missing instead of skip-whole-file.
+        if meta.title and should_write("title"):
             f["title"] = meta.title
-        if meta.artist:
+        if meta.artist and should_write("artist"):
             f["artist"] = meta.artist
-        if meta.album:
+        if meta.album and should_write("album"):
             f["album"] = meta.album
-        if meta.album_artist:
+        if meta.album_artist and should_write("albumartist"):
             f["albumartist"] = meta.album_artist
-        if meta.year:
+        if meta.year and should_write("year"):
             f["year"] = meta.year
-        if meta.genre:
+        if meta.genre and should_write("genre"):
             f["genre"] = meta.genre
-        if meta.track_number:
+        if meta.track_number and should_write("tracknumber"):
             f["tracknumber"] = meta.track_number
-        if meta.disc_number:
+        if meta.disc_number and should_write("discnumber"):
             f["discnumber"] = meta.disc_number
 
         # Embed cover art — mp4/m4a 只接受 jpeg/png，避免“mp4 artwork should be either jpeg or png”报错
-        if cfg.embed_cover and meta.cover_data:
+        if cfg.embed_cover and meta.cover_data and (cfg.overwrite_tag or not _has_artwork(f)):
             cover = meta.cover_data
             if cfg.cover_max_size > 0:
                 cover = _resize_cover(cover, cfg.cover_max_size)
@@ -158,7 +264,7 @@ def tag_file(file_path: str, meta: MusicMeta) -> bool:
                 f["artwork"] = cover
 
         # Write lyrics to tag
-        if cfg.save_lyrics_to_tag and meta.lyrics:
+        if cfg.save_lyrics_to_tag and meta.lyrics and should_write("lyrics"):
             f["lyrics"] = meta.lyrics
 
         f.save()
