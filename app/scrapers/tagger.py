@@ -248,6 +248,50 @@ def read_sidecar_lyrics(file_path: str) -> str:
     return ""
 
 
+def _break_hardlink_before_write(path: str | Path) -> bool:
+    """Copy-on-write for hardlinked library files before mutating metadata/sidecars.
+
+    Music Sub often hardlinks PT downloads into the library. Mutating tags on a
+    hardlinked library path would also mutate the original qBittorrent seed file
+    because both paths share the same inode. When enabled, replace the library
+    path with a private copy first so later writes only affect the library copy.
+    """
+    cfg = config.scraper
+    if not getattr(cfg, "break_hardlink_before_tag", True):
+        return True
+
+    p = Path(path)
+    try:
+        st = p.stat()
+    except FileNotFoundError:
+        return True
+    except Exception as e:
+        logger.warning(f"Cannot stat {p} before write: {e}")
+        return False
+
+    if st.st_nlink <= 1:
+        return True
+
+    tmp_path: Path | None = None
+    try:
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".cow", dir=str(p.parent))
+        os.close(fd)
+        tmp_path = Path(tmp)
+        shutil.copy2(p, tmp_path)
+        os.replace(tmp_path, p)
+        logger.info(f"Broke hardlink before metadata write: {p} (links={st.st_nlink})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to break hardlink before writing {p}: {e}")
+        try:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        return False
+
+
 def tag_file(file_path: str, meta: MusicMeta) -> str | bool:
     """Write metadata to an audio file.
 
@@ -257,8 +301,11 @@ def tag_file(file_path: str, meta: MusicMeta) -> str | bool:
     - embed_cover + cover_max_size
     - save_lyrics_to_tag
     - rename_file + rename_template
+    - break_hardlink_before_tag copy-on-write safety for PT seed files
     """
     cfg = config.scraper
+    if not _break_hardlink_before_write(file_path):
+        return False
     try:
         f = music_tag.load_file(file_path)
     except Exception as e:
@@ -398,6 +445,8 @@ def save_lyrics(file_path: str, lyrics: str) -> bool:
     if lrc_path.exists() and not cfg.overwrite_tag:
         return True
     try:
+        if lrc_path.exists() and not _break_hardlink_before_write(lrc_path):
+            return False
         lrc_path.write_text(lyrics, encoding="utf-8")
         logger.info(f"Saved lyrics: {lrc_path}")
         return True
@@ -418,6 +467,8 @@ def save_cover(directory: str, cover_data: bytes) -> bool:
     if cfg.cover_max_size > 0:
         cover_data = _resize_cover(cover_data, cfg.cover_max_size)
     try:
+        if os.path.exists(cover_path) and not _break_hardlink_before_write(cover_path):
+            return False
         with open(cover_path, "wb") as f:
             f.write(cover_data)
         logger.info(f"Saved cover: {cover_path}")
@@ -453,6 +504,8 @@ def save_album_nfo(directory: str, meta: MusicMeta, tracks: list = None) -> bool
     if os.path.exists(nfo_path) and not cfg.overwrite_tag:
         return True
     try:
+        if os.path.exists(nfo_path) and not _break_hardlink_before_write(nfo_path):
+            return False
         lines = ['<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>', "<album>"]
         lines.append(f"  <title>{_xml_escape(meta.album)}</title>")
         if meta.album_artist or meta.artist:

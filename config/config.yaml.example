@@ -62,6 +62,7 @@ scraper:
   rename_file: false
   rename_template: "${track} - ${title}"
   overwrite_tag: false       # skip already-tagged files when false
+  break_hardlink_before_tag: true  # copy-on-write before tag/sidecar writes to keep PT seed files unchanged
 
 scheduler:
   search_interval_minutes: 30

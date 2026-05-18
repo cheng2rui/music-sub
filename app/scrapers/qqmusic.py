@@ -9,7 +9,7 @@ from typing import Optional
 
 import requests
 
-from app.scrapers.base import BaseScraper, MusicMeta
+from app.scrapers.base import BaseScraper, MusicMeta, parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,11 @@ class QQMusicScraper(BaseScraper):
                 track_number=song.get("index_album", 0) or 0,
                 cover_url=self.COVER_URL.format(mid=album_mid) if album_mid else "",
                 song_id=song.get("mid", "") or file_info.get("media_mid", ""),
+                album_id=album_mid,
+                duration=parse_duration_seconds(song.get("interval") or song.get("duration")),
+                size=int(file_info.get("size_flac") or file_info.get("size_320mp3") or file_info.get("size_128mp3") or 0),
+                quality="flac" if file_info.get("size_flac") else ("320" if file_info.get("size_320mp3") else ""),
+                provider_extra={"album_mid": album_mid, "media_mid": file_info.get("media_mid", "")},
                 source=self.name,
             ))
         return results

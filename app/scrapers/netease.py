@@ -14,7 +14,7 @@ import requests
 from typing import Optional
 from Crypto.Cipher import AES
 
-from app.scrapers.base import BaseScraper, MusicMeta
+from app.scrapers.base import BaseScraper, MusicMeta, parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,9 @@ class NetEaseScraper(BaseScraper):
                 year=year,
                 cover_url=cover_url,
                 song_id=str(song.get("id") or ""),
+                album_id=str((album or {}).get("id") or ""),
+                duration=parse_duration_seconds(song.get("duration") or song.get("dt")),
+                provider_extra={"album_id": (album or {}).get("id")},
                 source=self.name,
             ))
         # /api/search/get/web 不返回 picUrl，需要再调一次 /api/song/detail 把封面拼上

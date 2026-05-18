@@ -1,7 +1,9 @@
 """Pipeline: download complete → hardlink → scrape."""
 import os
+import copy
 import datetime
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from app.config import config
@@ -67,7 +69,48 @@ def _source_priority(source: str) -> int:
     return _SOURCE_PRIORITY.get(source, -1)
 
 
-def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str) -> list:
+class ScrapeContext:
+    """Per-job scrape context for scraper reuse, search cache, and failure backoff."""
+
+    def __init__(self):
+        self.scrapers = _get_scraper_chain()
+        self._search_cache: dict[tuple[str, str, str], list[MusicMeta]] = {}
+        self._failures: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _clone_results(results: list[MusicMeta]) -> list[MusicMeta]:
+        # Candidates are later enriched with cover/lyrics. Return copies so cached
+        # search results stay small and do not leak mutation across tracks.
+        return [copy.deepcopy(meta) for meta in results]
+
+    def search(self, scraper, title_hint: str, artist_hint: str, filename: str) -> list[MusicMeta]:
+        source = scraper.name
+        key = (source, normalize_text(title_hint), normalize_text(artist_hint))
+        with self._lock:
+            if self._failures.get(source, 0) >= 3:
+                logger.info(f"[{source}] skipped for {filename}: temporary scrape backoff")
+                return []
+            cached = self._search_cache.get(key)
+            if cached is not None:
+                return self._clone_results(cached)
+        try:
+            results = scraper.search(title_hint, artist_hint) or []
+        except Exception as e:
+            with self._lock:
+                self._failures[source] = self._failures.get(source, 0) + 1
+            logger.warning(f"[{source}] Scrape failed for {filename}: {e}")
+            return []
+        with self._lock:
+            self._search_cache[key] = self._clone_results(results)
+            if results:
+                self._failures[source] = 0
+        return self._clone_results(results)
+
+
+def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str, context: ScrapeContext | None = None) -> list:
+    if context:
+        return context.search(scraper, title_hint, artist_hint, filename)
     try:
         return scraper.search(title_hint, artist_hint) or []
     except Exception as e:
@@ -75,15 +118,15 @@ def _safe_search(scraper, title_hint: str, artist_hint: str, filename: str) -> l
         return []
 
 
-def _search_all_scrapers(title_hint: str, artist_hint: str, filename: str) -> list[MusicMeta]:
-    scrapers = _get_scraper_chain()
+def _search_all_scrapers(title_hint: str, artist_hint: str, filename: str, context: ScrapeContext | None = None) -> list[MusicMeta]:
+    scrapers = context.scrapers if context else _get_scraper_chain()
     if not scrapers:
         return []
     out: list[MusicMeta] = []
     seen: set[tuple] = set()
     max_workers = max(1, min(len(scrapers), 6))
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="album-cluster") as ex:
-        futures = {ex.submit(_safe_search, scraper, title_hint, artist_hint, filename): scraper for scraper in scrapers}
+        futures = {ex.submit(_safe_search, scraper, title_hint, artist_hint, filename, context): scraper for scraper in scrapers}
         for fut in as_completed(futures):
             for meta in fut.result() or []:
                 key = (meta.source, getattr(meta, "song_id", "") or "", meta.title, meta.artist, meta.album)
@@ -97,7 +140,8 @@ def _search_all_scrapers(title_hint: str, artist_hint: str, filename: str) -> li
 def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
                  album_hint: str = "", year_hint: int | str | None = None,
                  duration_hint: float | int | None = None,
-                 track_hint: int | str | None = None) -> MusicMeta | None:
+                 track_hint: int | str | None = None,
+                 context: ScrapeContext | None = None) -> MusicMeta | None:
     """Try to scrape metadata for a single file, with optional trusted title/artist hints."""
     title_hint = repair_garble_hint(title_hint or "")
     artist_hint = repair_garble_hint(artist_hint or "")
@@ -121,7 +165,7 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
             fallback_pairs.append((cleaned_filename, ""))
     fallback_pairs.append((title_hint, ""))  # always allow bare title retry
 
-    scrapers = _get_scraper_chain()
+    scrapers = context.scrapers if context else _get_scraper_chain()
     scored_candidates = []
     scraper_by_name = {}
     seen_keys: set[tuple] = set()
@@ -133,7 +177,7 @@ def _scrape_file(file_path: str, title_hint: str = "", artist_hint: str = "",
         max_workers = max(1, min(len(scrapers), 6))
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="scrape") as ex:
             futures = {
-                ex.submit(_safe_search, scraper, t_hint, a_hint, filename): scraper
+                ex.submit(_safe_search, scraper, t_hint, a_hint, filename, context): scraper
                 for scraper in scrapers
             }
             for fut in as_completed(futures):
@@ -299,7 +343,8 @@ def _title_hint_for_file(path: str) -> dict:
     return tags
 
 
-def _album_cluster_hint(files: list[str], base_hint: dict | None = None, sample_size: int = 5) -> dict:
+def _album_cluster_hint(files: list[str], base_hint: dict | None = None, sample_size: int = 5,
+                        context: ScrapeContext | None = None) -> dict:
     """Pick album/artist by clustering multi-track online candidates.
 
     This reduces drifting into compilation/live albums: several local track
@@ -317,7 +362,7 @@ def _album_cluster_hint(files: list[str], base_hint: dict | None = None, sample_
             continue
         artist = hint.get("artist") or hint.get("album_artist") or base_hint.get("artist") or ""
         audio_meta = read_audio_metadata(path)
-        candidates = _search_all_scrapers(title, artist, Path(path).stem)
+        candidates = _search_all_scrapers(title, artist, Path(path).stem, context=context)
         for meta in candidates:
             if not meta.album:
                 continue
@@ -473,6 +518,7 @@ def _process_completed_torrent(torrent: dict):
             mark_processed(torrent_hash)
         return
 
+    scrape_context = ScrapeContext()
     meta_cache: dict[str, MusicMeta | None] = {}
     package_hint = _album_hint_from_existing_tags(source_audio_files)
     if package_hint:
@@ -481,7 +527,7 @@ def _process_completed_torrent(torrent: dict):
             f"Album-level local hints: artist={metadata_hint.get('artist')} "
             f"album={metadata_hint.get('album')} year={metadata_hint.get('year')}"
         )
-    cluster_hint = _album_cluster_hint(source_audio_files, metadata_hint)
+    cluster_hint = _album_cluster_hint(source_audio_files, metadata_hint, context=scrape_context)
     if cluster_hint:
         metadata_hint = _merge_hints(cluster_hint, metadata_hint)
     first_existing_hint = read_existing_tags(source_audio_files[0])
@@ -495,6 +541,7 @@ def _process_completed_torrent(torrent: dict):
         year_hint=first_hint.get("year") or metadata_hint.get("year"),
         duration_hint=first_audio_meta.get("duration"),
         track_hint=first_hint.get("track_number"),
+        context=scrape_context,
     ) or _meta_from_hint(first_hint)
     if first_meta:
         _enrich_from_local_assets(source_audio_files[0], first_meta)
@@ -553,6 +600,7 @@ def _process_completed_torrent(torrent: dict):
                     year_hint=use_hint.get("year") or metadata_hint.get("year"),
                     duration_hint=audio_meta_hint.get("duration"),
                     track_hint=use_hint.get("track_number"),
+                    context=scrape_context,
                 ) or _meta_from_hint(_merge_hints(use_hint, {"album": shared_album, "album_artist": shared_artist}))
                 if meta:
                     _enrich_from_local_assets(file_path, meta)

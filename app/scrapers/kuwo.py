@@ -8,7 +8,7 @@ from typing import Optional
 
 import requests
 
-from app.scrapers.base import BaseScraper, MusicMeta
+from app.scrapers.base import BaseScraper, MusicMeta, parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,10 @@ class KuwoScraper(BaseScraper):
                 year=0,
                 cover_url=song.get("albumpic", ""),
                 song_id=str(song.get("rid", "")),
+                album_id=str(song.get("albumid") or song.get("albumId") or ""),
+                duration=parse_duration_seconds(song.get("duration") or song.get("songTimeMillis") or song.get("songTimeMinutes")),
+                quality=song.get("hasLossless") and "lossless" or "",
+                provider_extra={"rid": song.get("rid"), "album_id": song.get("albumid") or song.get("albumId")},
                 source=self.name,
             ))
         return results

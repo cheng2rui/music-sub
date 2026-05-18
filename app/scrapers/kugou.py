@@ -9,7 +9,7 @@ from typing import Optional
 
 import requests
 
-from app.scrapers.base import BaseScraper, MusicMeta
+from app.scrapers.base import BaseScraper, MusicMeta, parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,12 @@ class KugouScraper(BaseScraper):
                 year=year,
                 cover_url=cover,
                 song_id=song.get("FileHash", "") or "",
+                album_id=str(album_id or ""),
+                duration=parse_duration_seconds(song.get("Duration") or song.get("duration")),
+                size=int(song.get("FileSize") or song.get("FileSize_320") or song.get("SQFileSize") or 0),
+                bitrate=int(song.get("Bitrate") or 0),
+                quality="flac" if song.get("SQFileHash") else ("320" if song.get("HQFileHash") else ""),
+                provider_extra={"album_id": album_id, "hash": song.get("FileHash")},
                 source=self.name,
             ))
         return results

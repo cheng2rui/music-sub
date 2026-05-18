@@ -9,7 +9,7 @@ import json
 import requests
 from typing import Optional
 
-from app.scrapers.base import BaseScraper, MusicMeta
+from app.scrapers.base import BaseScraper, MusicMeta, parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ class MiguScraper(BaseScraper):
             if cover and not cover.startswith("http"):
                 cover = "https:" + cover
             song_id = str(song.get("copyrightId") or song.get("id") or "")
+            album_id = str((albums[0].get("id") or albums[0].get("albumId") or "") if albums else "")
             year = ""
             release_date = song.get("releaseDate") or song.get("publishTime") or ""
             if isinstance(release_date, str) and len(release_date) >= 4:
@@ -84,7 +85,11 @@ class MiguScraper(BaseScraper):
                 album_artist=artist_name,
                 cover_url=cover,
                 song_id=song_id,
+                album_id=album_id,
                 year=year_int,
+                duration=parse_duration_seconds(song.get("duration") or song.get("length") or song.get("songTime")),
+                quality=(song.get("toneControl") or song.get("formatType") or ""),
+                provider_extra={"copyright_id": song.get("copyrightId"), "content_id": song.get("id"), "album_id": album_id},
                 source=self.name,
             ))
         return out

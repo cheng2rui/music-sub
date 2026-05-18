@@ -2,7 +2,7 @@
 import logging
 from typing import Optional
 import musicbrainzngs
-from app.scrapers.base import BaseScraper, MusicMeta
+from app.scrapers.base import BaseScraper, MusicMeta, parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,10 @@ class MusicBrainzScraper(BaseScraper):
                 artist=artist_name,
                 album=album_name,
                 year=year,
+                song_id=rec.get("id", ""),
+                album_id=(releases[0].get("id", "") if releases else ""),
+                duration=parse_duration_seconds(rec.get("length")),
+                provider_extra={"recording_id": rec.get("id"), "release_id": releases[0].get("id", "") if releases else ""},
                 source=self.name,
             ))
         return results

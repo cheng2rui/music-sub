@@ -59,6 +59,7 @@ class ScraperSettingInput(BaseModel):
     rename_file: bool = False
     rename_template: str = "${track} - ${title}"
     overwrite_tag: bool = False
+    break_hardlink_before_tag: bool = True
 
 
 class SchedulerSettingInput(BaseModel):

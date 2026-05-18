@@ -172,8 +172,11 @@ def score_meta(meta: MusicMeta, title_hint: str, artist_hint: str = "", album_hi
         score += year * 0.04
         reasons.append(f"year={year:.2f}")
     if duration_hint:
-        score += duration * 0.06
+        score += duration * 0.10
         reasons.append(f"duration={duration:.2f}")
+        if getattr(meta, "duration", 0.0) and duration < 0.45:
+            score -= 0.08
+            reasons.append("duration_mismatch")
     if track_hint:
         score += track * 0.03
         reasons.append(f"track={track:.2f}")
