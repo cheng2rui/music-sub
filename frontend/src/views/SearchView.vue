@@ -139,47 +139,76 @@ function toggleSite(name) {
 
     <div v-if="loading" class="loading-text">搜索中...</div>
     <div v-else-if="lastResp && filteredResults.length === 0" class="empty-text">未找到符合条件的资源</div>
-    <div v-else-if="filteredResults.length" class="results-table-wrap">
-      <table class="results-table">
-        <thead>
-          <tr>
-            <th>评分</th>
-            <th>标题</th>
-            <th>格式</th>
-            <th>质量</th>
-            <th>FREE</th>
-            <th>站点</th>
-            <th>大小</th>
-            <th>做种</th>
-            <th>上传时间</th>
-            <th>下载</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in filteredResults" :key="`${item.site}-${item.torrent_id}`">
-            <td><AppBadge :color="item.score >= 80 ? 'green' : (item.score >= 50 ? 'orange' : 'dim')">{{ Math.round(item.score) }}</AppBadge></td>
-            <td class="title-cell">
-              <div class="title-text">{{ item.title }}</div>
-              <div v-if="item.reasons?.length" class="title-reasons">{{ item.reasons.join(' · ') }}</div>
-            </td>
-            <td class="text-dim">{{ item.media_format || '-' }}</td>
-            <td class="text-dim">{{ item.quality || '-' }}</td>
-            <td><AppBadge v-if="item.free" color="green">FREE</AppBadge></td>
-            <td class="text-dim">{{ item.site }}</td>
-            <td class="text-dim">{{ formatSize(item.size) }}</td>
-            <td class="text-dim">{{ item.seeders ?? '-' }}</td>
-            <td class="text-dim">{{ formatUploadTime(item.upload_time) }}</td>
-            <td>
-              <AppButton
-                variant="primary"
-                size="sm"
-                :loading="downloading === `${item.site}-${item.torrent_id}`"
-                @click="handleDownload(item)"
-              >下载</AppButton>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else-if="filteredResults.length" class="results-section">
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>评分</th>
+              <th>标题</th>
+              <th>格式</th>
+              <th>质量</th>
+              <th>FREE</th>
+              <th>站点</th>
+              <th>大小</th>
+              <th>做种</th>
+              <th>上传时间</th>
+              <th>下载</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in filteredResults" :key="`${item.site}-${item.torrent_id}`">
+              <td><AppBadge :color="item.score >= 80 ? 'green' : (item.score >= 50 ? 'orange' : 'dim')">{{ Math.round(item.score) }}</AppBadge></td>
+              <td class="title-cell">
+                <div class="title-text">{{ item.title }}</div>
+                <div v-if="item.reasons?.length" class="title-reasons">{{ item.reasons.join(' · ') }}</div>
+              </td>
+              <td class="text-dim">{{ item.media_format || '-' }}</td>
+              <td class="text-dim">{{ item.quality || '-' }}</td>
+              <td><AppBadge v-if="item.free" color="green">FREE</AppBadge></td>
+              <td class="text-dim">{{ item.site }}</td>
+              <td class="text-dim">{{ formatSize(item.size) }}</td>
+              <td class="text-dim">{{ item.seeders ?? '-' }}</td>
+              <td class="text-dim">{{ formatUploadTime(item.upload_time) }}</td>
+              <td>
+                <AppButton
+                  variant="primary"
+                  size="sm"
+                  :loading="downloading === `${item.site}-${item.torrent_id}`"
+                  @click="handleDownload(item)"
+                >下载</AppButton>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="result-cards">
+        <article v-for="item in filteredResults" :key="`card-${item.site}-${item.torrent_id}`" class="result-card">
+          <div class="card-head">
+            <h3>{{ item.title }}</h3>
+            <AppBadge :color="item.score >= 80 ? 'green' : (item.score >= 50 ? 'orange' : 'dim')">{{ Math.round(item.score) }}</AppBadge>
+          </div>
+          <div class="chip-row">
+            <span class="info-chip">{{ item.site || '-' }}</span>
+            <span class="info-chip">{{ item.media_format || '-' }}</span>
+            <span class="info-chip">{{ item.quality || '-' }}</span>
+            <span class="info-chip">{{ formatSize(item.size) }}</span>
+            <span class="info-chip">seed {{ item.seeders ?? '-' }}</span>
+            <span v-if="item.free" class="info-chip free">FREE</span>
+          </div>
+          <div v-if="item.reasons?.length" class="card-reasons">{{ item.reasons.join(' · ') }}</div>
+          <div class="card-footer">
+            <span class="text-dim">{{ formatUploadTime(item.upload_time) }}</span>
+            <AppButton
+              variant="primary"
+              size="sm"
+              :loading="downloading === `${item.site}-${item.torrent_id}`"
+              @click="handleDownload(item)"
+            >下载</AppButton>
+          </div>
+        </article>
+      </div>
     </div>
   </div>
 </template>
@@ -201,6 +230,7 @@ function toggleSite(name) {
 .toolbar .left { color: var(--text-dim); font-size: 13px; }
 .toolbar .right { display: flex; gap: 8px; }
 .loading-text, .empty-text { color: var(--text-dim); padding: 20px 0; }
+.results-section { display: block; }
 .results-table-wrap { overflow-x: auto; }
 .results-table { width: 100%; border-collapse: collapse; }
 .results-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
@@ -209,6 +239,15 @@ function toggleSite(name) {
 .title-cell { max-width: 360px; }
 .title-text { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title-reasons { margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-cards { display: none; }
+.result-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); padding: 14px; }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.card-head h3 { min-width: 0; margin: 0; font-size: 15px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.info-chip { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--text-dim); background: var(--surface); font-size: 12px; }
+.info-chip.free { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+.card-reasons { margin-top: 10px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.card-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
 @media (max-width: 768px) {
   .search-bar { flex-direction: column; align-items: stretch; }
   .search-input { min-width: 0; width: 100%; }
@@ -216,12 +255,13 @@ function toggleSite(name) {
   .toolbar { align-items: flex-start; }
   .toolbar .right { width: 100%; flex-wrap: wrap; }
   .site-chip { max-width: 100%; }
-  .results-table th:nth-child(4),
-  .results-table td:nth-child(4),
-  .results-table th:nth-child(8),
-  .results-table td:nth-child(8),
-  .results-table th:nth-child(9),
-  .results-table td:nth-child(9) { display: none; }
-  .results-table th, .results-table td { padding: 8px; font-size: 12px; }
+  .results-table-wrap { display: none; }
+  .result-cards { display: flex; flex-direction: column; gap: 12px; }
 }
+@media (max-width: 420px) {
+  .search-view { padding: 16px; }
+  .toolbar .right { flex-direction: column; }
+  .card-footer { align-items: stretch; }
+}
+
 </style>
