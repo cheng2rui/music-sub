@@ -2,6 +2,7 @@
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import func, case
@@ -666,12 +667,53 @@ def _infer_hints_from_library_path(file_path: str) -> tuple[str, str]:
     return artist, album
 
 
+def _normalize_file_ids(value: Any) -> list[int]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        out = []
+        for p in parts:
+            try:
+                out.append(int(p))
+            except ValueError:
+                continue
+        return out
+    if isinstance(value, (list, tuple, set)):
+        out = []
+        for item in value:
+            try:
+                out.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+    return []
+
+
+def _normalize_library_selection(payload: Any, file_ids: list[int] | None, album_artist: str, album_name: str) -> tuple[list[int], str, str]:
+    """Accept query params, raw-list bodies, and legacy dict bodies."""
+    ids = _normalize_file_ids(file_ids)
+    artist = album_artist or ""
+    album = album_name or ""
+    if isinstance(payload, list):
+        ids = ids or _normalize_file_ids(payload)
+    elif isinstance(payload, dict):
+        ids = ids or _normalize_file_ids(payload.get("file_ids"))
+        artist = artist or payload.get("album_artist") or payload.get("artist") or ""
+        album = album or payload.get("album_name") or payload.get("album") or ""
+    return ids, artist, album
+
+
 @router.post("/rescrape")
-def rescrape_files(file_ids: list[int] = [], album_artist: str = "", album_name: str = "",
-                  db: Session = Depends(get_db)):
+def rescrape_files(payload: Any = Body(default=None), file_ids: list[int] | None = Query(default=None),
+                  album_artist: str = "", album_name: str = "", db: Session = Depends(get_db)):
     """Re-scrape metadata for specified files or an entire album."""
     from app.services.pipeline import _scrape_file, _enrich_from_local_assets
     from app.scrapers.tagger import tag_file, save_lyrics, save_cover, read_audio_metadata, read_existing_tags
+
+    file_ids, album_artist, album_name = _normalize_library_selection(payload, file_ids, album_artist, album_name)
 
     # Get files to rescrape
     if file_ids:
@@ -788,10 +830,12 @@ def scan_library_endpoint(payload: dict = Body(default={})):
 
 
 @router.post("/rescan_metadata")
-def rescan_metadata(file_ids: list[int] = [], album_artist: str = "", album_name: str = "",
-                    db: Session = Depends(get_db)):
+def rescan_metadata(payload: Any = Body(default=None), file_ids: list[int] | None = Query(default=None),
+                    album_artist: str = "", album_name: str = "", db: Session = Depends(get_db)):
     """Re-read local audio metadata (duration/bitrate/etc.) for a file or whole album."""
     from app.scrapers.tagger import read_audio_metadata
+
+    file_ids, album_artist, album_name = _normalize_library_selection(payload, file_ids, album_artist, album_name)
 
     if file_ids:
         files = db.query(MusicFile).filter(MusicFile.id.in_(file_ids)).all()
@@ -957,7 +1001,7 @@ def apply_library_tool(tool_id: str, payload: dict = Body(default={})):
 
 
 @router.put("/file/{file_id}")
-def update_file_tags(file_id: int, title: str = "", artist: str = "", album: str = "",
+def update_file_tags(file_id: int, title: str = "", artist: str = "", album_artist: str = "", album: str = "",
                     year: int = 0, genre: str = "", db: Session = Depends(get_db)):
     """Manually update tags for a music file (DB + audio file)."""
     f = db.query(MusicFile).filter(MusicFile.id == file_id).first()
@@ -969,6 +1013,8 @@ def update_file_tags(file_id: int, title: str = "", artist: str = "", album: str
         f.title = title
     if artist:
         f.artist = artist
+    if album_artist:
+        f.album_artist = album_artist
     if album:
         f.album = album
     if year:
@@ -987,6 +1033,8 @@ def update_file_tags(file_id: int, title: str = "", artist: str = "", album: str
                 audio["title"] = title
             if artist:
                 audio["artist"] = artist
+            if album_artist:
+                audio["albumartist"] = album_artist
             if album:
                 audio["album"] = album
             if year:

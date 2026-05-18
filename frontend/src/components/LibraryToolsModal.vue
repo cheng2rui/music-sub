@@ -96,7 +96,7 @@ async function loadScopeFiles() {
   try {
     const ctx = props.context || {}
     if (Array.isArray(ctx.file_ids) && ctx.file_ids.length) {
-      const rows = await Promise.all(ctx.file_ids.slice(0, 100).map(id => getFile(id).catch(() => null)))
+      const rows = await Promise.all(ctx.file_ids.map(id => getFile(id).catch(() => null)))
       fileRows.value = rows.filter(Boolean).map(normalizeFile)
       selectedFileIds.value = new Set(fileRows.value.map(f => f.id))
       return
@@ -213,7 +213,9 @@ function toggleDelete(id) {
 
 function selectTool(tool) {
   activeTool.value = tool
-  optionText.value = optionPlaceholder.value
+  let options = {}
+  try { options = JSON.parse(optionPlaceholder.value || '{}') } catch (_) { options = {} }
+  optionText.value = JSON.stringify({ ...options, ...(props.context?.options || {}) }, null, 2)
   previewData.value = null
   job.value = null
   deleteIds.value = new Set()

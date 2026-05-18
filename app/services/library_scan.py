@@ -84,7 +84,8 @@ def upsert_file_from_local(db: Session, file_path: str | Path, root: str | Path 
     existing.format = path.suffix.lstrip(".")
     existing.title = title
     existing.artist = tags.get("artist") or tags.get("album_artist") or path_hint.get("artist") or existing.artist
-    existing.album_artist = tags.get("album_artist") or path_hint.get("artist") or existing.album_artist or existing.artist
+    # Preserve manual album_artist repairs on existing rows unless the file tag explicitly has albumartist.
+    existing.album_artist = tags.get("album_artist") or existing.album_artist or path_hint.get("artist") or existing.artist
     existing.album = tags.get("album") or path_hint.get("album") or existing.album
     existing.year = tags.get("year") or existing.year
     existing.genre = tags.get("genre") or existing.genre

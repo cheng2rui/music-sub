@@ -142,7 +142,12 @@ def apply(tool_id: str, *, file_ids=None, album_artist="", album_name="",
             files = resolve_files(db, file_ids=file_ids,
                                   album_artist=album_artist or None,
                                   album_name=album_name or None)
-            return apply_fn(db, files, options, lambda *_: None)
+            summary = apply_fn(db, files, options, lambda *_: None)
+            db.commit()
+            return summary
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

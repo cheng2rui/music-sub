@@ -120,7 +120,8 @@ async function batchRescrapeCurrentKind() {
   }
   if (healthKind.value === 'album_artist_conflicts') {
     const ids = healthItems.value.flatMap(it => Array.isArray(it.file_ids) ? it.file_ids : [it.sample_track_id]).filter(Boolean)
-    openToolbox({ file_ids: ids, preferred_tool: 'album_artist' })
+    const suggestions = [...new Set(healthItems.value.map(it => it.suggested_album_artist).filter(Boolean))]
+    openToolbox({ file_ids: ids, preferred_tool: 'album_artist', options: suggestions.length === 1 ? { album_artist: suggestions[0] } : {} })
     return
   }
   batchBusy.value = true
@@ -587,7 +588,7 @@ onMounted(() => { loadStats(); loadAlbums() })
                 variant="primary"
                 size="sm"
                 :loading="healthRescraping === `${item.artist}::${item.album}`"
-                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : healthKind === 'album_artist_conflicts' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'album_artist' }) : rescrapeHealthAlbum(item)"
+                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : healthKind === 'album_artist_conflicts' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'album_artist', options: { album_artist: item.suggested_album_artist || item.artist } }) : rescrapeHealthAlbum(item)"
               >{{ healthKind === 'cue_candidates' ? '拆分' : healthKind === 'album_artist_conflicts' ? '修复' : '重刮削' }}</AppButton>
             </div>
           </div>

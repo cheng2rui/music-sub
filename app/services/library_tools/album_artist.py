@@ -70,8 +70,6 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
             on_progress(idx, "no change")
             continue
         try:
-            f.album_artist = target
-            updated += 1
             if write_tags and f.file_path and Path(f.file_path).exists():
                 try:
                     import music_tag
@@ -81,6 +79,8 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                 except Exception as exc:
                     on_progress(idx, f"err:tag write failed: {exc}")
                     continue
+            f.album_artist = target
+            updated += 1
             on_progress(idx, f"album_artist={target}")
         except Exception as exc:
             on_progress(idx, f"err:{exc}")
