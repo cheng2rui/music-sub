@@ -24,9 +24,7 @@ const pendingAction = ref(null)
 
 const enabled = computed(() => caps.value?.enabled)
 
-async function loadCaps() {
-  caps.value = await getAssistantCapabilities()
-}
+async function loadCaps() { caps.value = await getAssistantCapabilities() }
 
 async function loadConversations() {
   conversations.value = await getAssistantConversations()
@@ -115,18 +113,53 @@ async function handleCancel() {
   await loadMessages()
 }
 
-function roleLabel(role) {
-  return role === 'user' ? '你' : role === 'tool' ? '工具' : '助手'
+function roleLabel(role) { return role === 'user' ? '你' : role === 'tool' ? '工具' : '助手' }
+
+function parseToolResult(message) {
+  if (!message.tool_result_json) return null
+  try { return JSON.parse(message.tool_result_json) } catch { return null }
 }
 
 function formatToolResult(message) {
-  if (!message.tool_result_json) return ''
-  try {
-    return JSON.stringify(JSON.parse(message.tool_result_json), null, 2).slice(0, 1200)
-  } catch {
-    return message.tool_result_json.slice(0, 1200)
-  }
+  const parsed = parseToolResult(message)
+  if (parsed) return JSON.stringify(parsed, null, 2).slice(0, 1800)
+  return (message.tool_result_json || '').slice(0, 1800)
 }
+
+function formatSizeGb(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  const n = Number(value)
+  return Number.isFinite(n) ? `${n} GB` : String(value)
+}
+
+function toolItems(message) {
+  const parsed = parseToolResult(message)
+  return Array.isArray(parsed?.items) ? parsed.items : []
+}
+
+function toolSummary(message) {
+  const parsed = parseToolResult(message)
+  if (!parsed) return ''
+  if (message.tool_name === 'get_system_status') return `版本 ${parsed.version || '-'} · 站点 ${parsed.sites_enabled?.length || 0} · 任务 ${parsed.tasks || 0}`
+  if (message.tool_name === 'get_library_stats') return `曲目 ${parsed.tracks || 0} · 专辑 ${parsed.albums || 0} · ${parsed.total_hours || 0} 小时`
+  if (Array.isArray(parsed.items)) return `${parsed.items.length} 条结果`
+  return ''
+}
+
+function cardTitle(item) { return item.title || item.name || item.keyword || `${item.artist || item.album_artist || ''} ${item.album || ''}`.trim() || '-' }
+function cardSubtitle(item) { return [item.artist, item.album, item.site || item.source, item.status].filter(Boolean).join(' · ') }
+function cardMeta(item) {
+  const parts = []
+  if (item.size_gb !== undefined) parts.push(formatSizeGb(item.size_gb))
+  if (item.seeders !== undefined) parts.push(`做种 ${item.seeders}`)
+  if (item.leechers !== undefined) parts.push(`下载 ${item.leechers}`)
+  if (item.quality) parts.push(item.quality)
+  if (item.format) parts.push(item.format)
+  if (item.enabled !== undefined) parts.push(item.enabled ? '启用' : '停用')
+  return parts.join(' · ')
+}
+
+function previewDetails(call) { return call.preview?.details || [] }
 
 onMounted(async () => {
   await loadCaps()
@@ -144,15 +177,9 @@ onMounted(async () => {
         </div>
         <AppButton size="sm" variant="primary" @click="newConversation">新对话</AppButton>
       </div>
-      <div v-if="!enabled" class="warning-box">助手未启用：到设置里开启 Assistant 并填写 OpenAI-compatible 模型。</div>
+      <div v-if="!enabled" class="warning-box">助手未启用：到设置里开启 Assistant 并填写模型配置。</div>
       <div class="conversation-list">
-        <button
-          v-for="conv in conversations"
-          :key="conv.id"
-          class="conversation-item"
-          :class="{ active: conv.id === currentId }"
-          @click="selectConversation(conv.id)"
-        >
+        <button v-for="conv in conversations" :key="conv.id" class="conversation-item" :class="{ active: conv.id === currentId }" @click="selectConversation(conv.id)">
           <span>{{ conv.title || '新对话' }}</span>
           <small>{{ new Date(conv.updated_at).toLocaleString() }}</small>
           <i @click.stop="removeConversation(conv)">×</i>
@@ -177,8 +204,25 @@ onMounted(async () => {
           <div class="message-role">{{ roleLabel(msg.role) }}</div>
           <div class="message-content">
             <template v-if="msg.role === 'tool'">
-              <div class="tool-name">{{ msg.tool_name }}</div>
-              <pre>{{ formatToolResult(msg) }}</pre>
+              <div class="tool-head">
+                <span class="tool-name">{{ msg.tool_name }}</span>
+                <span class="tool-summary">{{ toolSummary(msg) }}</span>
+              </div>
+              <div v-if="toolItems(msg).length" class="result-cards">
+                <div v-for="(item, idx) in toolItems(msg).slice(0, 8)" :key="idx" class="result-card">
+                  <div class="result-rank">#{{ idx + 1 }}</div>
+                  <div class="result-main">
+                    <div class="result-title">{{ cardTitle(item) }}</div>
+                    <div v-if="cardSubtitle(item)" class="result-subtitle">{{ cardSubtitle(item) }}</div>
+                    <div v-if="cardMeta(item)" class="result-meta">{{ cardMeta(item) }}</div>
+                    <div v-if="item.reasons?.length" class="result-reasons">{{ item.reasons.join('、') }}</div>
+                  </div>
+                </div>
+              </div>
+              <details class="raw-json">
+                <summary>原始结果</summary>
+                <pre>{{ formatToolResult(msg) }}</pre>
+              </details>
             </template>
             <template v-else>{{ msg.content }}</template>
           </div>
@@ -188,8 +232,15 @@ onMounted(async () => {
       <div v-if="pendingAction" class="confirm-card">
         <strong>需要确认操作</strong>
         <div v-for="call in pendingAction.calls" :key="call.id" class="confirm-line">
-          <div>{{ call.summary || call.name }} · 风险 {{ call.risk }}</div>
-          <pre>{{ JSON.stringify(call.args || {}, null, 2).slice(0, 800) }}</pre>
+          <div class="confirm-summary">{{ call.preview?.summary || call.summary || call.name }}</div>
+          <div class="confirm-effect">{{ call.preview?.effect || `风险 ${call.risk}` }}</div>
+          <div v-if="previewDetails(call).length" class="confirm-grid">
+            <div v-for="d in previewDetails(call)" :key="d.label" class="confirm-detail">
+              <span>{{ d.label }}</span>
+              <strong>{{ d.value }}</strong>
+            </div>
+          </div>
+          <details class="raw-json"><summary>参数</summary><pre>{{ JSON.stringify(call.args || {}, null, 2).slice(0, 1200) }}</pre></details>
         </div>
         <div class="confirm-actions">
           <AppButton variant="ghost" @click="handleCancel">取消</AppButton>
@@ -198,12 +249,7 @@ onMounted(async () => {
       </div>
 
       <div class="composer">
-        <textarea
-          v-model="input"
-          placeholder="输入你的音乐管理需求..."
-          :disabled="loading"
-          @keydown.enter.exact.prevent="sendMessage"
-        />
+        <textarea v-model="input" placeholder="输入你的音乐管理需求..." :disabled="loading" @keydown.enter.exact.prevent="sendMessage" />
         <AppButton variant="primary" :loading="loading" :disabled="!input.trim()" @click="sendMessage">发送</AppButton>
       </div>
     </section>
@@ -234,14 +280,29 @@ onMounted(async () => {
 .message-content { white-space: pre-wrap; line-height: 1.55; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; overflow-x: auto; }
 .message.user .message-content { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .message.tool .message-content { font-size: 12px; color: var(--text-dim); }
-.tool-name { color: var(--accent); font-weight: 600; margin-bottom: 6px; }
-pre { margin: 0; white-space: pre-wrap; }
+.tool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.tool-name { color: var(--accent); font-weight: 700; }
+.tool-summary { color: var(--text-dim); }
+.result-cards { display: grid; gap: 8px; margin: 8px 0; }
+.result-card { display: grid; grid-template-columns: 38px 1fr; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--bg); }
+.result-rank { color: var(--accent); font-weight: 700; }
+.result-title { color: var(--text); font-weight: 650; }
+.result-subtitle, .result-meta, .result-reasons { margin-top: 3px; color: var(--text-dim); font-size: 12px; }
+.raw-json { margin-top: 8px; color: var(--text-dim); }
+.raw-json summary { cursor: pointer; }
+pre { margin: 6px 0 0; white-space: pre-wrap; }
 .empty-text { color: var(--text-dim); text-align: center; padding: 40px; }
 .error-text { margin: 12px 18px 0; color: var(--danger); }
 .confirm-card { margin: 0 18px 12px; padding: 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.confirm-line { color: var(--text-dim); margin-top: 6px; font-size: 13px; }
+.confirm-line { color: var(--text-dim); margin-top: 8px; font-size: 13px; }
+.confirm-summary { color: var(--text); font-weight: 700; }
+.confirm-effect { margin-top: 4px; color: var(--warning); }
+.confirm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.confirm-detail { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; background: var(--bg); }
+.confirm-detail span { display: block; color: var(--text-dim); font-size: 11px; }
+.confirm-detail strong { display: block; color: var(--text); margin-top: 2px; word-break: break-word; }
 .confirm-actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; }
 .composer { border-top: 1px solid var(--border); padding: 14px; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 .composer textarea { resize: none; min-height: 46px; max-height: 120px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); color: var(--text); padding: 10px 12px; outline: none; }
-@media (max-width: 900px) { .assistant-view { grid-template-columns: 1fr; padding: 12px; } .conversation-panel { display: none; } }
+@media (max-width: 900px) { .assistant-view { grid-template-columns: 1fr; padding: 12px; } .conversation-panel { display: none; } .confirm-grid { grid-template-columns: 1fr; } }
 </style>

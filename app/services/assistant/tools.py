@@ -145,7 +145,10 @@ def search_pt(db: Session, keyword: str, sites: list[str] | None = None, limit: 
 def search_online_tool(db: Session, keyword: str, sources: list[str] | None = None, limit: int = 10, **kwargs) -> dict:
     if not keyword:
         raise ToolError("缺少 keyword")
-    return {"items": search_online(keyword, sources=sources, limit=max(1, min(int(limit or 10), 20)))}
+    items = search_online(keyword, sources=sources, limit=max(1, min(int(limit or 10), 20)))
+    for item in items:
+        item["download_args"] = {"song": item, "organize": True}
+    return {"items": items, "instruction": "如果用户要下载某个结果，调用 download_online_song，并原样传入该结果的 download_args。"}
 
 
 def pause_task(db: Session, task_id: int, **kwargs) -> dict:

@@ -31,6 +31,34 @@ def _safe_json_loads(text: str | None) -> dict[str, Any]:
         return {}
 
 
+def _truncate_text(text: str, limit: int = 8000) -> str:
+    if len(text or "") <= limit:
+        return text or ""
+    return (text or "")[:limit] + "...（已截断）"
+
+
+def _compact_tool_result(tool_name: str, result: Any) -> Any:
+    """Keep full tool results in DB, but feed only compact data back to the LLM.
+
+    This follows MoviePilot's pattern: tool output should be useful for the next
+    decision, not pollute the whole conversation context.
+    """
+    if not isinstance(result, dict):
+        return result
+    if tool_name == "search_pt":
+        return {
+            "queries": result.get("queries") or [],
+            "sites": result.get("sites") or [],
+            "items": (result.get("items") or [])[:8],
+            "instruction": result.get("instruction") or "",
+        }
+    if tool_name == "search_online":
+        return {"items": (result.get("items") or [])[:6]}
+    if tool_name in {"list_tasks", "list_subscriptions", "search_library"}:
+        return {"items": (result.get("items") or [])[:15]}
+    return result
+
+
 class AssistantService:
     def __init__(self, db: Session):
         self.db = db
@@ -95,10 +123,9 @@ class AssistantService:
                 # of protocol-level `tool` messages. OpenAI/Anthropic both require a
                 # preceding assistant tool_call/tool_use in the same request; after a
                 # page reload or a later user turn we only need the data as context.
-                result = (row.tool_result_json or row.content or "{}").strip()
-                if len(result) > 8000:
-                    result = result[:8000] + "...（已截断）"
-                messages.append({"role": "assistant", "content": f"[工具结果 {row.tool_name or ''}]\n{result}"})
+                raw_result = _safe_json_loads(row.tool_result_json) if row.tool_result_json else {}
+                result = _json_dumps(_compact_tool_result(row.tool_name or "", raw_result)) if raw_result else (row.content or "{}")
+                messages.append({"role": "assistant", "content": f"[工具结果 {row.tool_name or ''}]\n{_truncate_text(result)}"})
         return messages
 
     def _llm_client(self) -> AssistantLLMClient:
@@ -167,17 +194,19 @@ class AssistantService:
         if self._requires_confirm(name, risk):
             action_id = self._create_action(conversation_id, name, args, risk)
             summary = self._action_summary(name, args, risk)
+            preview = self._action_preview(name, args, risk, summary)
             text = f"需要确认后才能执行：{summary}"
             self._save_message(conversation_id, "assistant", text, status="needs_confirm")
             return {
                 "conversation_id": conversation_id,
                 "message": text,
-                "tool_calls": [{"id": action_id, "name": name, "args": args, "risk": risk, "summary": summary, "requires_confirm": True}],
+                "tool_calls": [{"id": action_id, "name": name, "args": args, "risk": risk, "summary": summary, "preview": preview, "requires_confirm": True}],
                 "needs_confirm": True,
                 "action_id": action_id,
             }
         result = execute_tool(self.db, name, args)
-        tool_events.append({"name": name, "args": args, "result": result, "risk": risk})
+        compact_result = _compact_tool_result(name, result)
+        tool_events.append({"name": name, "args": args, "result": compact_result, "risk": risk})
         self._save_message(
             conversation_id,
             "tool",
@@ -186,7 +215,7 @@ class AssistantService:
             tool_args_json=_json_dumps(args),
             tool_result_json=_json_dumps(result),
         )
-        messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": _json_dumps(result)})
+        messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": _json_dumps(compact_result)})
         return None
 
     def _tool_allowed(self, name: str) -> tuple[bool, str]:
@@ -226,6 +255,47 @@ class AssistantService:
         if name in {"pause_task", "resume_task"}:
             return f"{name}：任务 #{args.get('task_id')}"
         return f"{name}（风险级别：{risk}）"
+
+    def _action_preview(self, name: str, args: dict[str, Any], risk: str, summary: str) -> dict[str, Any]:
+        details: list[dict[str, str]] = []
+        effect = "执行后会修改 Music Sub 状态。"
+        if name == "download_torrent":
+            details = [
+                {"label": "资源", "value": str(args.get("title") or args.get("torrent_id") or "-")},
+                {"label": "站点", "value": str(args.get("site") or "-")},
+                {"label": "Torrent ID", "value": str(args.get("torrent_id") or "-")},
+            ]
+            effect = "确认后会下载种子并添加到 qBittorrent，随后任务页会出现新下载任务。"
+        elif name == "download_online_song":
+            song = args.get("song") or {}
+            details = [
+                {"label": "歌曲", "value": str(song.get("title") or song.get("filename") or "-")},
+                {"label": "艺人", "value": str(song.get("artist") or "-")},
+                {"label": "来源", "value": str(song.get("source") or "-")},
+                {"label": "整理入库", "value": "是" if args.get("organize", True) else "否"},
+            ]
+            effect = "确认后会下载音频文件；若开启整理，会自动进入整理/刮削流程。"
+        elif name == "create_subscription":
+            details = [
+                {"label": "关键词", "value": str(args.get("keyword") or "-")},
+                {"label": "类型", "value": str(args.get("type") or "artist")},
+                {"label": "质量", "value": str(args.get("quality") or "any")},
+                {"label": "站点", "value": str(args.get("sites") or "all")},
+            ]
+            effect = "确认后会新增订阅，后续定时任务会自动搜索匹配资源。"
+        elif name == "organize_task":
+            details = [{"label": "任务 ID", "value": str(args.get("task_id") or "-")}]
+            effect = "确认后会对该下载任务执行整理、硬链接/复制和元数据刮削。"
+        elif name == "rescrape_album":
+            details = [
+                {"label": "艺人", "value": str(args.get("artist") or "-")},
+                {"label": "专辑", "value": str(args.get("album") or "-")},
+            ]
+            effect = "确认后会启动专辑重新刮削后台任务。"
+        elif name in {"pause_task", "resume_task"}:
+            details = [{"label": "任务 ID", "value": str(args.get("task_id") or "-")}]
+            effect = "确认后会修改 qBittorrent 下载状态。"
+        return {"summary": summary, "risk": risk, "details": details, "effect": effect}
 
     def _create_action(self, conversation_id: int, tool_name: str, args: dict[str, Any], risk: str) -> str:
         action_id = uuid.uuid4().hex[:16]
