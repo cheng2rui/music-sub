@@ -65,14 +65,17 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
         target_file = os.path.join(target_dir, filename)
 
         if os.path.exists(target_file):
-            # Already linked or exists
+            # Already linked or exists; still make sure sidecars are present.
             linked.append(target_file)
+            _copy_sidecars(src_file, target_file)
+            _copy_album_sidecars(Path(src_file).parent, Path(target_file).parent)
             continue
 
         try:
             os.link(src_file, target_file)
             linked.append(target_file)
             _copy_sidecars(src_file, target_file)
+            _copy_album_sidecars(Path(src_file).parent, Path(target_file).parent)
             logger.info(f"Hardlinked: {src_file} -> {target_file}")
         except OSError as e:
             if e.errno == 18:  # Cross-device link
@@ -81,6 +84,7 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
                 shutil.copy2(src_file, target_file)
                 linked.append(target_file)
                 _copy_sidecars(src_file, target_file)
+                _copy_album_sidecars(Path(src_file).parent, Path(target_file).parent)
             else:
                 logger.error(f"Failed to hardlink {src_file}: {e}")
 
@@ -103,7 +107,7 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
 
 
 def _copy_sidecars(src_file: str, target_file: str):
-    """Copy common sidecars (.lrc/.cue/.log/.nfo/.txt) next to linked audio."""
+    """Copy same-stem sidecars (.lrc/.cue/.log/.nfo/.txt) next to linked audio."""
     src = Path(src_file)
     dst = Path(target_file)
     for suffix in SIDECAR_SUFFIXES:
@@ -118,3 +122,20 @@ def _copy_sidecars(src_file: str, target_file: str):
         except OSError:
             import shutil
             shutil.copy2(sidecar, target)
+
+
+def _copy_album_sidecars(src_dir: Path, target_dir: Path):
+    """Copy album-level sidecars that are not necessarily named like the audio file."""
+    if not src_dir.exists() or not src_dir.is_dir():
+        return
+    for path in src_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in SIDECAR_SUFFIXES:
+            continue
+        target = target_dir / path.name
+        if target.exists():
+            continue
+        try:
+            os.link(path, target)
+        except OSError:
+            import shutil
+            shutil.copy2(path, target)

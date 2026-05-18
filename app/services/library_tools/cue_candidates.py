@@ -22,7 +22,12 @@ def _has_cue(file_path: str | None) -> bool:
     if path.with_suffix(".cue").exists():
         return True
     try:
-        return len(list(path.parent.glob("*.cue"))) == 1
+        if len(list(path.parent.glob("*.cue"))) == 1:
+            return True
+    except Exception:
+        pass
+    try:
+        return split_audio._matched_cue(path) is not None
     except Exception:
         return False
 

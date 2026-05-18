@@ -19,6 +19,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import config
 from app.models import MusicFile
 from app.scrapers.base import MusicMeta
 from app.scrapers.tagger import (
@@ -148,6 +149,35 @@ def _matched_cue(audio_path: Path) -> Path | None:
             continue
         if sheet.audio_file and Path(sheet.audio_file).name == audio_path.name:
             return cue
+    return _matched_download_cue(audio_path)
+
+
+def _matched_download_cue(audio_path: Path) -> Path | None:
+    """Fallback for older library rows where the .cue stayed in downloads."""
+    try:
+        download_root = Path(config.paths.downloads)
+    except Exception:
+        return None
+    if not download_root.exists():
+        return None
+    seen: set[Path] = set()
+    checked = 0
+    for pattern in (f"**/{audio_path.stem}.cue", "**/*.cue"):
+        for cue in download_root.glob(pattern):
+            if cue in seen:
+                continue
+            seen.add(cue)
+            checked += 1
+            if checked > 500:
+                return None
+            try:
+                sheet = _read_cue_sheet(cue)
+            except Exception:
+                continue
+            if sheet.audio_file and Path(sheet.audio_file).name != audio_path.name:
+                continue
+            if cue.stem == audio_path.stem or (sheet.audio_file and Path(sheet.audio_file).name == audio_path.name):
+                return cue
     return None
 
 
