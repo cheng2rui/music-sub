@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { getTasks, checkTasks, pauseTask, resumeTask, retryTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask } from '@/api/index.js'
+import { getTasks, checkTasks, pauseTask, resumeTask, retryTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask, listLibraryJobs } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
@@ -15,6 +15,9 @@ const cleanupApplying = ref(false)
 const cleanupPreview = ref(null)
 const cleanupResult = ref(null)
 const cleanupDeleteFiles = ref(false)
+const libraryJobs = ref([])
+const jobsOpen = ref(true)
+const jobsError = ref('')
 let timer = null
 
 const hasActiveTasks = computed(() => tasks.value.some(t => ['downloading', 'organized', 'downloaded'].includes(t.status)))
@@ -23,7 +26,7 @@ function scheduleNextLoad() {
   if (timer) clearTimeout(timer)
   const delay = document.hidden ? 120000 : (hasActiveTasks.value ? 5000 : 60000)
   timer = setTimeout(async () => {
-    await loadTasks()
+    await refreshAll()
     scheduleNextLoad()
   }, delay)
 }
@@ -39,11 +42,26 @@ async function loadTasks() {
   }
 }
 
+async function loadLibraryJobs() {
+  try {
+    jobsError.value = ''
+    const data = await listLibraryJobs(8)
+    libraryJobs.value = data.jobs || []
+  } catch (e) {
+    console.warn('load library jobs failed', e)
+    jobsError.value = e.message || '曲库 Job 加载失败'
+  }
+}
+
+async function refreshAll() {
+  await Promise.allSettled([loadTasks(), loadLibraryJobs()])
+}
+
 async function handleCheck() {
   loading.value = true
   try {
     await checkTasks()
-    await loadTasks()
+    await refreshAll()
     scheduleNextLoad()
   } catch (e) {
     errorText.value = e.message || '检查失败'
@@ -81,7 +99,7 @@ async function runTaskAction(task, action) {
         await deleteTask(task.id, deleteFiles)
       }
     }
-    await loadTasks()
+    await refreshAll()
     scheduleNextLoad()
   } catch (e) {
     alert(e.message || '操作失败')
@@ -120,7 +138,7 @@ async function handleCleanupApply() {
   cleanupApplying.value = true
   try {
     cleanupResult.value = await applyTaskCleanup(cleanupDeleteFiles.value)
-    await loadTasks()
+    await refreshAll()
     cleanupPreview.value = await previewTaskCleanup()
     cleanupDeleteFiles.value = false
     scheduleNextLoad()
@@ -183,6 +201,29 @@ function formatSpeed(bytesPerSecond) {
   return `${formatSize(bytesPerSecond)}/s`
 }
 
+function formatJobTime(value) {
+  if (!value) return '-'
+  try { return new Date(value).toLocaleString() } catch { return String(value) }
+}
+
+function jobPercent(job) {
+  const total = Number(job.total || 0)
+  const done = Number(job.done || 0)
+  if (!total) return job.status === 'done' ? 100 : 0
+  return Math.max(0, Math.min(100, Math.round(done / total * 100)))
+}
+
+function jobStatus(job) {
+  const map = {
+    queued: { label: '排队中', color: 'dim' },
+    running: { label: '运行中', color: 'blue' },
+    done: { label: '已完成', color: 'green' },
+    failed: { label: '失败', color: 'red' },
+    cancelled: { label: '已取消', color: 'orange' },
+  }
+  return map[job.status] || { label: job.status || '-', color: 'dim' }
+}
+
 function formatEta(seconds) {
   if (!seconds || seconds >= 8640000) return ''
   if (seconds < 60) return `${seconds}s`
@@ -219,7 +260,7 @@ function handleVisibilityChange() {
 }
 
 onMounted(async () => {
-  await loadTasks()
+  await refreshAll()
   scheduleNextLoad()
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
@@ -242,6 +283,7 @@ onUnmounted(() => {
       </div>
       <div class="header-actions">
         <AppButton variant="ghost" :loading="cleanupLoading" @click="handleCleanupPreview">清理扫描</AppButton>
+        <AppButton variant="ghost" @click="loadLibraryJobs">刷新 Job</AppButton>
         <AppButton variant="primary" :loading="loading" @click="handleCheck">检查完成</AppButton>
       </div>
     </div>
@@ -293,6 +335,40 @@ onUnmounted(() => {
     </AppModal>
 
     <div v-if="errorText" class="error-text">{{ errorText }}</div>
+
+    <section class="library-jobs-panel">
+      <button class="jobs-toggle" type="button" @click="jobsOpen = !jobsOpen">
+        <span>最近曲库 Job</span>
+        <em>{{ libraryJobs.length }} 条</em>
+        <strong>{{ jobsOpen ? '收起' : '展开' }}</strong>
+      </button>
+      <div v-if="jobsOpen" class="jobs-body">
+        <div v-if="jobsError" class="warning-text">{{ jobsError }}</div>
+        <div v-else-if="!libraryJobs.length" class="empty-text compact">暂无曲库后台任务</div>
+        <div v-else class="job-list">
+          <article v-for="job in libraryJobs" :key="job.id" class="job-card">
+            <div class="job-head">
+              <div>
+                <strong>{{ job.title || job.kind || job.id }}</strong>
+                <span>{{ job.id }}</span>
+              </div>
+              <AppBadge :color="jobStatus(job).color">{{ jobStatus(job).label }}</AppBadge>
+            </div>
+            <div class="job-progress-row">
+              <div class="progress-bar"><span :style="{ width: jobPercent(job) + '%' }"></span></div>
+              <span>{{ job.done || 0 }}/{{ job.total || 0 }}</span>
+            </div>
+            <div class="job-meta">
+              <span>创建 {{ formatJobTime(job.created_at) }}</span>
+              <span v-if="job.updated_at">更新 {{ formatJobTime(job.updated_at) }}</span>
+              <span v-if="job.summary">{{ JSON.stringify(job.summary).slice(0, 80) }}</span>
+            </div>
+            <div v-if="job.error" class="tracker-msg mobile">{{ job.error }}</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <div v-if="tasks.length === 0" class="empty-text">暂无任务</div>
     <div v-else class="tasks-section">
       <div class="tasks-table-wrap">
@@ -499,6 +575,22 @@ onUnmounted(() => {
 .delete-files-toggle.danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .tasks-section { display: block; }
+.library-jobs-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); overflow: hidden; }
+.jobs-toggle { width: 100%; min-height: 46px; border: 0; background: transparent; color: var(--text); display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; text-align: left; }
+.jobs-toggle span { font-weight: 800; }
+.jobs-toggle em { color: var(--text-dim); font-style: normal; font-size: 12px; }
+.jobs-toggle strong { margin-left: auto; color: var(--accent); font-size: 12px; }
+.jobs-body { border-top: 1px solid var(--border); padding: 12px; }
+.job-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.job-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.job-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.job-head div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.job-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.job-head span, .job-meta { color: var(--text-dim); font-size: 11px; }
+.job-progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; color: var(--text-dim); font-size: 12px; }
+.job-progress-row .progress-bar { width: 100%; margin: 0; }
+.job-meta { display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.empty-text.compact { padding: 8px 0; }
 .tasks-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); -webkit-overflow-scrolling: touch; }
 .tasks-table { width: 100%; border-collapse: collapse; min-width: 1120px; }
 .tasks-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
@@ -529,6 +621,7 @@ onUnmounted(() => {
   .tasks-header h2 { font-size: 18px; }
   .header-actions { justify-content: space-between; flex-wrap: wrap; }
   .tasks-table-wrap { display: none; }
+  .job-list { grid-template-columns: 1fr; }
   .task-cards { display: flex; flex-direction: column; gap: 12px; }
   .cleanup-list { max-height: 46vh; }
   .modal-actions { display: grid; grid-template-columns: 1fr 1fr; }
