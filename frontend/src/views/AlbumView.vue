@@ -227,6 +227,7 @@ onMounted(loadTracks)
           <label>年份<input v-model="trackEdit.year" type="number" /></label>
           <label>流派<input v-model="trackEdit.genre" /></label>
           <AppButton variant="primary" size="sm" :loading="savingTrack" @click="saveTrack">保存</AppButton>
+        </div>
         <div class="pager" v-if="trackPagedMode && trackPageCount > 1">
           <button :disabled="trackPage === 0 || trackLoading" @click="changeTrackPage(0)">&lt;&lt;</button>
           <button :disabled="trackPage === 0 || trackLoading" @click="changeTrackPage(trackPage - 1)">&lt;</button>
