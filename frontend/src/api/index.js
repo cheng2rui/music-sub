@@ -3,13 +3,29 @@ import { useAuthStore } from '@/stores/auth.js'
 async function authFetch(url, options = {}) {
   const auth = useAuthStore()
   const headers = { ...(options.headers || {}) }
+  const { timeoutMs, ...fetchOptions } = options
+  let timeoutId = null
+  let signal = fetchOptions.signal
+  if (timeoutMs) {
+    const controller = new AbortController()
+    timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+    signal = controller.signal
+  }
   if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`
   // Only set Content-Type for requests with body
-  if (options.body && !headers['Content-Type']) {
+  if (fetchOptions.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
 
-  const res = await fetch(url, { ...options, headers })
+  let res
+  try {
+    res = await fetch(url, { ...fetchOptions, headers, signal })
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error('请求超时，请稍后重试或检查模型/工具连接。')
+    throw new Error(e?.message || '网络请求失败')
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId)
+  }
 
   if (res.status === 401) {
     auth.logout()
@@ -18,6 +34,29 @@ async function authFetch(url, options = {}) {
   }
   return res
 }
+
+async function parseApiResponse(res) {
+  const text = await res.text()
+  let data = null
+  if (text) {
+    try { data = JSON.parse(text) } catch { data = { message: text } }
+  }
+  const detail = data?.detail || data?.error || data?.message
+  if (!res.ok) {
+    const message = typeof detail === 'string' ? detail : detail?.message || `请求失败（HTTP ${res.status}）`
+    throw new Error(message)
+  }
+  if (data && data.ok === false) {
+    const message = typeof detail === 'string' ? detail : detail?.message || data.message || '操作失败'
+    const err = new Error(message)
+    err.payload = data
+    throw err
+  }
+  return data
+}
+
+const json = (promise) => promise.then(parseApiResponse)
+const ASSISTANT_TIMEOUT_MS = 120000
 
 // ============ Auth ============
 export const loginApi = (username, password) =>
@@ -96,27 +135,30 @@ export const importQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/import`, 
 export const organizeQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/organize`, { method: 'POST' }).then(r => r.json())
 
 // ============ Assistant ============
-export const getAssistantCapabilities = () => authFetch('/api/assistant/capabilities').then(r => r.json())
-export const getAssistantProviders = () => authFetch('/api/assistant/providers').then(r => r.json())
-export const getAssistantTools = () => authFetch('/api/assistant/tools').then(r => r.json())
-export const getAssistantActivity = (limit = 50) => authFetch(`/api/assistant/activity?limit=${limit}`).then(r => r.json())
-export const testAssistantProvider = (enabled, provider) => authFetch('/api/assistant/providers/test', {
+export const getAssistantCapabilities = () => json(authFetch('/api/assistant/capabilities', { timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const getAssistantProviders = () => json(authFetch('/api/assistant/providers', { timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const getAssistantTools = () => json(authFetch('/api/assistant/tools', { timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const getAssistantActivity = (limit = 50) => json(authFetch(`/api/assistant/activity?limit=${limit}`, { timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const testAssistantProvider = (enabled, provider) => json(authFetch('/api/assistant/providers/test', {
   method: 'POST',
-  body: JSON.stringify({ enabled, provider })
-}).then(r => r.json())
-export const getAssistantConversations = () => authFetch('/api/assistant/conversations').then(r => r.json())
-export const createAssistantConversation = (title = '新对话') => authFetch('/api/assistant/conversations', {
+  body: JSON.stringify({ enabled, provider }),
+  timeoutMs: ASSISTANT_TIMEOUT_MS
+}))
+export const getAssistantConversations = () => json(authFetch('/api/assistant/conversations', { timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const createAssistantConversation = (title = '新对话') => json(authFetch('/api/assistant/conversations', {
   method: 'POST',
-  body: JSON.stringify({ title })
-}).then(r => r.json())
-export const getAssistantMessages = (id) => authFetch(`/api/assistant/conversations/${id}/messages`).then(r => r.json())
-export const deleteAssistantConversation = (id) => authFetch(`/api/assistant/conversations/${id}`, { method: 'DELETE' }).then(r => r.json())
-export const sendAssistantMessage = (message, conversationId = null) => authFetch('/api/assistant/chat', {
+  body: JSON.stringify({ title }),
+  timeoutMs: ASSISTANT_TIMEOUT_MS
+}))
+export const getAssistantMessages = (id) => json(authFetch(`/api/assistant/conversations/${id}/messages`, { timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const deleteAssistantConversation = (id) => json(authFetch(`/api/assistant/conversations/${id}`, { method: 'DELETE', timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const sendAssistantMessage = (message, conversationId = null) => json(authFetch('/api/assistant/chat', {
   method: 'POST',
-  body: JSON.stringify({ message, conversation_id: conversationId })
-}).then(r => r.json())
-export const confirmAssistantAction = (actionId) => authFetch(`/api/assistant/actions/${actionId}/confirm`, { method: 'POST' }).then(r => r.json())
-export const cancelAssistantAction = (actionId) => authFetch(`/api/assistant/actions/${actionId}/cancel`, { method: 'POST' }).then(r => r.json())
+  body: JSON.stringify({ message, conversation_id: conversationId }),
+  timeoutMs: ASSISTANT_TIMEOUT_MS
+}))
+export const confirmAssistantAction = (actionId) => json(authFetch(`/api/assistant/actions/${actionId}/confirm`, { method: 'POST', timeoutMs: ASSISTANT_TIMEOUT_MS }))
+export const cancelAssistantAction = (actionId) => json(authFetch(`/api/assistant/actions/${actionId}/cancel`, { method: 'POST', timeoutMs: ASSISTANT_TIMEOUT_MS }))
 
 // ============ Library ============
 export const getLibraryStats = () => authFetch('/api/library/stats').then(r => r.json())

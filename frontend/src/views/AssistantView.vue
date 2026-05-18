@@ -23,6 +23,7 @@ const caps = ref(null)
 const errorText = ref('')
 const pendingAction = ref(null)
 const activity = ref([])
+const retryDraft = ref('')
 
 const enabled = computed(() => caps.value?.enabled)
 const groupedTools = computed(() => {
@@ -35,14 +36,23 @@ const groupedTools = computed(() => {
   return groups
 })
 
-async function loadCaps() { caps.value = await getAssistantCapabilities() }
+function showError(error, fallback = '操作失败') {
+  errorText.value = error?.message || fallback
+}
+
+async function loadCaps() {
+  try { caps.value = await getAssistantCapabilities() }
+  catch (e) { showError(e, '加载助手配置失败') }
+}
 
 async function loadConversations() {
-  conversations.value = await getAssistantConversations()
-  if (!currentId.value && conversations.value.length) {
-    currentId.value = conversations.value[0].id
-    await loadMessages()
-  }
+  try {
+    conversations.value = await getAssistantConversations()
+    if (!currentId.value && conversations.value.length) {
+      currentId.value = conversations.value[0].id
+      await loadMessages()
+    }
+  } catch (e) { showError(e, '加载对话失败') }
 }
 
 async function loadMessages() {
@@ -50,21 +60,28 @@ async function loadMessages() {
     messages.value = []
     return
   }
-  messages.value = await getAssistantMessages(currentId.value)
+  try { messages.value = await getAssistantMessages(currentId.value) }
+  catch (e) { showError(e, '加载消息失败') }
 }
 
 async function loadActivity() {
-  const data = await getAssistantActivity(30)
-  activity.value = data.items || []
+  try {
+    const data = await getAssistantActivity(30)
+    activity.value = data.items || []
+  } catch (e) { console.warn('load assistant activity failed', e) }
 }
 
 async function newConversation() {
-  const conv = await createAssistantConversation('新对话')
-  currentId.value = conv.id
-  input.value = ''
-  pendingAction.value = null
-  await loadConversations()
-  await loadMessages()
+  if (loading.value) return
+  try {
+    const conv = await createAssistantConversation('新对话')
+    currentId.value = conv.id
+    input.value = ''
+    retryDraft.value = ''
+    pendingAction.value = null
+    await loadConversations()
+    await loadMessages()
+  } catch (e) { showError(e, '创建对话失败') }
 }
 
 async function removeConversation(conv) {
@@ -77,6 +94,7 @@ async function removeConversation(conv) {
 }
 
 async function selectConversation(id) {
+  if (loading.value) return
   currentId.value = id
   pendingAction.value = null
   await loadMessages()
@@ -86,9 +104,10 @@ function pushLocal(role, content, extra = {}) {
   messages.value.push({ id: `local-${Date.now()}-${Math.random()}`, role, content, created_at: new Date().toISOString(), ...extra })
 }
 
-async function sendMessage() {
-  const text = input.value.trim()
+async function sendMessage(textOverride = '') {
+  const text = (textOverride || input.value).trim()
   if (!text || loading.value) return
+  retryDraft.value = text
   input.value = ''
   errorText.value = ''
   pushLocal('user', text)
@@ -96,16 +115,31 @@ async function sendMessage() {
   try {
     const res = await sendAssistantMessage(text, currentId.value)
     currentId.value = res.conversation_id
-    pushLocal('assistant', res.message)
+    pushLocal('assistant', res.message || '助手没有返回文字。')
     pendingAction.value = res.needs_confirm ? { id: res.action_id, calls: res.tool_calls || [] } : null
+    retryDraft.value = ''
     await loadConversations()
     await loadMessages()
     await loadActivity()
   } catch (e) {
-    errorText.value = e.message || '发送失败'
+    input.value = text
+    if (e?.payload?.conversation_id) {
+      currentId.value = e.payload.conversation_id
+      if (e.payload.message) pushLocal('assistant', e.payload.message, { status: 'failed' })
+      pendingAction.value = null
+      await loadConversations()
+      await loadMessages()
+      await loadActivity()
+    }
+    showError(e, '发送失败')
   } finally {
     loading.value = false
   }
+}
+
+function retryLastMessage() {
+  const text = retryDraft.value || input.value
+  sendMessage(text)
 }
 
 async function handleConfirm() {
@@ -118,18 +152,22 @@ async function handleConfirm() {
     await loadMessages()
     await loadActivity()
   } catch (e) {
-    alert(e.message || '确认失败')
+    showError(e, '确认失败')
   } finally {
     loading.value = false
   }
 }
 
 async function handleCancel() {
-  if (!pendingAction.value?.id) return
-  await cancelAssistantAction(pendingAction.value.id)
-  pendingAction.value = null
-  await loadMessages()
-  await loadActivity()
+  if (!pendingAction.value?.id || loading.value) return
+  loading.value = true
+  try {
+    await cancelAssistantAction(pendingAction.value.id)
+    pendingAction.value = null
+    await loadMessages()
+    await loadActivity()
+  } catch (e) { showError(e, '取消失败') }
+  finally { loading.value = false }
 }
 
 function roleLabel(role) { return role === 'user' ? '你' : role === 'tool' ? '工具' : '助手' }
@@ -198,7 +236,7 @@ onMounted(async () => {
           <h3>智能助手</h3>
           <div class="muted">{{ caps?.model || '未配置模型' }}</div>
         </div>
-        <AppButton size="sm" variant="primary" @click="newConversation">新对话</AppButton>
+        <AppButton size="sm" variant="primary" :disabled="loading" @click="newConversation">新对话</AppButton>
       </div>
       <div v-if="!enabled" class="warning-box">助手未启用：到设置里开启 Assistant 并填写模型配置。</div>
       <div class="conversation-list">
@@ -239,12 +277,15 @@ onMounted(async () => {
           <p>可以问：帮我搜周杰伦 FLAC、最近任务状态、库里有没有稻香、列出订阅。</p>
         </div>
         <div class="chat-toolbar-actions">
-          <AppButton class="mobile-new-chat" size="sm" variant="ghost" @click="newConversation">新对话</AppButton>
+          <AppButton class="mobile-new-chat" size="sm" variant="ghost" :disabled="loading" @click="newConversation">新对话</AppButton>
           <AppBadge :color="enabled ? 'green' : 'orange'">{{ enabled ? '已启用' : '未启用' }}</AppBadge>
         </div>
       </div>
 
-      <div v-if="errorText" class="error-text">{{ errorText }}</div>
+      <div v-if="errorText" class="error-text">
+        <span>{{ errorText }}</span>
+        <AppButton v-if="retryDraft" size="sm" variant="ghost" :disabled="loading" @click="retryLastMessage">重试</AppButton>
+      </div>
 
       <div class="messages">
         <div v-if="messages.length === 0" class="empty-text">暂无消息，试试“搜索周杰伦 FLAC，优先猫站”。</div>
@@ -275,6 +316,10 @@ onMounted(async () => {
             <template v-else>{{ msg.content }}</template>
           </div>
         </div>
+        <div v-if="loading" class="message assistant loading-row">
+          <div class="message-role">助手</div>
+          <div class="message-content">正在思考/调用工具，请稍候…</div>
+        </div>
       </div>
 
       <div v-if="pendingAction" class="confirm-card">
@@ -291,14 +336,14 @@ onMounted(async () => {
           <details class="raw-json"><summary>参数</summary><pre>{{ JSON.stringify(call.args || {}, null, 2).slice(0, 1200) }}</pre></details>
         </div>
         <div class="confirm-actions">
-          <AppButton variant="ghost" @click="handleCancel">取消</AppButton>
+          <AppButton variant="ghost" :disabled="loading" @click="handleCancel">取消</AppButton>
           <AppButton variant="danger" :loading="loading" @click="handleConfirm">确认执行</AppButton>
         </div>
       </div>
 
       <div class="composer">
-        <textarea v-model="input" placeholder="输入你的音乐管理需求..." :disabled="loading" @keydown.enter.exact.prevent="sendMessage" />
-        <AppButton variant="primary" :loading="loading" :disabled="!input.trim()" @click="sendMessage">发送</AppButton>
+        <textarea v-model="input" placeholder="输入你的音乐管理需求..." :disabled="loading || !enabled" @keydown.enter.exact.prevent="sendMessage" />
+        <AppButton variant="primary" :loading="loading" :disabled="loading || !enabled || !input.trim()" @click="sendMessage">发送</AppButton>
       </div>
     </section>
   </div>
@@ -353,7 +398,8 @@ onMounted(async () => {
 .raw-json summary { cursor: pointer; }
 pre { margin: 6px 0 0; white-space: pre-wrap; }
 .empty-text { color: var(--text-dim); text-align: center; padding: 40px; }
-.error-text { margin: 12px 18px 0; color: var(--danger); }
+.error-text { margin: 12px 18px 0; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: var(--radius-md); padding: 8px 10px; background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.loading-row .message-content { color: var(--text-dim); }
 .confirm-card { margin: 0 18px 12px; padding: 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .confirm-line { color: var(--text-dim); margin-top: 8px; font-size: 13px; }
 .confirm-summary { color: var(--text); font-weight: 700; }
