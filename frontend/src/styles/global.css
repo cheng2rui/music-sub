@@ -72,7 +72,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   .logs-view,
   .settings-view {
     padding: 14px !important;
-    padding-bottom: 104px !important;
+    padding-bottom: var(--mobile-page-bottom, 68px) !important;
     gap: 14px !important;
   }
   .table-wrap {
@@ -94,6 +94,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   .logs-view,
   .settings-view {
     padding: 12px !important;
-    padding-bottom: 104px !important;
+    padding-bottom: var(--mobile-page-bottom, 62px) !important;
   }
 }

@@ -601,7 +601,7 @@ function formatDuration(seconds) {
   .global-player {
     left: max(10px, env(safe-area-inset-left));
     right: max(10px, env(safe-area-inset-right));
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--mobile-player-bottom, calc(64px + env(safe-area-inset-bottom)));
     min-height: 60px;
     gap: 8px;
     padding: 9px 10px;
@@ -610,7 +610,7 @@ function formatDuration(seconds) {
   .global-player.collapsed {
     left: max(10px, env(safe-area-inset-left));
     right: max(10px, env(safe-area-inset-right));
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--mobile-player-bottom, calc(64px + env(safe-area-inset-bottom)));
     width: auto;
   }
   .collapse-toggle, .player-close, .transport-btn, .queue-close {

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from '@/stores/theme.js'
 import { useAuthStore } from '@/stores/auth.js'
+import { usePlayerStore } from '@/stores/player.js'
 import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
 import GlobalPlayer from '@/components/GlobalPlayer.vue'
 
@@ -10,6 +11,7 @@ const route = useRoute()
 const router = useRouter()
 const theme = useThemeStore()
 const auth = useAuthStore()
+const player = usePlayerStore()
 
 const navItems = [
   { to: '/discover', icon: '🏠', label: '发现', short: '发现', mobile: true },
@@ -40,7 +42,7 @@ function handleLogout() {
     <router-view />
   </div>
 
-  <div v-else class="app-layout" :class="{ 'glass-active': isGlass }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
+  <div v-else class="app-layout" :class="{ 'glass-active': isGlass, 'has-player': player.currentTrack }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
     <aside class="sidebar">
       <div class="sidebar-logo">
         <img src="/logo.svg" alt="Music Sub" class="sidebar-logo-img" />
@@ -58,7 +60,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.7.5</div>
+        <div class="version-tag">v0.7.6</div>
       </div>
     </aside>
 
@@ -238,7 +240,15 @@ function handleLogout() {
 .mobile-theme, .mobile-logout { display: none; }
 
 @media (max-width: 768px) {
-  .app-layout { display: block; }
+  .app-layout {
+    --mobile-tab-height: 54px;
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 14px + env(safe-area-inset-bottom));
+    --mobile-player-bottom: calc(var(--mobile-tab-height) + 10px + env(safe-area-inset-bottom));
+    display: block;
+  }
+  .app-layout.has-player {
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 86px + env(safe-area-inset-bottom));
+  }
   .sidebar { display: none; }
   .main-wrapper { height: 100%; }
   .topbar {
@@ -249,11 +259,7 @@ function handleLogout() {
     backdrop-filter: blur(16px);
   }
   .page-title { font-size: 16px; }
-  .main-content {
-    overflow: hidden;
-    /* Reserve bottom space for the tab bar and the floating player when active. */
-    padding-bottom: calc(144px + env(safe-area-inset-bottom));
-  }
+  .main-content { overflow: hidden; }
   .mobile-theme, .mobile-logout { display: flex; }
   .bottom-tabs {
     display: flex;
@@ -266,8 +272,8 @@ function handleLogout() {
     border-top: 1px solid var(--border);
     align-items: stretch;
     z-index: 100;
-    padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-    gap: 6px;
+    padding: 5px max(8px, env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    gap: 5px;
     overflow-x: auto;
     overflow-y: hidden;
     overscroll-behavior-x: contain;
@@ -278,12 +284,12 @@ function handleLogout() {
   }
   .bottom-tabs::-webkit-scrollbar { display: none; }
   .bottom-tab {
-    min-width: 66px;
-    height: 52px;
+    min-width: 62px;
+    height: 44px;
     border-radius: 16px;
     color: var(--text-dim);
     display: inline-flex;
-    flex: 0 0 66px;
+    flex: 0 0 62px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -293,14 +299,14 @@ function handleLogout() {
     -webkit-tap-highlight-color: transparent;
   }
   .tab-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 11px;
-    font-size: 15px;
+    width: 24px;
+    height: 24px;
+    border-radius: 10px;
+    font-size: 14px;
     background: transparent;
   }
   .tab-label {
-    font-size: 10px;
+    font-size: 9px;
     line-height: 1;
     font-weight: 700;
     white-space: nowrap;
@@ -316,14 +322,20 @@ function handleLogout() {
 }
 
 @media (max-width: 430px) {
-  .app-layout { --mobile-tab-height: 58px; }
+  .app-layout {
+    --mobile-tab-height: 50px;
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 12px + env(safe-area-inset-bottom));
+  }
+  .app-layout.has-player {
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 82px + env(safe-area-inset-bottom));
+  }
   .bottom-tabs {
     padding-left: max(6px, env(safe-area-inset-left));
     padding-right: max(6px, env(safe-area-inset-right));
-    gap: 5px;
+    gap: 4px;
   }
-  .bottom-tab { min-width: 62px; flex-basis: 62px; height: 46px; border-radius: 14px; }
-  .tab-icon { width: 28px; height: 28px; font-size: 15px; }
+  .bottom-tab { min-width: 58px; flex-basis: 58px; height: 40px; border-radius: 13px; }
+  .tab-icon { width: 22px; height: 22px; font-size: 13px; }
   .tab-label { display: block; }
 }
 </style>
