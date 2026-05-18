@@ -233,8 +233,9 @@ onMounted(loadSubs)
     <div class="subs-list">
       <div v-if="loading" class="loading-text">加载中...</div>
       <div v-else-if="subs.length === 0" class="empty-text">暂无订阅</div>
-      <div v-else class="table-wrap">
-        <table class="subs-table">
+      <div v-else class="subs-results">
+        <div class="table-wrap">
+          <table class="subs-table">
           <thead>
             <tr>
               <th>类型</th>
@@ -267,7 +268,34 @@ onMounted(loadSubs)
               </td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
+
+        <div class="sub-cards">
+          <article v-for="sub in subs" :key="`card-${sub.id}`" class="sub-card">
+            <div class="sub-card-head">
+              <h3>{{ sub.keyword }}</h3>
+              <AppBadge :color="sub.enabled ? 'green' : 'dim'">
+                {{ sub.enabled ? '启用' : '停用' }}
+              </AppBadge>
+            </div>
+            <div class="sub-chip-row">
+              <AppBadge :color="typeBadgeColor(sub.type)">{{ sub.type }}</AppBadge>
+              <span class="sub-chip">{{ sub.quality }}</span>
+            </div>
+            <div class="sub-last-search">
+              <span>最近搜索</span>
+              {{ sub.last_search_at ? new Date(sub.last_search_at).toLocaleString() : '-' }}
+            </div>
+            <div class="action-btns mobile">
+              <button class="icon-btn" @click="handleToggle(sub.id)" :title="sub.enabled ? '停用' : '启用'">
+                {{ sub.enabled ? '⏸ 停用' : '▶ 启用' }}
+              </button>
+              <button class="icon-btn" @click="openEdit(sub)" title="编辑">✏️ 编辑</button>
+              <button class="icon-btn danger" @click="handleDelete(sub.id)" title="删除">🗑 删除</button>
+            </div>
+          </article>
+        </div>
       </div>
     </div>
   </div>
@@ -281,6 +309,7 @@ onMounted(loadSubs)
 .input-keyword { flex: 1; min-width: 180px; }
 .subs-list { display: flex; flex-direction: column; }
 .loading-text, .empty-text { color: var(--text-dim); padding: 20px 0; }
+.subs-results { display: block; }
 .table-wrap { overflow-x: auto; }
 .subs-table { width: 100%; border-collapse: collapse; }
 .subs-table th {
@@ -309,6 +338,16 @@ onMounted(loadSubs)
 .parse-song-title { font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .parse-song-artist { color: var(--text-dim); flex-shrink: 0; }
 .parse-actions { display: flex; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.sub-cards { display: none; }
+.sub-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); padding: 14px; }
+.sub-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.sub-card-head h3 { min-width: 0; margin: 0; font-size: 15px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; }
+.sub-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.sub-chip { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--text-dim); background: var(--surface); font-size: 12px; }
+.sub-last-search { margin-top: 12px; color: var(--text-dim); font-size: 13px; }
+.sub-last-search span { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 2px; }
+.action-btns.mobile { margin-top: 12px; flex-wrap: wrap; }
+.action-btns.mobile .icon-btn { border: 1px solid var(--border); background: var(--surface); padding: 6px 9px; font-size: 13px; }
 
 @media (max-width: 768px) {
   .add-form { padding: 14px; border-radius: 16px; }
@@ -320,5 +359,11 @@ onMounted(loadSubs)
   .parse-actions { flex-wrap: wrap; }
   .parse-song-row { align-items: flex-start; }
   .parse-song-artist { display: none; }
+  .table-wrap { display: none; }
+  .sub-cards { display: flex; flex-direction: column; gap: 12px; }
 }
+@media (max-width: 420px) {
+  .subs-view { padding: 16px; }
+}
+
 </style>

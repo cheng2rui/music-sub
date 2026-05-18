@@ -294,8 +294,9 @@ onUnmounted(() => {
 
     <div v-if="errorText" class="error-text">{{ errorText }}</div>
     <div v-if="tasks.length === 0" class="empty-text">暂无任务</div>
-    <div v-else class="tasks-table-wrap">
-      <table class="tasks-table">
+    <div v-else class="tasks-section">
+      <div class="tasks-table-wrap">
+        <table class="tasks-table">
         <thead>
           <tr>
             <th>名称</th>
@@ -392,7 +393,86 @@ onUnmounted(() => {
             </td>
           </tr>
         </tbody>
-      </table>
+        </table>
+      </div>
+
+      <div class="task-cards">
+        <article v-for="task in tasks" :key="`card-${task.id}`" class="task-card">
+          <div class="task-card-head">
+            <h3 :title="task.torrent_name">{{ task.torrent_name }}</h3>
+            <AppBadge :color="statusLabel(task.status).color">
+              {{ statusLabel(task.status).label }}
+            </AppBadge>
+          </div>
+          <div v-if="task.external_qb" class="external-qb-tag">qB 未关联 · {{ task.content_path || task.save_path || '' }}</div>
+          <div class="task-meta-grid">
+            <div><span>来源</span>{{ task.external_qb ? 'qB' : (task.site || '-') }}</div>
+            <div><span>大小</span>{{ formatSize(task.size) }}</div>
+            <div><span>qB</span>{{ task.qb_state || '-' }}</div>
+            <div v-if="task.download_speed"><span>速度</span>{{ formatSpeed(task.download_speed) }}</div>
+          </div>
+          <div class="mobile-progress">
+            <template v-if="progressPercent(task) !== null">
+              <div class="progress-bar"><span :style="{ width: progressPercent(task) + '%' }"></span></div>
+              <div class="progress-meta">
+                {{ progressPercent(task) }}%
+                <span v-if="task.eta"> · ETA {{ formatEta(task.eta) }}</span>
+              </div>
+            </template>
+            <span v-else class="text-dim">进度 -</span>
+          </div>
+          <div v-if="task.tracker_msg" class="tracker-msg mobile" :title="task.tracker_msg">{{ task.tracker_msg }}</div>
+          <div class="mobile-actions">
+            <AppButton
+              v-if="canPause(task)"
+              size="sm"
+              variant="ghost"
+              :loading="actingId === actionKey(task, 'pause')"
+              @click="runTaskAction(task, 'pause')"
+            >暂停</AppButton>
+            <AppButton
+              v-if="canResume(task)"
+              size="sm"
+              variant="success"
+              :loading="actingId === actionKey(task, 'resume')"
+              @click="runTaskAction(task, 'resume')"
+            >继续</AppButton>
+            <AppButton
+              v-if="task.external_qb"
+              size="sm"
+              variant="ghost"
+              :loading="actingId === actionKey(task, 'import')"
+              @click="runTaskAction(task, 'import')"
+            >导入</AppButton>
+            <AppButton
+              v-if="canOrganize(task)"
+              size="sm"
+              variant="success"
+              :loading="actingId === actionKey(task, 'organize')"
+              @click="runTaskAction(task, 'organize')"
+            >整理</AppButton>
+            <AppButton
+              v-if="canRetry(task)"
+              size="sm"
+              variant="success"
+              :loading="actingId === actionKey(task, 'retry')"
+              @click="runTaskAction(task, 'retry')"
+            >重试</AppButton>
+            <AppButton
+              size="sm"
+              variant="ghost"
+              :loading="actingId === actionKey(task, 'delete')"
+              @click="runTaskAction(task, 'delete')"
+            >删任务</AppButton>
+            <AppButton
+              size="sm"
+              variant="danger"
+              :loading="actingId === actionKey(task, 'delete-files')"
+              @click="runTaskAction(task, 'delete-files')"
+            >删文件</AppButton>
+          </div>
+        </article>
+      </div>
     </div>
   </div>
 </template>
@@ -418,6 +498,7 @@ onUnmounted(() => {
 .delete-files-toggle em { color: var(--text-muted); font-style: normal; }
 .delete-files-toggle.danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.tasks-section { display: block; }
 .tasks-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); -webkit-overflow-scrolling: touch; }
 .tasks-table { width: 100%; border-collapse: collapse; min-width: 1120px; }
 .tasks-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
@@ -431,21 +512,31 @@ onUnmounted(() => {
 .progress-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 .progress-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .actions { display: flex; align-items: center; gap: 8px; }
+.task-cards { display: none; }
+.task-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); padding: 14px; }
+.task-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.task-card-head h3 { min-width: 0; margin: 0; font-size: 15px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; }
+.task-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; color: var(--text-dim); font-size: 12px; }
+.task-meta-grid div { min-width: 0; overflow-wrap: anywhere; }
+.task-meta-grid span { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 2px; }
+.mobile-progress { margin-top: 12px; }
+.mobile-progress .progress-bar { width: 100%; }
+.mobile-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tracker-msg.mobile { max-width: none; white-space: normal; margin-top: 10px; }
 
 @media (max-width: 768px) {
   .tasks-header { flex-direction: column; align-items: stretch; }
   .tasks-header h2 { font-size: 18px; }
   .header-actions { justify-content: space-between; flex-wrap: wrap; }
-  .tasks-table-wrap { border-radius: 16px; margin: 0 -2px; }
-  .tasks-table { min-width: 820px; }
-  .tasks-table th:nth-child(5), .tasks-table td:nth-child(5),
-  .tasks-table th:nth-child(8), .tasks-table td:nth-child(8) { display: none; }
-  .tasks-table th, .tasks-table td { padding: 8px; font-size: 12px; }
-  .name-cell { max-width: 240px; }
-  .progress-cell { min-width: 126px; }
-  .progress-bar { width: 96px; }
-  .actions { flex-wrap: wrap; gap: 6px; }
+  .tasks-table-wrap { display: none; }
+  .task-cards { display: flex; flex-direction: column; gap: 12px; }
   .cleanup-list { max-height: 46vh; }
   .modal-actions { display: grid; grid-template-columns: 1fr 1fr; }
 }
+@media (max-width: 420px) {
+  .tasks-view { padding: 16px; }
+  .header-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .task-meta-grid { grid-template-columns: 1fr; }
+}
+
 </style>
