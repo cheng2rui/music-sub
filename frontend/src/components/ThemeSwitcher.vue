@@ -5,6 +5,7 @@ const theme = useThemeStore()
 const options = [
   { value: 'dark', label: '🌙 深色' },
   { value: 'light', label: '☀️ 浅色' },
+  { value: 'purple', label: '🟣 紫色' },
   { value: 'dark-glass', label: '🔮 深色毛玻璃' },
   { value: 'light-glass', label: '☁️ 浅色毛玻璃' }
 ]

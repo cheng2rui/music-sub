@@ -71,7 +71,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.7.9</div>
+        <div class="version-tag">v0.7.10</div>
       </div>
     </aside>
 
@@ -118,6 +118,7 @@ function handleLogout() {
   min-width: 240px;
   background: var(--bg-elevated);
   border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   padding: 16px 0;
@@ -184,7 +185,7 @@ function handleLogout() {
   line-height: 1;
   background: var(--surface);
   border: 1px solid transparent;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
 }
 .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-bottom {
@@ -267,7 +268,8 @@ function handleLogout() {
     min-height: 50px;
     padding: 0 max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left));
     background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-    backdrop-filter: blur(16px);
+    backdrop-filter: blur(max(16px, var(--blur-strength))) saturate(1.25);
+    -webkit-backdrop-filter: blur(max(16px, var(--blur-strength))) saturate(1.25);
   }
   .page-title { font-size: 16px; }
   .main-content { overflow: hidden; }
@@ -286,7 +288,8 @@ function handleLogout() {
     padding: 5px max(8px, env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
     gap: 5px;
     overflow: hidden;
-    backdrop-filter: blur(18px);
+    backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.25);
+    -webkit-backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.25);
   }
   .bottom-tab {
     min-width: 0;

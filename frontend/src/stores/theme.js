@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
-const THEMES = ['dark', 'light', 'dark-glass', 'light-glass']
+const THEMES = ['dark', 'light', 'purple', 'dark-glass', 'light-glass']
 
 export const useThemeStore = defineStore('theme', () => {
   const stored = localStorage.getItem('music_sub_theme')

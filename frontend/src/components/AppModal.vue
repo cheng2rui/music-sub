@@ -34,15 +34,16 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 <style scoped>
 .modal-overlay {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: var(--overlay-bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
   padding: 16px;
 }
 .modal-box {
-  background: var(--surface);
+  background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
   min-width: 360px;
   max-width: 90vw;
   max-height: 90vh;
