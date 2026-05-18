@@ -34,6 +34,12 @@ const routes = [
     component: () => import('@/views/TasksView.vue')
   },
   {
+    path: '/assistant',
+    name: 'assistant',
+    meta: { title: '智能助手' },
+    component: () => import('@/views/AssistantView.vue')
+  },
+  {
     path: '/library',
     name: 'library',
     meta: { title: '音乐库' },

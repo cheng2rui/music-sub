@@ -1,6 +1,6 @@
 """ORM models."""
 import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Text
 from app.db import Base
 
 
@@ -31,6 +31,45 @@ class DownloadTask(Base):
     link_path = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+
+
+class AssistantConversation(Base):
+    __tablename__ = "assistant_conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(255), default="新对话")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class AssistantMessage(Base):
+    __tablename__ = "assistant_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(Integer, nullable=False)
+    role = Column(String(50), nullable=False)  # user / assistant / tool / system
+    content = Column(Text, default="")
+    tool_name = Column(String(100), nullable=True)
+    tool_call_id = Column(String(100), nullable=True)
+    tool_args_json = Column(Text, nullable=True)
+    tool_result_json = Column(Text, nullable=True)
+    status = Column(String(50), default="done")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class AssistantAction(Base):
+    __tablename__ = "assistant_actions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action_id = Column(String(64), unique=True, nullable=False)
+    conversation_id = Column(Integer, nullable=False)
+    tool_name = Column(String(100), nullable=False)
+    tool_args_json = Column(Text, default="{}")
+    result_json = Column(Text, nullable=True)
+    risk = Column(String(50), default="low")
+    status = Column(String(50), default="pending")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 class MusicFile(Base):

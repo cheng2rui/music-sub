@@ -75,6 +75,27 @@ class AuthConfig(BaseModel):
     password_hash: str = "5e968ce47ce4a17e3823c29332a39d049a8d0afb08d157eb6224625f92671a51"
 
 
+class AssistantProviderConfig(BaseModel):
+    provider: str = "openai_compatible"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    temperature: float = 0.2
+    timeout_seconds: int = 60
+
+
+class AssistantConfig(BaseModel):
+    enabled: bool = False
+    provider: AssistantProviderConfig = AssistantProviderConfig()
+    max_history_messages: int = 20
+    require_confirm_for_download: bool = True
+    require_confirm_for_delete: bool = True
+    require_confirm_for_apply_tools: bool = True
+    allow_online_download: bool = False
+    allow_library_write: bool = True
+    allow_task_delete: bool = False
+
+
 class AppConfig(BaseModel):
     sites: dict[str, SiteConfig] = {}
     qbittorrent: QBConfig = QBConfig()
@@ -83,6 +104,7 @@ class AppConfig(BaseModel):
     scheduler: SchedulerConfig = SchedulerConfig()
     notify: NotifyConfig = NotifyConfig()
     auth: AuthConfig = AuthConfig()
+    assistant: AssistantConfig = AssistantConfig()
 
 
 def load_config(path: str = None) -> AppConfig:

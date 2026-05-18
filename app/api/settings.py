@@ -82,6 +82,27 @@ class NotifySettingInput(BaseModel):
     telegram: TelegramNotifyInput = TelegramNotifyInput()
 
 
+class AssistantProviderInput(BaseModel):
+    provider: str = "openai_compatible"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    temperature: float = 0.2
+    timeout_seconds: int = 60
+
+
+class AssistantSettingInput(BaseModel):
+    enabled: bool = False
+    provider: AssistantProviderInput = AssistantProviderInput()
+    max_history_messages: int = 20
+    require_confirm_for_download: bool = True
+    require_confirm_for_delete: bool = True
+    require_confirm_for_apply_tools: bool = True
+    allow_online_download: bool = False
+    allow_library_write: bool = True
+    allow_task_delete: bool = False
+
+
 class AllSettings(BaseModel):
     sites: dict[str, SiteSettingInput] = {}
     qbittorrent: QBSettingInput = QBSettingInput()
@@ -89,6 +110,7 @@ class AllSettings(BaseModel):
     scraper: ScraperSettingInput = ScraperSettingInput()
     scheduler: SchedulerSettingInput = SchedulerSettingInput()
     notify: NotifySettingInput = NotifySettingInput()
+    assistant: AssistantSettingInput = AssistantSettingInput()
 
 
 @router.get("/", response_model=AllSettings)
@@ -103,6 +125,7 @@ def get_settings():
         notify=NotifySettingInput(
             telegram=TelegramNotifyInput(**cfg_module.config.notify.telegram.model_dump()),
         ),
+        assistant=AssistantSettingInput(**cfg_module.config.assistant.model_dump()),
     )
     # Mask sensitive fields
     for s in data.sites.values():
@@ -116,6 +139,8 @@ def get_settings():
         data.qbittorrent.password = QB_PASSWORD_MASK
     if data.notify.telegram.bot_token:
         data.notify.telegram.bot_token = _mask_secret(data.notify.telegram.bot_token, 6)
+    if data.assistant.provider.api_key:
+        data.assistant.provider.api_key = _mask_secret(data.assistant.provider.api_key, 6)
     return data
 
 
@@ -131,6 +156,7 @@ def save_settings(settings: AllSettings):
         "scraper": settings.scraper.model_dump(),
         "scheduler": settings.scheduler.model_dump(),
         "notify": settings.notify.model_dump(),
+        "assistant": settings.assistant.model_dump(),
     }
 
     # For sites, merge with existing to preserve unmasked secrets
@@ -154,6 +180,10 @@ def save_settings(settings: AllSettings):
     # Preserve telegram bot_token only if the exact generated mask was submitted.
     if _is_unchanged_mask(raw["notify"]["telegram"].get("bot_token", ""), cfg_module.config.notify.telegram.bot_token, 6):
         raw["notify"]["telegram"]["bot_token"] = cfg_module.config.notify.telegram.bot_token
+
+    # Preserve assistant api_key only if the exact generated mask was submitted.
+    if _is_unchanged_mask(raw["assistant"]["provider"].get("api_key", ""), cfg_module.config.assistant.provider.api_key, 6):
+        raw["assistant"]["provider"]["api_key"] = cfg_module.config.assistant.provider.api_key
 
     # Write YAML
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:

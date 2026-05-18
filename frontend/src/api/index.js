@@ -95,6 +95,22 @@ export const deleteQbTask = (hash, deleteFiles = false) => authFetch(`/api/tasks
 export const importQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/import`, { method: 'POST' }).then(r => r.json())
 export const organizeQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/organize`, { method: 'POST' }).then(r => r.json())
 
+// ============ Assistant ============
+export const getAssistantCapabilities = () => authFetch('/api/assistant/capabilities').then(r => r.json())
+export const getAssistantConversations = () => authFetch('/api/assistant/conversations').then(r => r.json())
+export const createAssistantConversation = (title = '新对话') => authFetch('/api/assistant/conversations', {
+  method: 'POST',
+  body: JSON.stringify({ title })
+}).then(r => r.json())
+export const getAssistantMessages = (id) => authFetch(`/api/assistant/conversations/${id}/messages`).then(r => r.json())
+export const deleteAssistantConversation = (id) => authFetch(`/api/assistant/conversations/${id}`, { method: 'DELETE' }).then(r => r.json())
+export const sendAssistantMessage = (message, conversationId = null) => authFetch('/api/assistant/chat', {
+  method: 'POST',
+  body: JSON.stringify({ message, conversation_id: conversationId })
+}).then(r => r.json())
+export const confirmAssistantAction = (actionId) => authFetch(`/api/assistant/actions/${actionId}/confirm`, { method: 'POST' }).then(r => r.json())
+export const cancelAssistantAction = (actionId) => authFetch(`/api/assistant/actions/${actionId}/cancel`, { method: 'POST' }).then(r => r.json())
+
 // ============ Library ============
 export const getLibraryStats = () => authFetch('/api/library/stats').then(r => r.json())
 export const getLibrary = (params = {}) => {

@@ -15,7 +15,18 @@ const settings = ref({
   paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
   scraper: { sources: ['qqmusic', 'netease', 'kugou', 'migu', 'kuwo', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false },
   scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
-  notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } }
+  notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } },
+  assistant: {
+    enabled: false,
+    provider: { provider: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60 },
+    max_history_messages: 20,
+    require_confirm_for_download: true,
+    require_confirm_for_delete: true,
+    require_confirm_for_apply_tools: true,
+    allow_online_download: false,
+    allow_library_write: true,
+    allow_task_delete: false
+  }
 })
 const loading = ref(false)
 const saving = ref(false)
@@ -284,6 +295,48 @@ onMounted(loadAll)
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_error" /><span>错误告警</span></label>
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_cleanup_candidates" /><span>清理候选提醒</span></label>
           </div>
+        </div>
+      </div>
+
+      <!-- 智能助手 -->
+      <div class="settings-section">
+        <h3>🤖 智能助手</h3>
+        <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.assistant.enabled" /><span>启用智能助手</span></label>
+        <div class="fields-grid">
+          <div class="field">
+            <label>Provider</label>
+            <select v-model="settings.assistant.provider.provider">
+              <option value="openai_compatible">OpenAI Compatible</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Base URL</label>
+            <input v-model="settings.assistant.provider.base_url" placeholder="http://localhost:8180/v1" />
+          </div>
+          <div class="field">
+            <label>API Key</label>
+            <input v-model="settings.assistant.provider.api_key" type="password" placeholder="sk-..." />
+          </div>
+          <div class="field">
+            <label>Model</label>
+            <input v-model="settings.assistant.provider.model" placeholder="gpt-4o-mini / claude..." />
+          </div>
+          <div class="field">
+            <label>Temperature</label>
+            <input v-model.number="settings.assistant.provider.temperature" type="number" min="0" max="2" step="0.1" />
+          </div>
+          <div class="field">
+            <label>超时秒数</label>
+            <input v-model.number="settings.assistant.provider.timeout_seconds" type="number" min="10" max="300" />
+          </div>
+        </div>
+        <div class="toggle-list" style="margin-top:12px">
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_download" /><span>下载前需要确认</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_delete" /><span>删除前需要确认</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_apply_tools" /><span>中高风险工具需要确认</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_online_download" /><span>允许在线音乐下载工具</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_library_write" /><span>允许音乐库写入工具</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_task_delete" /><span>允许任务删除工具</span></label>
         </div>
       </div>
 

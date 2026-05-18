@@ -41,6 +41,7 @@ function handleLogout() {
         <router-link to="/search">🔍 PT搜索</router-link>
         <router-link to="/online">🎧 在线下载</router-link>
         <router-link to="/tasks">⬇️ 任务列表</router-link>
+        <router-link to="/assistant">🤖 智能助手</router-link>
         <router-link to="/library">🎶 音乐库</router-link>
         <router-link to="/logs">📜 日志</router-link>
         <router-link to="/settings">⚙️ 设置</router-link>
@@ -51,7 +52,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.6.30</div>
+        <div class="version-tag">v0.7.0-dev</div>
       </div>
     </aside>
 
@@ -78,6 +79,7 @@ function handleLogout() {
       <router-link to="/search" title="PT搜索">🔍</router-link>
       <router-link to="/online" title="在线下载">🎧</router-link>
       <router-link to="/tasks" title="任务">⬇️</router-link>
+      <router-link to="/assistant" title="助手">🤖</router-link>
       <router-link to="/library" title="音乐库">🎶</router-link>
       <router-link to="/logs" title="日志">📜</router-link>
       <router-link to="/settings" title="设置">⚙️</router-link>
