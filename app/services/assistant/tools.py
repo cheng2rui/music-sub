@@ -292,8 +292,9 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
-def openai_tools() -> list[dict[str, Any]]:
-    return [
+def openai_tools(enabled_names: set[str] | list[str] | None = None) -> list[dict[str, Any]]:
+    enabled = set(enabled_names or [])
+    tools = [
         {
             "type": "function",
             "function": {
@@ -304,6 +305,7 @@ def openai_tools() -> list[dict[str, Any]]:
         }
         for name, spec in TOOL_SPECS.items()
     ]
+    return [tool for tool in tools if not enabled or tool["function"]["name"] in enabled]
 
 
 def execute_tool(db: Session, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -318,7 +320,8 @@ def tool_risk(name: str) -> str:
     return (TOOL_SPECS.get(name) or {}).get("risk", "high")
 
 
-def tool_catalog() -> list[dict[str, Any]]:
+def tool_catalog(enabled_names: set[str] | list[str] | None = None) -> list[dict[str, Any]]:
+    enabled = set(enabled_names or [])
     group_map = {
         "get_system_status": "系统",
         "get_library_stats": "音乐库",
@@ -342,6 +345,7 @@ def tool_catalog() -> list[dict[str, Any]]:
             "risk": spec.get("risk", "high"),
             "group": group_map.get(name, "其他"),
             "requires_confirm_by_default": spec.get("risk") in {"medium", "high"},
+            "enabled": (not enabled or name in enabled),
         }
         for name, spec in TOOL_SPECS.items()
     ]

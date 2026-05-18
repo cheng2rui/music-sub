@@ -102,6 +102,7 @@ class AssistantSettingInput(BaseModel):
     allow_online_download: bool = False
     allow_library_write: bool = True
     allow_task_delete: bool = False
+    enabled_tools: list[str] = []
 
 
 class AllSettings(BaseModel):

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -25,7 +25,8 @@ const settings = ref({
     require_confirm_for_apply_tools: true,
     allow_online_download: false,
     allow_library_write: true,
-    allow_task_delete: false
+    allow_task_delete: false,
+    enabled_tools: []
   }
 })
 const loading = ref(false)
@@ -35,6 +36,7 @@ const testingTg = ref(false)
 const testingSite = ref('')
 const scheduler = ref([])
 const assistantProviders = ref([])
+const assistantTools = ref([])
 const testingAssistant = ref(false)
 
 // Password change
@@ -56,6 +58,8 @@ async function loadAll() {
     scheduler.value = await getScheduler()
     const providerData = await getAssistantProviders()
     assistantProviders.value = providerData.providers || []
+    const toolData = await getAssistantTools()
+    assistantTools.value = toolData.tools || []
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
@@ -117,6 +121,38 @@ function applyAssistantPreset(presetId) {
   if (!preset) return
   settings.value.assistant.provider.base_url = preset.base_url
   settings.value.assistant.provider.runtime = preset.runtime || provider.runtime || 'openai_compatible'
+}
+
+function activeAssistantTools() {
+  const selected = settings.value.assistant.enabled_tools || []
+  if (selected.includes('__none__')) return []
+  if (!selected.length) return assistantTools.value.map(t => t.name)
+  return selected
+}
+
+function isAssistantToolEnabled(name) {
+  return activeAssistantTools().includes(name)
+}
+
+function toggleAssistantTool(name) {
+  const all = assistantTools.value.map(t => t.name)
+  let selected = activeAssistantTools()
+  if (selected.includes(name)) selected = selected.filter(n => n !== name)
+  else selected = [...selected, name]
+  selected = selected.filter(n => all.includes(n))
+  settings.value.assistant.enabled_tools = selected.length ? selected : ['__none__']
+}
+
+function selectAllAssistantTools() {
+  settings.value.assistant.enabled_tools = assistantTools.value.map(t => t.name)
+}
+
+function resetAssistantToolsDefault() {
+  settings.value.assistant.enabled_tools = []
+}
+
+function riskColor(risk) {
+  return risk === 'high' ? 'red' : risk === 'medium' ? 'orange' : 'green'
 }
 
 async function handleTestAssistant() {
@@ -392,6 +428,28 @@ onMounted(loadAll)
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_library_write" /><span>允许音乐库写入工具</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_task_delete" /><span>允许任务删除工具</span></label>
         </div>
+        <div class="assistant-tools-box">
+          <div class="assistant-tools-head">
+            <div>
+              <strong>助手工具开关</strong>
+              <div class="text-dim">控制哪些工具会暴露给模型。默认模式为全部启用。</div>
+            </div>
+            <div class="header-actions">
+              <AppButton variant="ghost" size="sm" @click="selectAllAssistantTools">全选</AppButton>
+              <AppButton variant="ghost" size="sm" @click="resetAssistantToolsDefault">恢复默认</AppButton>
+            </div>
+          </div>
+          <div class="assistant-tool-grid">
+            <label v-for="tool in assistantTools" :key="tool.name" class="assistant-tool-item" :class="{ disabled: !isAssistantToolEnabled(tool.name) }">
+              <input type="checkbox" :checked="isAssistantToolEnabled(tool.name)" @change="toggleAssistantTool(tool.name)" />
+              <span class="assistant-tool-main">
+                <span class="assistant-tool-name">{{ tool.name }}</span>
+                <small>{{ tool.group }} · {{ tool.description }}</small>
+              </span>
+              <AppBadge :color="riskColor(tool.risk)">{{ tool.risk }}</AppBadge>
+            </label>
+          </div>
+        </div>
       </div>
 
       <!-- 账号安全 -->
@@ -442,9 +500,18 @@ onMounted(loadAll)
 .pwd-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .pwd-form input { flex: 1; min-width: 160px; }
 .save-bar { position: sticky; bottom: 0; background: var(--bg); padding: 16px 0; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+.fields-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.assistant-tools-box { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; background: var(--surface-hover); display: flex; flex-direction: column; gap: 12px; }
+.assistant-tools-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.assistant-tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.assistant-tool-item { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; background: var(--surface); cursor: pointer; }
+.assistant-tool-item.disabled { opacity: .55; }
+.assistant-tool-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.assistant-tool-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text); }
+.assistant-tool-main small { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 768px) {
-  .site-grid { grid-template-columns: 1fr; }
+  .site-grid, .fields-grid, .assistant-tool-grid { grid-template-columns: 1fr; }
   .pwd-form { flex-direction: column; align-items: stretch; }
   .pwd-form input { min-width: unset; }
   .scheduler-row { flex-direction: column; align-items: flex-start; gap: 8px; }

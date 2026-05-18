@@ -63,14 +63,19 @@ class AssistantService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _enabled_tool_names(self) -> set[str]:
+        return set(cfg_module.config.assistant.enabled_tools or [])
+
     def capabilities(self) -> dict[str, Any]:
         cfg = cfg_module.config.assistant
+        enabled_tools = self._enabled_tool_names()
+        tools = openai_tools(enabled_tools)
         return {
             "enabled": cfg.enabled,
             "provider": cfg.provider.provider,
             "model": cfg.provider.model,
-            "tools": [t["function"]["name"] for t in openai_tools()],
-            "tool_catalog": tool_catalog(),
+            "tools": [t["function"]["name"] for t in tools],
+            "tool_catalog": tool_catalog(enabled_tools),
             "risk_control": {
                 "download": cfg.require_confirm_for_download,
                 "delete": cfg.require_confirm_for_delete,
@@ -156,7 +161,7 @@ class AssistantService:
 
         try:
             for _ in range(4):
-                assistant_msg = client.chat(messages, tools=openai_tools())
+                assistant_msg = client.chat(messages, tools=openai_tools(self._enabled_tool_names()))
                 tool_calls = assistant_msg.get("tool_calls") or []
                 if not tool_calls:
                     content = assistant_msg.get("content") or "我查到了，但模型没有生成文字总结。"
@@ -221,6 +226,9 @@ class AssistantService:
 
     def _tool_allowed(self, name: str) -> tuple[bool, str]:
         cfg = cfg_module.config.assistant
+        enabled_tools = self._enabled_tool_names()
+        if enabled_tools and name not in enabled_tools:
+            return False, f"工具 {name} 已在设置中禁用。"
         if name == "download_online_song" and not cfg.allow_online_download:
             return False, "请先在设置中打开“允许在线音乐下载工具”。"
         if name in {"rescrape_album", "organize_task"} and not cfg.allow_library_write:

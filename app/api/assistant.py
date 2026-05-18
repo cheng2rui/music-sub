@@ -63,8 +63,9 @@ def providers():
 
 
 @router.get("/tools")
-def tools():
-    return {"tools": tool_catalog()}
+def tools(db: Session = Depends(get_db)):
+    cfg = AssistantService(db)._enabled_tool_names()
+    return {"tools": tool_catalog(cfg)}
 
 
 @router.post("/providers/test")
