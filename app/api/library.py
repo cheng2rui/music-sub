@@ -270,7 +270,72 @@ def _is_unknown_artist(artist: str | None) -> bool:
     return a in {"", "unknown artist", "未知艺人", "unknown", "various artists"}
 
 
-_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates")
+def _library_path_album_artist(file_path: str | None) -> str:
+    """Infer album artist from configured library path: {artist}/{album}/{track}."""
+    if not file_path:
+        return ""
+    try:
+        rel = Path(file_path).resolve().relative_to(Path(config.paths.library).resolve())
+    except Exception:
+        return ""
+    parts = rel.parts
+    if len(parts) < 3 or parts[0] == parts[1]:
+        return ""
+    return parts[0]
+
+
+def _album_artist_conflict_items(files: list[MusicFile], limit: int) -> tuple[int, list[dict]]:
+    """Find physical album folders whose rows disagree on album_artist.
+
+    This catches old libraries where rows were backfilled from track artist and
+    one album now appears split because of feat./guest artists. Grouping by
+    physical parent folder avoids false positives from same-named albums by
+    different artists.
+    """
+    groups: dict[str, dict] = {}
+    for f in files:
+        if not f.file_path:
+            continue
+        try:
+            folder = str(Path(f.file_path).parent)
+        except Exception:
+            continue
+        bucket = groups.setdefault(folder, {"files": [], "artists": set(), "album": f.album or "", "suggested": ""})
+        bucket["files"].append(f)
+        aa = (f.album_artist or f.artist or "").strip()
+        if aa:
+            bucket["artists"].add(aa)
+        if not bucket.get("album") and f.album:
+            bucket["album"] = f.album
+        if not bucket.get("suggested"):
+            bucket["suggested"] = _library_path_album_artist(f.file_path)
+    items = []
+    total_tracks = 0
+    for folder, bucket in groups.items():
+        artists = sorted(bucket["artists"])
+        rows = bucket["files"]
+        if len(rows) < 2 or len(artists) <= 1:
+            continue
+        sample = rows[0]
+        suggested = bucket.get("suggested") or artists[0]
+        total_tracks += len(rows)
+        items.append({
+            "artist": suggested or UNKNOWN_ARTIST,
+            "album": _display_album(bucket.get("album") or sample.album),
+            "track_count": len(rows),
+            "sample_track_id": sample.id,
+            "sample_path": sample.file_path,
+            "has_cover": _has_cover(sample.file_path),
+            "file_ids": [r.id for r in rows],
+            "artists": artists,
+            "suggested_album_artist": suggested,
+            "folder": folder,
+        })
+    items.sort(key=lambda x: (x["track_count"], len(x.get("artists") or [])), reverse=True)
+    return total_tracks, items[:limit]
+
+
+_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts")
 
 
 @router.get("/health")
@@ -323,7 +388,12 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
         if _has_cue(f):
             _add("cue_candidates", f)
 
+    conflict_total, conflict_items = _album_artist_conflict_items(files, limit)
+    totals["album_artist_conflicts"] = conflict_total
+
     def _serialize(bucket_key: str):
+        if bucket_key == "album_artist_conflicts":
+            return conflict_items
         items = list(buckets[bucket_key].values())
         items.sort(key=lambda x: x["track_count"], reverse=True)
         return items[:limit]

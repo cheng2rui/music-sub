@@ -47,7 +47,7 @@ function openToolbox(ctx = {}) {
 const healthLoading = ref(false)
 const healthRescraping = ref('')
 const healthKind = ref('missing_cover')
-const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0, cue_candidates: 0 })
+const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0, cue_candidates: 0, album_artist_conflicts: 0 })
 const healthItems = ref([])
 const healthKinds = [
   { id: 'missing_cover', label: '缺封面' },
@@ -55,10 +55,11 @@ const healthKinds = [
   { id: 'missing_duration', label: '缺时长' },
   { id: 'unknown_artist', label: '艺人异常' },
   { id: 'unscraped', label: '未刮削' },
-  { id: 'cue_candidates', label: 'CUE整轨' }
+  { id: 'cue_candidates', label: 'CUE整轨' },
+  { id: 'album_artist_conflicts', label: '专辑艺人冲突' }
 ]
 const healthLabels = Object.fromEntries(healthKinds.map(k => [k.id, k.label]))
-const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped', 'cue_candidates']
+const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped', 'cue_candidates', 'album_artist_conflicts']
 
 async function openHealthModal(kind = healthKind.value) {
   showHealthModal.value = true
@@ -115,6 +116,11 @@ async function batchRescrapeCurrentKind() {
   if (!healthItems.value.length) return
   if (healthKind.value === 'cue_candidates') {
     openToolbox({ file_ids: healthItems.value.map(it => it.sample_track_id).filter(Boolean), preferred_tool: 'cue_candidates' })
+    return
+  }
+  if (healthKind.value === 'album_artist_conflicts') {
+    const ids = healthItems.value.flatMap(it => Array.isArray(it.file_ids) ? it.file_ids : [it.sample_track_id]).filter(Boolean)
+    openToolbox({ file_ids: ids, preferred_tool: 'album_artist' })
     return
   }
   batchBusy.value = true
@@ -540,7 +546,7 @@ onMounted(() => { loadStats(); loadAlbums() })
             :disabled="!healthItems.length"
             :loading="batchBusy"
             @click="batchRescrapeCurrentKind"
-          >{{ healthKind === 'cue_candidates' ? '打开工具箱批量拆分' : `批量重刮削当前 ${healthItems.length} 项` }}</AppButton>
+          >{{ healthKind === 'cue_candidates' ? '打开工具箱批量拆分' : healthKind === 'album_artist_conflicts' ? '打开工具箱批量修复' : `批量重刮削当前 ${healthItems.length} 项` }}</AppButton>
         </div>
         <div v-if="batchJob" class="job-progress">
           <div class="job-progress-head">
@@ -568,7 +574,10 @@ onMounted(() => { loadStats(); loadAlbums() })
           <div v-for="item in healthItems" :key="`${item.artist}-${item.album}`" class="health-row">
             <div class="health-info" @click="openHealthAlbum(item)">
               <div class="health-album">{{ item.album }}</div>
-              <div class="health-sub">{{ item.artist }} · {{ item.track_count }} 首</div>
+              <div class="health-sub">
+                {{ item.artist }} · {{ item.track_count }} 首
+                <template v-if="item.artists?.length"> · 冲突：{{ item.artists.join(' / ') }}</template>
+              </div>
             </div>
             <div class="health-actions">
               <AppBadge :color="item.has_cover ? 'green' : 'orange'">
@@ -578,8 +587,8 @@ onMounted(() => { loadStats(); loadAlbums() })
                 variant="primary"
                 size="sm"
                 :loading="healthRescraping === `${item.artist}::${item.album}`"
-                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : rescrapeHealthAlbum(item)"
-              >{{ healthKind === 'cue_candidates' ? '拆分' : '重刮削' }}</AppButton>
+                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : healthKind === 'album_artist_conflicts' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'album_artist' }) : rescrapeHealthAlbum(item)"
+              >{{ healthKind === 'cue_candidates' ? '拆分' : healthKind === 'album_artist_conflicts' ? '修复' : '重刮削' }}</AppButton>
             </div>
           </div>
         </div>
