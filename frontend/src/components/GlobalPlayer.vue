@@ -52,15 +52,18 @@ async function openNowPanel() {
 }
 
 async function toggleNowPanel() {
-  isNowOpen.value = !isNowOpen.value
   if (isNowOpen.value) {
-    player.closeQueue()
-    await loadTrackDetail()
+    isNowOpen.value = false
+    return
   }
+  player.expand()
+  player.closeQueue()
+  isNowOpen.value = true
+  await loadTrackDetail()
 }
 
 async function handleTitleClick() {
-  await openNowPanel()
+  await toggleNowPanel()
 }
 
 watch(() => player.currentId, () => {
@@ -209,7 +212,7 @@ function formatDuration(seconds) {
 <template>
   <div v-if="player.currentTrack" :class="['global-player', { collapsed: player.isCollapsed }]">
     <button class="collapse-toggle" :title="player.isCollapsed ? '展开播放器' : '缩小播放器'" @click="player.toggleCollapsed">
-      {{ player.isCollapsed ? '▴' : '▾' }}
+      {{ player.isCollapsed ? '‹' : '⌄' }}
     </button>
 
     <button class="player-info" type="button" title="查看正在播放详情" @click="handleTitleClick">
@@ -221,9 +224,11 @@ function formatDuration(seconds) {
     </button>
 
     <div v-show="!player.isCollapsed" class="transport">
-      <button class="transport-btn" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev">⏮</button>
-      <button class="transport-btn" :title="isPlaying ? '暂停' : '播放'" @click="togglePlay">{{ isPlaying ? '⏸' : '▶' }}</button>
-      <button class="transport-btn" title="下一首" :disabled="!player.hasNext" @click="player.playNext">⏭</button>
+      <button class="transport-btn side" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev">⏮</button>
+      <button :class="['transport-btn', 'play-main', { playing: isPlaying }]" :title="isPlaying ? '暂停' : '播放'" @click="togglePlay">
+        <span aria-hidden="true">{{ isPlaying ? 'Ⅱ' : '▶' }}</span>
+      </button>
+      <button class="transport-btn side" title="下一首" :disabled="!player.hasNext" @click="player.playNext">⏭</button>
     </div>
 
     <div v-show="!player.isCollapsed" class="seek-wrap">
@@ -301,40 +306,43 @@ function formatDuration(seconds) {
       <div :style="{ width: seekPercent + '%' }"></div>
     </div>
 
-    <div v-if="isNowOpen && !player.isCollapsed" class="now-panel">
-      <div class="now-cover-wrap">
-        <img v-if="coverUrl" :src="coverUrl" class="now-cover" />
-        <div v-else class="now-cover placeholder">♪</div>
-      </div>
-      <div class="now-content">
-        <div class="now-head">
-          <div>
-            <strong>{{ detailTrack.title || title }}</strong>
-            <span>{{ [detailTrack.artist, detailTrack.album].filter(Boolean).join(' · ') || subtitle || '未知来源' }}</span>
+    <Transition name="player-panel">
+      <div v-if="isNowOpen && !player.isCollapsed" class="now-panel">
+        <div class="now-cover-wrap">
+          <img v-if="coverUrl" :src="coverUrl" class="now-cover" />
+          <div v-else class="now-cover placeholder">♪</div>
+        </div>
+        <div class="now-content">
+          <div class="now-head">
+            <div>
+              <strong>{{ detailTrack.title || title }}</strong>
+              <span>{{ [detailTrack.artist, detailTrack.album].filter(Boolean).join(' · ') || subtitle || '未知来源' }}</span>
+            </div>
+            <button class="queue-close" @click="isNowOpen = false">×</button>
           </div>
-          <button class="queue-close" @click="isNowOpen = false">×</button>
+          <div class="now-meta">
+            <span>{{ formatDuration(detailTrack.duration) }}</span>
+            <span v-if="audioMeta">{{ audioMeta }}</span>
+            <span v-if="trackDetail?.year">{{ trackDetail.year }}</span>
+            <span v-if="trackDetail?.genre">{{ trackDetail.genre }}</span>
+          </div>
+          <div v-if="detailLoading" class="lyrics-box muted">加载曲目信息中...</div>
+          <div v-else-if="parsedLyrics.length" ref="lyricsListRef" class="lyrics-box lyrics-list">
+            <button
+              v-for="(line, idx) in parsedLyrics"
+              :key="`${line.time}-${idx}`"
+              :data-lyric-index="idx"
+              :class="['lyric-line', { active: idx === activeLyricIndex }]"
+              @click="seekTo(line.time)"
+            >{{ line.text }}</button>
+          </div>
+          <pre v-else-if="trackDetail?.lyrics" class="lyrics-box">{{ trackDetail.lyrics }}</pre>
+          <div v-else class="lyrics-box muted">暂无歌词。可以在专辑详情里重新刮削补齐歌词。</div>
         </div>
-        <div class="now-meta">
-          <span>{{ formatDuration(detailTrack.duration) }}</span>
-          <span v-if="audioMeta">{{ audioMeta }}</span>
-          <span v-if="trackDetail?.year">{{ trackDetail.year }}</span>
-          <span v-if="trackDetail?.genre">{{ trackDetail.genre }}</span>
-        </div>
-        <div v-if="detailLoading" class="lyrics-box muted">加载曲目信息中...</div>
-        <div v-else-if="parsedLyrics.length" ref="lyricsListRef" class="lyrics-box lyrics-list">
-          <button
-            v-for="(line, idx) in parsedLyrics"
-            :key="`${line.time}-${idx}`"
-            :data-lyric-index="idx"
-            :class="['lyric-line', { active: idx === activeLyricIndex }]"
-            @click="seekTo(line.time)"
-          >{{ line.text }}</button>
-        </div>
-        <pre v-else-if="trackDetail?.lyrics" class="lyrics-box">{{ trackDetail.lyrics }}</pre>
-        <div v-else class="lyrics-box muted">暂无歌词。可以在专辑详情里重新刮削补齐歌词。</div>
       </div>
-    </div>
+    </Transition>
 
+    <Transition name="player-panel">
     <div v-if="player.isQueueOpen && !player.isCollapsed" class="queue-panel">
       <div class="queue-head">
         <div>
@@ -359,6 +367,7 @@ function formatDuration(seconds) {
         </button>
       </div>
     </div>
+    </Transition>
   </div>
 </template>
 
@@ -377,8 +386,10 @@ function formatDuration(seconds) {
   background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
   border: 1px solid var(--border);
   border-radius: 18px;
-  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.36);
-  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(max(16px, var(--blur-strength))) saturate(1.2);
+  -webkit-backdrop-filter: blur(max(16px, var(--blur-strength))) saturate(1.2);
+  transition: left .28s cubic-bezier(.2,.8,.2,1), right .28s cubic-bezier(.2,.8,.2,1), bottom .28s cubic-bezier(.2,.8,.2,1), width .28s cubic-bezier(.2,.8,.2,1), min-height .28s cubic-bezier(.2,.8,.2,1), padding .28s cubic-bezier(.2,.8,.2,1), border-radius .28s cubic-bezier(.2,.8,.2,1), transform .28s cubic-bezier(.2,.8,.2,1), opacity .2s ease;
 }
 .global-player.collapsed {
   left: auto;
@@ -413,6 +424,20 @@ function formatDuration(seconds) {
 .transport-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .player-close:hover { color: var(--danger); }
 .transport { display: flex; gap: 6px; align-items: center; }
+.play-main {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  color: white;
+  background: radial-gradient(circle at 30% 20%, color-mix(in srgb, white 24%, var(--accent)), var(--accent));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 34%, transparent), inset 0 1px 0 rgba(255,255,255,.28);
+  transform: translateZ(0);
+}
+.play-main span { transform: translateX(1px); font-size: 18px; font-weight: 900; line-height: 1; }
+.play-main.playing span { transform: none; letter-spacing: -0.12em; }
+.play-main:hover:not(:disabled) { color: white; background: var(--accent-hover); transform: translateY(-1px) scale(1.03); }
+.transport-btn.side { background: transparent; border-color: transparent; }
+.transport-btn.side:hover:not(:disabled) { border-color: var(--border); }
 .player-info {
   min-width: 180px;
   max-width: 360px;
@@ -554,11 +579,13 @@ function formatDuration(seconds) {
   max-height: min(460px, calc(100vh - 160px));
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--bg-elevated) 98%, transparent);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 99%, transparent);
+  border: 1px solid var(--border-strong, var(--border));
   border-radius: 18px;
-  box-shadow: 0 18px 48px rgba(0,0,0,.42);
+  box-shadow: var(--shadow-soft);
   overflow: hidden;
+  backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.2);
+  -webkit-backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.2);
 }
 .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
 
@@ -579,11 +606,22 @@ function formatDuration(seconds) {
 .now-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-muted); font-size: 12px; }
 .now-meta span:not(:last-child)::after { content: '·'; margin-left: 8px; color: var(--text-muted); }
 .lyrics-box { min-height: 128px; max-height: 220px; overflow-y: auto; margin: 0; padding: 12px; border-radius: 14px; background: var(--surface); color: var(--text-dim); font-size: 12px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
-.lyrics-box.muted { display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-muted); }
+.lyrics-box.muted { display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-dim); border: 1px dashed var(--border); }
 .lyrics-list { display: flex; flex-direction: column; gap: 4px; padding: 12px 12px; }
 .lyric-line { width: 100%; text-align: center; border: 0; background: transparent; color: var(--text-muted); padding: 4px 6px; cursor: pointer; font-size: 13px; line-height: 1.6; transition: color .15s, transform .15s; }
 .lyric-line:hover { color: var(--text-dim); }
 .lyric-line.active { color: var(--text); font-weight: 800; transform: scale(1.04); }
+
+.player-panel-enter-active,
+.player-panel-leave-active {
+  transition: opacity .22s ease, transform .24s cubic-bezier(.2,.8,.2,1), filter .22s ease;
+}
+.player-panel-enter-from,
+.player-panel-leave-to {
+  opacity: 0;
+  transform: translateY(12px) scale(.98);
+  filter: blur(4px);
+}
 
 .queue-head div { display: flex; flex-direction: column; gap: 2px; }
 .queue-head strong { font-size: 14px; }
@@ -591,7 +629,7 @@ function formatDuration(seconds) {
 .queue-list { overflow-y: auto; padding: 6px; }
 .queue-item { width: 100%; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px; align-items: center; border: 0; background: transparent; color: var(--text-dim); border-radius: 12px; padding: 9px 10px; cursor: pointer; text-align: left; }
 .queue-item:hover, .queue-item.active { background: var(--surface-hover); color: var(--text); }
-.queue-index, .queue-duration { font-size: 12px; color: var(--text-muted); }
+.queue-index, .queue-duration { font-size: 12px; color: var(--text-dim); }
 .queue-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .queue-main strong, .queue-main em { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queue-main strong { font-size: 13px; color: var(--text); }
@@ -608,16 +646,44 @@ function formatDuration(seconds) {
     border-radius: 18px;
   }
   .global-player.collapsed {
-    left: max(10px, env(safe-area-inset-left));
+    left: auto;
     right: max(10px, env(safe-area-inset-right));
     bottom: var(--mobile-player-bottom, calc(64px + env(safe-area-inset-bottom)));
-    width: auto;
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 999px;
+    justify-content: center;
+    gap: 0;
+  }
+  .global-player.collapsed .collapse-toggle {
+    width: 38px;
+    height: 38px;
+    border: 0;
+    color: white;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 36%, transparent);
+    font-size: 24px;
+    font-weight: 900;
+  }
+  .global-player.collapsed .player-info,
+  .global-player.collapsed .transport,
+  .global-player.collapsed .seek-wrap,
+  .global-player.collapsed .mini-duration,
+  .global-player.collapsed .panel-toggle,
+  .global-player.collapsed .player-close,
+  .global-player.collapsed .mobile-progress {
+    display: none !important;
   }
   .collapse-toggle, .player-close, .transport-btn, .queue-close {
     width: 30px;
     height: 30px;
     font-size: 14px;
   }
+  .play-main { width: 38px; height: 38px; }
+  .play-main span { font-size: 17px; }
   .player-info { min-width: 0; max-width: none; flex: 1; }
   .player-title { font-size: 13px; }
   .player-sub { font-size: 11px; }

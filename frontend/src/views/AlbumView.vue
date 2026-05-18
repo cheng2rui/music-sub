@@ -104,13 +104,24 @@ function coverUrl() {
   return getAlbumCover(artist.value, album.value)
 }
 
-function playAll(startIndex = 0) {
-  player.playQueue(tracks.value, startIndex)
+async function getAlbumQueueTracks() {
+  // 播放队列必须是整张专辑：分页/局部列表场景下补一次全量专辑曲目，避免只把当前歌曲塞进队列。
+  if (!tracks.value.length || trackPagedMode.value) {
+    tracks.value = await getAlbumTracks(artist.value, album.value)
+    if (!trackTotal.value) trackTotal.value = tracks.value.length
+  }
+  return tracks.value.length ? tracks.value : displayTracks.value
 }
 
-function playTrack(track) {
-  const idx = tracks.value.findIndex(t => t.id === track.id)
-  playAll(idx >= 0 ? idx : 0)
+async function playAll(startIndex = 0) {
+  const queueTracks = await getAlbumQueueTracks()
+  player.playQueue(queueTracks, startIndex)
+}
+
+async function playTrack(track) {
+  const queueTracks = await getAlbumQueueTracks()
+  const idx = queueTracks.findIndex(t => String(t.id) === String(track.id))
+  player.playQueue(queueTracks, idx >= 0 ? idx : 0)
 }
 
 async function rescrapeAlbum() {
@@ -180,7 +191,7 @@ onMounted(loadTracks)
           <span>{{ scrapedCount }}/{{ tracks.length }} 已刮削</span>
         </div>
         <div class="hero-actions">
-          <AppButton variant="primary" size="sm" :disabled="!tracks.length" @click="playAll(0)">播放整张</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="!trackTotal && !displayTracks.length" @click="playAll(0)">播放整张</AppButton>
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
         </div>
       </div>
