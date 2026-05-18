@@ -12,16 +12,18 @@ const theme = useThemeStore()
 const auth = useAuthStore()
 
 const navItems = [
-  { to: '/discover', icon: '🏠', label: '发现', short: '发现' },
+  { to: '/discover', icon: '🏠', label: '发现', short: '发现', mobile: true },
   { to: '/subs', icon: '📡', label: '订阅管理', short: '订阅' },
-  { to: '/search', icon: '🔍', label: 'PT 搜索', short: '搜索' },
+  { to: '/search', icon: '🔍', label: 'PT 搜索', short: '搜索', mobile: true },
   { to: '/online', icon: '🎧', label: '在线下载', short: '在线' },
-  { to: '/tasks', icon: '⬇️', label: '任务列表', short: '任务' },
-  { to: '/assistant', icon: '🤖', label: '智能助手', short: '助手' },
-  { to: '/library', icon: '🎶', label: '音乐库', short: '曲库' },
+  { to: '/tasks', icon: '⬇️', label: '任务列表', short: '任务', mobile: true },
+  { to: '/assistant', icon: '🤖', label: '智能助手', short: '助手', mobile: true },
+  { to: '/library', icon: '🎶', label: '音乐库', short: '曲库', mobile: true },
   { to: '/logs', icon: '📜', label: '日志', short: '日志' },
   { to: '/settings', icon: '⚙️', label: '设置', short: '设置' },
 ]
+
+const mobileNavItems = computed(() => navItems.filter(item => item.mobile))
 
 const pageTitle = computed(() => route.meta?.title || '音乐订阅管理')
 const isGlass = computed(() => theme.current.includes('glass'))
@@ -76,7 +78,7 @@ function handleLogout() {
     <GlobalPlayer />
 
     <nav class="bottom-tabs" aria-label="移动端导航">
-      <router-link v-for="item in navItems" :key="item.to" :to="item.to" class="bottom-tab" :title="item.label">
+      <router-link v-for="item in mobileNavItems" :key="item.to" :to="item.to" class="bottom-tab" :title="item.label">
         <span class="tab-icon" aria-hidden="true">{{ item.icon }}</span>
         <span class="tab-label">{{ item.short }}</span>
       </router-link>
@@ -255,7 +257,7 @@ function handleLogout() {
   .mobile-theme, .mobile-logout { display: flex; }
   .bottom-tabs {
     display: grid;
-    grid-template-columns: repeat(9, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     position: fixed;
     bottom: 0;
     left: 0;
@@ -315,6 +317,6 @@ function handleLogout() {
   }
   .bottom-tab { height: 46px; border-radius: 14px; }
   .tab-icon { width: 28px; height: 28px; font-size: 15px; }
-  .tab-label { display: none; }
+  .tab-label { display: block; }
 }
 </style>
