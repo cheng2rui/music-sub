@@ -182,4 +182,14 @@ onMounted(loadAll)
 .song-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .song-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song-sub { font-size: 12px; color: var(--text-dim); }
+
+@media (max-width: 768px) {
+  .section-header { align-items: flex-start; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .section-header h2 { font-size: 18px; }
+  .cover-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
+  .toplist-row { padding: 8px 4px; gap: 8px; }
+  .rank-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .playlist-detail { min-width: 0; }
+  .detail-cover { width: 132px; height: 132px; }
+}
 </style>

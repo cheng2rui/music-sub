@@ -210,12 +210,18 @@ function toggleSite(name) {
 .title-text { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title-reasons { margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 768px) {
-  .search-view { padding: 16px; }
+  .search-bar { flex-direction: column; align-items: stretch; }
+  .search-input { min-width: 0; width: 100%; }
+  .sel { width: 100%; }
+  .toolbar { align-items: flex-start; }
+  .toolbar .right { width: 100%; flex-wrap: wrap; }
+  .site-chip { max-width: 100%; }
   .results-table th:nth-child(4),
   .results-table td:nth-child(4),
   .results-table th:nth-child(8),
   .results-table td:nth-child(8),
   .results-table th:nth-child(9),
   .results-table td:nth-child(9) { display: none; }
+  .results-table th, .results-table td { padding: 8px; font-size: 12px; }
 }
 </style>

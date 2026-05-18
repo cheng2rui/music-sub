@@ -418,7 +418,7 @@ onUnmounted(() => {
 .delete-files-toggle em { color: var(--text-muted); font-style: normal; }
 .delete-files-toggle.danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.tasks-table-wrap { overflow-x: auto; }
+.tasks-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); -webkit-overflow-scrolling: touch; }
 .tasks-table { width: 100%; border-collapse: collapse; min-width: 1120px; }
 .tasks-table th { text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); }
 .tasks-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -431,4 +431,21 @@ onUnmounted(() => {
 .progress-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 .progress-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .actions { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 768px) {
+  .tasks-header { flex-direction: column; align-items: stretch; }
+  .tasks-header h2 { font-size: 18px; }
+  .header-actions { justify-content: space-between; flex-wrap: wrap; }
+  .tasks-table-wrap { border-radius: 16px; margin: 0 -2px; }
+  .tasks-table { min-width: 820px; }
+  .tasks-table th:nth-child(5), .tasks-table td:nth-child(5),
+  .tasks-table th:nth-child(8), .tasks-table td:nth-child(8) { display: none; }
+  .tasks-table th, .tasks-table td { padding: 8px; font-size: 12px; }
+  .name-cell { max-width: 240px; }
+  .progress-cell { min-width: 126px; }
+  .progress-bar { width: 96px; }
+  .actions { flex-wrap: wrap; gap: 6px; }
+  .cleanup-list { max-height: 46vh; }
+  .modal-actions { display: grid; grid-template-columns: 1fr 1fr; }
+}
 </style>

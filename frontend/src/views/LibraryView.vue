@@ -812,11 +812,20 @@ button.scan-health-chip { cursor: pointer; }
 .job-step-msg { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 768px) {
-  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .stats-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat-card { padding: 12px 10px; }
+  .stat-val { font-size: 20px; }
   .toolbar { align-items: stretch; }
-  .sort-select { width: 100%; }
-  .album-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
-  .track-modal { min-width: unset; width: 100%; }
+  .search-input, .sort-select { width: 100%; min-width: 0; }
+  .view-toggles { width: 100%; }
+  .view-btn { flex: 1; }
+  .album-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
+  .album-row { padding: 8px; }
+  .row-count { display: none; }
+  .album-modal, .track-modal, .health-modal { min-width: unset; width: 100%; }
+  .modal-cover { width: 132px; height: 132px; }
+  .health-row { align-items: flex-start; flex-direction: column; }
+  .health-actions { width: 100%; flex-wrap: wrap; }
   .tag-row { flex-direction: column; align-items: stretch; gap: 4px; }
   .tag-row label { min-width: unset; }
 }

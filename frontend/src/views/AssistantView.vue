@@ -238,7 +238,10 @@ onMounted(async () => {
           <h2>Music Sub Copilot</h2>
           <p>可以问：帮我搜周杰伦 FLAC、最近任务状态、库里有没有稻香、列出订阅。</p>
         </div>
-        <AppBadge :color="enabled ? 'green' : 'orange'">{{ enabled ? '已启用' : '未启用' }}</AppBadge>
+        <div class="chat-toolbar-actions">
+          <AppButton class="mobile-new-chat" size="sm" variant="ghost" @click="newConversation">新对话</AppButton>
+          <AppBadge :color="enabled ? 'green' : 'orange'">{{ enabled ? '已启用' : '未启用' }}</AppBadge>
+        </div>
       </div>
 
       <div v-if="errorText" class="error-text">{{ errorText }}</div>
@@ -330,6 +333,8 @@ onMounted(async () => {
 .chat-toolbar { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chat-toolbar h2 { margin: 0; font-size: 20px; }
 .chat-toolbar p { margin: 4px 0 0; color: var(--text-dim); font-size: 13px; }
+.chat-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.mobile-new-chat { display: none; }
 .messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
 .message { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; }
 .message-role { color: var(--text-dim); font-size: 12px; padding-top: 8px; }
@@ -360,5 +365,30 @@ pre { margin: 6px 0 0; white-space: pre-wrap; }
 .confirm-actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; }
 .composer { border-top: 1px solid var(--border); padding: 14px; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 .composer textarea { resize: none; min-height: 46px; max-height: 120px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); color: var(--text); padding: 10px 12px; outline: none; }
-@media (max-width: 900px) { .assistant-view { grid-template-columns: 1fr; padding: 12px; } .conversation-panel { display: none; } .confirm-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .assistant-view { grid-template-columns: 1fr; padding: 12px; min-height: 0; }
+  .conversation-panel { display: none; }
+  .chat-panel { border-radius: 18px; }
+  .chat-toolbar { padding: 12px; align-items: flex-start; }
+  .chat-toolbar h2 { font-size: 17px; }
+  .chat-toolbar p { font-size: 12px; line-height: 1.4; }
+  .chat-toolbar-actions { flex-direction: column; align-items: flex-end; }
+  .mobile-new-chat { display: inline-flex; }
+  .messages { padding: 12px; gap: 10px; }
+  .message { grid-template-columns: 1fr; gap: 4px; }
+  .message-role { padding: 0 2px; font-size: 11px; }
+  .message-content { padding: 9px 10px; border-radius: 14px; }
+  .result-card { grid-template-columns: 28px minmax(0, 1fr); padding: 8px; }
+  .confirm-card { margin: 0 12px 10px; }
+  .confirm-grid { grid-template-columns: 1fr; }
+  .confirm-actions { justify-content: stretch; }
+  .confirm-actions button { flex: 1; }
+  .composer { padding: 10px; grid-template-columns: 1fr; }
+  .composer textarea { min-height: 74px; }
+}
+
+@media (max-width: 430px) {
+  .chat-toolbar { flex-direction: column; }
+  .chat-toolbar-actions { width: 100%; flex-direction: row; justify-content: space-between; }
+}
 </style>

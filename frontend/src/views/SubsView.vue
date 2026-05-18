@@ -311,6 +311,14 @@ onMounted(loadSubs)
 .parse-actions { display: flex; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
 
 @media (max-width: 768px) {
+  .add-form { padding: 14px; border-radius: 16px; }
+  .form-row { flex-direction: column; align-items: stretch; }
+  .input-keyword { min-width: 0; width: 100%; }
   .parse-result { min-width: unset; }
+  .edit-form { min-width: 0; grid-template-columns: 1fr; gap: 6px; }
+  .checkbox-row, .edit-form .parse-actions { grid-column: auto; }
+  .parse-actions { flex-wrap: wrap; }
+  .parse-song-row { align-items: flex-start; }
+  .parse-song-artist { display: none; }
 }
 </style>

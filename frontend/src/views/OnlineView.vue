@@ -143,8 +143,13 @@ async function handleDownload(song) {
 .title-cell { font-weight: 500; }
 
 @media (max-width: 768px) {
-  .online-card, .results-card { padding: 14px; }
+  .online-card, .results-card { padding: 14px; border-radius: 16px; }
+  .source-row { gap: 8px; }
+  .source-item { min-width: calc(50% - 4px); }
   .search-row { flex-direction: column; }
   .results-table th, .results-table td { padding: 8px; font-size: 12px; }
+  .results-table th:nth-child(4), .results-table td:nth-child(4),
+  .results-table th:nth-child(6), .results-table td:nth-child(6),
+  .results-table th:nth-child(7), .results-table td:nth-child(7) { display: none; }
 }
 </style>

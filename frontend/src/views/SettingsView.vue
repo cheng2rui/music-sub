@@ -511,9 +511,16 @@ onMounted(loadAll)
 .assistant-tool-main small { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 768px) {
+  .settings-section { padding: 14px; border-radius: 16px; }
   .site-grid, .fields-grid, .assistant-tool-grid { grid-template-columns: 1fr; }
+  .fields-row { flex-direction: column; align-items: stretch; }
+  .field.flex-1 { min-width: 0; width: 100%; }
+  .site-header, .assistant-tools-head { align-items: flex-start; flex-direction: column; }
+  .site-fields input { width: 100%; }
   .pwd-form { flex-direction: column; align-items: stretch; }
   .pwd-form input { min-width: unset; }
   .scheduler-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .save-bar { padding: 12px 0; justify-content: stretch; }
+  .save-bar button { width: 100%; }
 }
 </style>
