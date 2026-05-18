@@ -287,12 +287,17 @@ h2 { font-size: clamp(28px, 5vw, 56px); line-height: 1; margin: 0; word-break: b
 
 @media (max-width: 768px) {
   .album-view { padding: 16px; padding-bottom: 150px; }
-  .hero-card { align-items: flex-start; flex-direction: column; padding: 18px; }
-  .hero-cover { width: 160px; height: 160px; }
+  .hero-card { align-items: flex-start; flex-direction: column; padding: 18px; border-radius: 18px; }
+  .hero-cover { width: 150px; height: 150px; align-self: center; border-radius: 18px; }
+  h2 { font-size: clamp(24px, 9vw, 34px); line-height: 1.08; }
+  .artist-line { font-size: 15px; }
+  .hero-actions { width: 100%; }
+  .hero-actions button { flex: 1; }
   .table-head { display: none; }
-  .track-row { grid-template-columns: 32px minmax(0, 1fr) 64px; }
+  .track-row { grid-template-columns: 30px minmax(0, 1fr) 58px; padding: 9px 8px; gap: 8px; }
   .track-format, .track-duration, .track-row :deep(.badge) { display: none; }
   .track-modal { min-width: unset; width: 100%; }
+  .detail-row { flex-direction: column; gap: 2px; }
   .tag-edit label { flex-direction: column; align-items: stretch; }
 }
 </style>
