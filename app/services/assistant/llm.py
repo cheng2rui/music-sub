@@ -73,7 +73,8 @@ class AssistantLLMClient:
                 json=payload,
                 timeout=self.timeout_seconds,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise AssistantLLMError(f"HTTP {resp.status_code}: {resp.text[:800]}")
             data = resp.json()
             choices = data.get("choices") or []
             if not choices:
@@ -149,7 +150,8 @@ class AssistantLLMClient:
                 json=payload,
                 timeout=self.timeout_seconds,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise AssistantLLMError(f"HTTP {resp.status_code}: {resp.text[:800]}")
             data = resp.json()
             content = data.get("content") or []
             text_parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]

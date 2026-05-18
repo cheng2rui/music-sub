@@ -7,6 +7,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.config import config
+from app.version import APP_VERSION
 from app.models import DownloadTask, MusicFile, Subscription
 from app.services.searcher import search_with_chain, fetch_torrent_info_hash, download_torrent_content
 from app.services.online_music import search_online, download_online_song as _download_online_song
@@ -24,7 +25,7 @@ def _size_gb(value: float | int | None) -> float:
 
 def get_system_status(db: Session, **kwargs) -> dict:
     return {
-        "version": "0.7.0",
+        "version": APP_VERSION,
         "sites_enabled": [name for name, site in config.sites.items() if site.enabled],
         "library_files": db.query(MusicFile).count(),
         "subscriptions": db.query(Subscription).count(),

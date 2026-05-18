@@ -12,6 +12,7 @@ from app.auth import verify_token
 from app.api import subscriptions, search, tasks, library, settings, discover, online, assistant
 from app.api import auth as auth_api
 from app.api import logs as logs_api
+from app.version import APP_VERSION
 
 WEB_DIR = Path(__file__).parent.parent / "web"
 WEB_DIST_DIR = WEB_DIR / "dist"
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Music Sub",
     description="音乐订阅下载管理系统 - PT站搜索订阅 + QB下载 + 硬链接整理 + 自动刮削",
-    version="0.7.1",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -95,7 +96,7 @@ app.include_router(assistant.router, prefix="/api/assistant", tags=["assistant"]
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.7.1"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 # Serve new Vue SPA (web/dist/) with fallback to legacy (web/index.html)

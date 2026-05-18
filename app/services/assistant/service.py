@@ -91,7 +91,14 @@ class AssistantService:
             if row.role in {"user", "assistant"}:
                 messages.append({"role": row.role, "content": row.content or ""})
             elif row.role == "tool":
-                messages.append({"role": "tool", "tool_call_id": row.tool_call_id or row.tool_name or "tool", "content": row.tool_result_json or row.content or "{}"})
+                # Persisted tool messages are replayed as plain assistant context instead
+                # of protocol-level `tool` messages. OpenAI/Anthropic both require a
+                # preceding assistant tool_call/tool_use in the same request; after a
+                # page reload or a later user turn we only need the data as context.
+                result = (row.tool_result_json or row.content or "{}").strip()
+                if len(result) > 8000:
+                    result = result[:8000] + "...（已截断）"
+                messages.append({"role": "assistant", "content": f"[工具结果 {row.tool_name or ''}]\n{result}"})
         return messages
 
     def _llm_client(self) -> AssistantLLMClient:
