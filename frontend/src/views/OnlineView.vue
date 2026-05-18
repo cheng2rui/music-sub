@@ -8,12 +8,15 @@ const keyword = ref('')
 const results = ref([])
 const loading = ref(false)
 const downloading = ref('')
-const selectedSources = ref(['migu', 'kugou', 'netease'])
+const selectedSources = ref(['qq', 'migu', 'kugou', 'netease', 'kuwo'])
+const allSources = ['qq', 'migu', 'kugou', 'netease', 'kuwo']
 
 const sourceLabels = {
+  qq: 'QQ音乐',
   migu: '咪咕',
   kugou: '酷狗',
-  netease: '网易云'
+  netease: '网易云',
+  kuwo: '酷我'
 }
 
 function formatSize(bytes) {
@@ -55,9 +58,9 @@ async function handleDownload(song) {
   <div class="online-view">
     <div class="online-card">
       <h3>🎧 在线音乐下载</h3>
-      <p class="hint">从咪咕 / 酷狗 / 网易云搜索直链，下载后自动进入整理刮削流程。</p>
+      <p class="hint">从 QQ音乐 / 咪咕 / 酷狗 / 网易云 / 酷我搜索直链，下载后自动进入整理刮削流程。</p>
       <div class="source-row">
-        <label v-for="s in ['migu','kugou','netease']" :key="s" class="source-item">
+        <label v-for="s in allSources" :key="s" class="source-item">
           <input type="checkbox" :value="s" v-model="selectedSources" />
           <span>{{ sourceLabels[s] }}</span>
         </label>
@@ -81,6 +84,7 @@ async function handleDownload(song) {
               <th>专辑</th>
               <th>格式</th>
               <th>大小</th>
+              <th>时长</th>
               <th></th>
             </tr>
           </thead>
@@ -92,6 +96,7 @@ async function handleDownload(song) {
               <td>{{ song.album || '-' }}</td>
               <td>{{ song.format?.toUpperCase?.() || '-' }}</td>
               <td>{{ formatSize(song.size) }}</td>
+              <td>{{ song.duration ? Math.floor(song.duration / 60) + ':' + String(song.duration % 60).padStart(2, '0') : '-' }}</td>
               <td>
                 <AppButton
                   size="sm"

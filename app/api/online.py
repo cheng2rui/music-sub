@@ -13,7 +13,7 @@ router = APIRouter()
 
 class OnlineSearchRequest(BaseModel):
     keyword: str
-    sources: list[str] = ["migu", "kugou", "netease"]
+    sources: list[str] = ["qq", "migu", "kugou", "netease", "kuwo"]
     limit: int = 20
 
 
@@ -71,6 +71,7 @@ def download(req: OnlineDownloadRequest):
                 "title": song.get("title") or title,
                 "artist": song.get("artist") or "",
                 "album": song.get("album") or "",
+                "duration": song.get("duration") or 0,
             },
         })
 

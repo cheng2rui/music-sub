@@ -7,7 +7,9 @@ can later swap to go-music-dl/musicn CLI without changing the frontend API.
 import hashlib
 import logging
 import os
+import random
 import re
+import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
@@ -33,6 +35,8 @@ class OnlineSong:
     cover_url: str = ""
     size: int = 0
     format: str = "mp3"
+    duration: int = 0
+    bitrate: int = 0
     disabled: bool = False
 
     def to_dict(self):
@@ -240,6 +244,136 @@ def search_netease(keyword: str, limit: int = 20) -> list[OnlineSong]:
     return results
 
 
+def _parse_kuwo_minfo(minfo: str) -> tuple[int, int, str]:
+    """Parse Kuwo MINFO snippets for best known size/bitrate/format."""
+    if not minfo:
+        return 0, 0, "mp3"
+    best_size, best_bitrate, best_fmt = 0, 0, "mp3"
+    for part in re.split(r";|,", minfo):
+        text = part.strip().lower()
+        size = 0
+        bitrate = 0
+        fmt = "flac" if "flac" in text else "mp3"
+        m = re.search(r"(\d+)k(?:mp3)?", text)
+        if m:
+            bitrate = int(m.group(1))
+        sm = re.search(r"(?:size|filesize)[:=]?(\d+)", text)
+        if sm:
+            size = int(sm.group(1))
+        score = (1 if fmt == "flac" else 0, bitrate, size)
+        if score > (1 if best_fmt == "flac" else 0, best_bitrate, best_size):
+            best_size, best_bitrate, best_fmt = size, bitrate, fmt
+    return best_size, best_bitrate, best_fmt
+
+
+def search_kuwo(keyword: str, limit: int = 20) -> list[OnlineSong]:
+    """Search Kuwo and resolve downloadable URLs.
+
+    Inspired by music-lib's Kuwo provider, but implemented independently in
+    Python. Anonymous access may still be copyright/region restricted.
+    """
+    try:
+        resp = _SESSION.get(
+            "http://www.kuwo.cn/search/searchMusicBykeyWord",
+            params={
+                "vipver": "1",
+                "client": "kt",
+                "ft": "music",
+                "cluster": "0",
+                "strategy": "2012",
+                "encoding": "utf8",
+                "rformat": "json",
+                "mobi": "1",
+                "issubtitle": "1",
+                "show_copyright_off": "1",
+                "pn": "0",
+                "rn": limit,
+                "all": keyword,
+            },
+            timeout=15,
+        )
+        rows = resp.json().get("abslist", []) or []
+    except Exception as e:
+        logger.warning(f"[online:kuwo] search failed: {e}")
+        return []
+
+    results: list[OnlineSong] = []
+    for row in rows[:limit]:
+        try:
+            rid = str(row.get("MUSICRID") or row.get("musicrid") or "").replace("MUSIC_", "")
+            if not rid or int(row.get("bitSwitch") or 0) == 0:
+                continue
+            title = row.get("SONGNAME") or row.get("songname") or ""
+            artist = row.get("ARTIST") or row.get("artist") or ""
+            album = row.get("ALBUM") or row.get("album") or ""
+            duration = int(row.get("DURATION") or 0)
+            size, bitrate, fmt_hint = _parse_kuwo_minfo(row.get("MINFO") or "")
+            dl_url, ext, dl_size, dl_bitrate = _kuwo_pick_download_url(rid)
+            ext = ext or fmt_hint
+            cover = row.get("hts_MVPIC") or row.get("web_albumpic_short") or ""
+            if cover and not cover.startswith("http"):
+                cover = "http://" + cover.lstrip("/")
+            results.append(OnlineSong(
+                source="kuwo",
+                song_id=rid,
+                title=title,
+                artist=artist,
+                album=album,
+                filename=f"{_clean_filename(title)} - {_clean_filename(artist)}.{ext}",
+                url=dl_url,
+                lyric_url=f"http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId={rid}",
+                cover_url=cover,
+                size=dl_size or size,
+                format=ext,
+                duration=duration,
+                bitrate=dl_bitrate or bitrate,
+                disabled=not bool(dl_url),
+            ))
+        except Exception as e:
+            logger.debug(f"[online:kuwo] skip item: {e}")
+    return results
+
+
+def _kuwo_pick_download_url(rid: str) -> tuple[str, str, int, int]:
+    random_id = f"C_APK_guanwang_{time.time_ns()}{random.randint(0, 999999)}"
+    for br, ext, bitrate in (("2000kflac", "flac", 2000), ("flac", "flac", 1000), ("320kmp3", "mp3", 320), ("128kmp3", "mp3", 128)):
+        try:
+            resp = _SESSION.get(
+                "https://mobi.kuwo.cn/mobi.s",
+                params={
+                    "f": "web",
+                    "source": "kwplayercar_ar_6.0.0.9_B_jiakong_vh.apk",
+                    "from": "PC",
+                    "type": "convert_url_with_sign",
+                    "br": br,
+                    "rid": rid,
+                    "user": random_id,
+                },
+                timeout=15,
+            ).json()
+            url = ((resp.get("data") or {}).get("url") or "").strip()
+            if url:
+                if not url.startswith("http"):
+                    url = "https:" + url if url.startswith("//") else url
+                return url, ext, _head_size(url), bitrate
+        except Exception:
+            continue
+    try:
+        resp = _SESSION.get(
+            "http://www.kuwo.cn/api/v1/www/music/playUrl",
+            params={"mid": rid, "type": "music", "httpsStatus": 1},
+            headers={"Secret": "kuwo_web_secret", "Cookie": "kw_token=secret_token"},
+            timeout=15,
+        ).json()
+        url = ((resp.get("data") or {}).get("url") or "").strip()
+        if url:
+            ext = "flac" if ".flac" in url.lower() else "mp3"
+            return url, ext, _head_size(url), 0
+    except Exception:
+        pass
+    return "", "mp3", 0, 0
+
+
 def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
     """Search QQ Music. 参考 music-lib qq: 先 search_for_qq_cp 拿 songmid，再 musicu.fcg 拿 vkey。
 
@@ -380,6 +514,8 @@ def search_online(keyword: str, sources: list[str] | None = None, limit: int = 2
             results.extend(search_netease(keyword, per_source))
         elif src == "qq":
             results.extend(search_qq(keyword, per_source))
+        elif src == "kuwo":
+            results.extend(search_kuwo(keyword, per_source))
     # Prefer enabled/downloadable first, then larger files.
     results.sort(key=lambda x: (x.disabled, -(x.size or 0)))
     return [r.to_dict() for r in results[:limit]]

@@ -70,7 +70,7 @@ export const downloadTorrent = (site, torrentId, title) =>
   }).then(r => r.json())
 
 // ============ Online Download ============
-export const searchOnlineMusic = (keyword, sources = ['migu', 'kugou', 'netease'], limit = 20) => authFetch('/api/online/search', {
+export const searchOnlineMusic = (keyword, sources = ['qq', 'migu', 'kugou', 'netease', 'kuwo'], limit = 20) => authFetch('/api/online/search', {
   method: 'POST',
   body: JSON.stringify({ keyword, sources, limit })
 }).then(r => r.json())
