@@ -25,11 +25,22 @@ const navItems = [
   { to: '/settings', icon: '⚙️', label: '设置', short: '设置' },
 ]
 
-const mobileNavItems = computed(() => navItems)
+const mobileNavItems = computed(() => [
+  { to: '/discover', icon: '🏠', label: '发现', short: '发现' },
+  { to: '/search', icon: '🔍', label: 'PT 搜索', short: '搜索' },
+  { to: '/library', icon: '🎶', label: '音乐库', short: '曲库' },
+  { to: '/tasks', icon: '⬇️', label: '任务列表', short: '任务' },
+  { to: '/more', icon: '☰', label: '更多', short: '更多', matches: ['/more', '/subs', '/online', '/assistant', '/logs', '/settings'] },
+])
 
 const pageTitle = computed(() => route.meta?.title || '音乐订阅管理')
 const isGlass = computed(() => theme.current.includes('glass'))
 const isLoginPage = computed(() => route.name === 'login')
+
+function isMobileNavActive(item) {
+  const matches = item.matches || [item.to]
+  return matches.some((path) => route.path === path || route.path.startsWith(`${path}/`))
+}
 
 function handleLogout() {
   auth.logout()
@@ -80,7 +91,7 @@ function handleLogout() {
     <GlobalPlayer />
 
     <nav class="bottom-tabs" aria-label="移动端导航">
-      <router-link v-for="item in mobileNavItems" :key="item.to" :to="item.to" class="bottom-tab" :title="item.label">
+      <router-link v-for="item in mobileNavItems" :key="item.to" :to="item.to" class="bottom-tab" :class="{ 'is-active': isMobileNavActive(item) }" :title="item.label">
         <span class="tab-icon" aria-hidden="true">{{ item.icon }}</span>
         <span class="tab-label">{{ item.short }}</span>
       </router-link>
@@ -274,27 +285,20 @@ function handleLogout() {
     z-index: 100;
     padding: 5px max(8px, env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
     gap: 5px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    overflow: hidden;
     backdrop-filter: blur(18px);
   }
-  .bottom-tabs::-webkit-scrollbar { display: none; }
   .bottom-tab {
-    min-width: 62px;
+    min-width: 0;
     height: 44px;
     border-radius: 16px;
     color: var(--text-dim);
     display: inline-flex;
-    flex: 0 0 62px;
+    flex: 1 1 0;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 3px;
-    scroll-snap-align: center;
     transition: color .15s, background .15s, transform .15s;
     -webkit-tap-highlight-color: transparent;
   }
@@ -311,11 +315,13 @@ function handleLogout() {
     font-weight: 700;
     white-space: nowrap;
   }
-  .bottom-tab.router-link-active {
+  .bottom-tab.router-link-active,
+  .bottom-tab.is-active {
     color: var(--text);
     background: color-mix(in srgb, var(--accent) 13%, var(--surface));
   }
-  .bottom-tab.router-link-active .tab-icon {
+  .bottom-tab.router-link-active .tab-icon,
+  .bottom-tab.is-active .tab-icon {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
@@ -334,7 +340,7 @@ function handleLogout() {
     padding-right: max(6px, env(safe-area-inset-right));
     gap: 4px;
   }
-  .bottom-tab { min-width: 58px; flex-basis: 58px; height: 40px; border-radius: 13px; }
+  .bottom-tab { height: 40px; border-radius: 13px; }
   .tab-icon { width: 22px; height: 22px; font-size: 13px; }
   .tab-label { display: block; }
 }

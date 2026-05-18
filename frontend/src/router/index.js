@@ -46,6 +46,12 @@ const routes = [
     component: () => import('@/views/LibraryView.vue')
   },
   {
+    path: '/more',
+    name: 'more',
+    meta: { title: '更多' },
+    component: () => import('@/views/MoreView.vue')
+  },
+  {
     path: '/album',
     name: 'album',
     meta: { title: '专辑详情' },
