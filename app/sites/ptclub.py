@@ -8,6 +8,21 @@ from app.sites.base import BaseSite, TorrentInfo
 logger = logging.getLogger(__name__)
 
 
+_DETAIL_LINK_RE = re.compile(
+    r'<a\s+title="([^"]*)"\s+href="details\.php\?id=(\d+)',
+    re.IGNORECASE,
+)
+
+# PTClub torrent rows contain a nested ``torrentname`` table, so a plain
+# ``<tr>...</tr>`` regex stops at the nested title row before the seed/leech
+# columns.  Anchor on the category cell and slice until the next category cell
+# instead.
+_ROW_ANCHOR_RE = re.compile(
+    r'<td\s+class=["\']rowfollow\s+nowrap["\']\s+valign=["\']middle["\']\s+style=["\']padding:\s*0px["\']',
+    re.IGNORECASE,
+)
+
+
 def _strip_tags(html: str) -> str:
     text = re.sub(r"<br\s*/?>", " ", html or "", flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -68,52 +83,64 @@ class PTClubSite(BaseSite):
     def _parse_torrent_list(self, html: str) -> list[TorrentInfo]:
         results: list[TorrentInfo] = []
         seen: set[str] = set()
-        for row in re.findall(r"<tr[^>]*>[\s\S]*?</tr>", html or "", re.IGNORECASE):
+        anchors = [m.start() for m in _ROW_ANCHOR_RE.finditer(html or "")]
+        for idx, start in enumerate(anchors):
+            end = anchors[idx + 1] if idx + 1 < len(anchors) else len(html or "")
+            row = (html or "")[start:end]
             if "download.php?id=" not in row or "details.php?id=" not in row:
                 continue
+            link = _DETAIL_LINK_RE.search(row)
             dl = re.search(r"download\.php\?id=(\d+)", row)
-            if not dl:
+            if link:
+                title = link.group(1).strip()
+                torrent_id = link.group(2)
+            elif dl:
+                torrent_id = dl.group(1)
+                title_html = self._first_match(row, r'href="details\.php\?id=\d+[^>]*>[\s\S]*?<b>([\s\S]*?)</b>')
+                title = _strip_tags(title_html)
+            else:
                 continue
-            torrent_id = dl.group(1)
-            if torrent_id in seen:
+            if not title or torrent_id in seen:
                 continue
             seen.add(torrent_id)
 
-            title = ""
-            title_match = re.search(
-                r'<a\s+title="([^"]*)"\s+href="details\.php\?id=\d+[^>]*>[\s\S]*?</a>',
-                row,
-                re.IGNORECASE,
-            )
-            if title_match:
-                title = title_match.group(1).strip()
-            if not title:
-                title_html = self._first_match(row, r'href="details\.php\?id=\d+[^>]*>[\s\S]*?<b>([\s\S]*?)</b>')
-                title = _strip_tags(title_html)
-            if not title:
-                continue
-
-            tail = row[row.find("</table>"):] if "</table>" in row else row
-            cells = re.findall(r'<td class="rowfollow[^>]*>([\s\S]*?)</td>', tail, re.IGNORECASE)
-            size = seeders = leechers = 0
-            upload_time = ""
-            if len(cells) >= 5:
-                upload_time = _strip_tags(cells[1])
-                size = _parse_size(_strip_tags(cells[2]))
-                seeders = _parse_int(cells[3])
-                leechers = _parse_int(cells[4])
+            size_text, seeders_text, leechers_text, upload_time = self._extract_metrics(row)
 
             results.append(TorrentInfo(
                 site=self.name,
                 torrent_id=torrent_id,
                 title=title,
-                size=size,
-                seeders=seeders,
-                leechers=leechers,
+                size=_parse_size(size_text),
+                seeders=_parse_int(seeders_text),
+                leechers=_parse_int(leechers_text),
                 upload_time=upload_time,
                 free=bool(re.search(r"pro_free|free|FREE|免费|免費", row)),
             ))
         return results
+
+    @staticmethod
+    def _extract_metrics(row_html: str) -> tuple[str, str, str, str]:
+        if not row_html:
+            return "", "", "", ""
+        # Remove the nested title table before splitting top-level row cells.
+        flattened = re.sub(
+            r"<table class=\"torrentname\"[\s\S]*?</table>",
+            "<td>title</td>",
+            row_html,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        cells = re.findall(r"<td[^>]*>([\s\S]*?)</td>", flattened, re.IGNORECASE)
+        # Top-level PTClub columns:
+        #   0 分类 / 1 标题块 / 2 评论 / 3 时间 / 4 大小 / 5 种子 / 6 下载 / 7 完成 / 8 发布者
+        if len(cells) >= 7:
+            return (
+                _strip_tags(cells[4]),
+                _strip_tags(cells[5]),
+                _strip_tags(cells[6]),
+                _strip_tags(cells[3]),
+            )
+        return "", "", "", ""
 
     @staticmethod
     def _first_match(text: str, pattern: str) -> str:

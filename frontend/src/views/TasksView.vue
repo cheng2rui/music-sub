@@ -56,22 +56,29 @@ async function runTaskAction(task, action) {
   const key = task.external_qb ? task.torrent_hash : task.id
   actingId.value = `${action}:${key}`
   try {
+    const deleteFiles = action === 'delete-files'
     if (task.external_qb) {
       if (action === 'pause') await pauseQbTask(task.torrent_hash)
       if (action === 'resume') await resumeQbTask(task.torrent_hash)
       if (action === 'import') await importQbTask(task.torrent_hash)
       if (action === 'organize') await organizeQbTask(task.torrent_hash)
-      if (action === 'delete') {
-        if (!confirm(`删除 qB 任务？\n${task.torrent_name}\n\n默认不会删除已下载文件。`)) return
-        await deleteQbTask(task.torrent_hash, false)
+      if (action === 'delete' || action === 'delete-files') {
+        const message = deleteFiles
+          ? `⚠️ 删除 qB 任务并删除本地文件？\n${task.torrent_name}\n\n此操作会让 qB 删除已下载数据文件，不可恢复。`
+          : `删除 qB 任务？\n${task.torrent_name}\n\n只移除 qB 任务，保留已下载文件。`
+        if (!confirm(message)) return
+        await deleteQbTask(task.torrent_hash, deleteFiles)
       }
     } else {
       if (action === 'pause') await pauseTask(task.id)
       if (action === 'resume') await resumeTask(task.id)
       if (action === 'retry') await retryTask(task.id)
-      if (action === 'delete') {
-        if (!confirm(`删除任务记录？\n${task.torrent_name}\n\n不会删除已下载文件。`)) return
-        await deleteTask(task.id)
+      if (action === 'delete' || action === 'delete-files') {
+        const message = deleteFiles
+          ? `⚠️ 删除任务并删除本地文件？\n${task.torrent_name}\n\n会删除任务记录/qB 种子，并让 qB 删除已下载数据文件，不可恢复。`
+          : `删除任务？\n${task.torrent_name}\n\n会删除任务记录/qB 种子，但保留已下载文件。`
+        if (!confirm(message)) return
+        await deleteTask(task.id, deleteFiles)
       }
     }
     await loadTasks()
@@ -371,10 +378,16 @@ onUnmounted(() => {
                 >重试</AppButton>
                 <AppButton
                   size="sm"
-                  variant="danger"
+                  variant="ghost"
                   :loading="actingId === actionKey(task, 'delete')"
                   @click="runTaskAction(task, 'delete')"
-                >删除</AppButton>
+                >删任务</AppButton>
+                <AppButton
+                  size="sm"
+                  variant="danger"
+                  :loading="actingId === actionKey(task, 'delete-files')"
+                  @click="runTaskAction(task, 'delete-files')"
+                >删文件</AppButton>
               </div>
             </td>
           </tr>
