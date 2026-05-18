@@ -263,21 +263,29 @@ function formatDuration(seconds) {
       v-show="!player.isCollapsed"
       :class="['panel-toggle', { active: isNowOpen }]"
       title="正在播放详情"
+      aria-label="正在播放详情"
       @click="toggleNowPanel"
     >
-      ♪ 详情
+      <span class="panel-icon" aria-hidden="true">♪</span>
+      <span class="panel-label">详情</span>
     </button>
 
     <button
       v-show="!player.isCollapsed"
       :class="['panel-toggle', { active: player.isQueueOpen }]"
       title="播放队列"
+      aria-label="播放队列"
       @click="toggleQueuePanel"
     >
-      ☰ {{ queueLabel }}
+      <span class="panel-icon" aria-hidden="true">☰</span>
+      <span class="panel-label">{{ queueLabel }}</span>
     </button>
 
     <button class="player-close" title="关闭播放器" @click="player.close">×</button>
+
+    <div v-show="!player.isCollapsed" class="mobile-progress" aria-hidden="true">
+      <div :style="{ width: seekPercent + '%' }"></div>
+    </div>
 
     <div v-if="isNowOpen && !player.isCollapsed" class="now-panel">
       <div class="now-cover-wrap">
@@ -495,6 +503,9 @@ function formatDuration(seconds) {
   font-weight: 700;
 }
 .panel-toggle:hover, .panel-toggle.active { color: var(--text); background: var(--surface-hover); }
+.panel-icon { font-size: 14px; line-height: 1; }
+.panel-label { line-height: 1; }
+.mobile-progress { display: none; }
 .queue-panel,
 .now-panel {
   position: absolute;
@@ -573,7 +584,9 @@ function formatDuration(seconds) {
   .player-sub { font-size: 11px; }
   .transport { gap: 4px; }
   .seek-wrap { display: none; }
-  .panel-toggle { height: 30px; padding: 0 9px; }
+  .panel-toggle { height: 30px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; }
+  .mobile-progress { display: block; position: absolute; left: 14px; right: 14px; bottom: 5px; height: 3px; border-radius: 999px; background: var(--surface); overflow: hidden; }
+  .mobile-progress > div { height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s linear; }
   .queue-panel { left: 0; right: 0; width: auto; max-height: min(420px, calc(100dvh - 180px)); }
   .now-panel { left: 0; right: 0; width: auto; grid-template-columns: 92px minmax(0, 1fr); max-height: min(520px, calc(100dvh - 180px)); overflow-y: auto; }
   .now-cover { width: 92px; height: 92px; border-radius: 14px; }
@@ -582,8 +595,9 @@ function formatDuration(seconds) {
 }
 
 @media (max-width: 430px) {
-  .panel-toggle { width: 32px; padding: 0; overflow: hidden; white-space: nowrap; }
-  .panel-toggle:first-of-type::first-letter { font-size: 14px; }
+  .global-player { gap: 6px; padding: 9px 8px 11px; }
+  .panel-toggle { width: 30px; padding: 0; justify-content: center; overflow: hidden; white-space: nowrap; }
+  .panel-label { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; }
   .transport-btn[title="上一首"], .transport-btn[title="下一首"] { display: none; }
 }
 </style>

@@ -254,7 +254,8 @@ function handleLogout() {
   }
   .mobile-theme, .mobile-logout { display: flex; }
   .bottom-tabs {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
     position: fixed;
     bottom: 0;
     left: 0;
@@ -263,19 +264,14 @@ function handleLogout() {
     background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
     border-top: 1px solid var(--border);
     align-items: stretch;
-    justify-content: flex-start;
     z-index: 100;
-    padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-    gap: 4px;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
+    padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    gap: 3px;
+    overflow: hidden;
     backdrop-filter: blur(18px);
-    scrollbar-width: none;
   }
-  .bottom-tabs::-webkit-scrollbar { display: none; }
   .bottom-tab {
-    min-width: 54px;
+    min-width: 0;
     height: 52px;
     border-radius: 16px;
     color: var(--text-dim);
@@ -308,5 +304,17 @@ function handleLogout() {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
+}
+
+@media (max-width: 430px) {
+  .app-layout { --mobile-tab-height: 58px; }
+  .bottom-tabs {
+    padding-left: max(4px, env(safe-area-inset-left));
+    padding-right: max(4px, env(safe-area-inset-right));
+    gap: 2px;
+  }
+  .bottom-tab { height: 46px; border-radius: 14px; }
+  .tab-icon { width: 28px; height: 28px; font-size: 15px; }
+  .tab-label { display: none; }
 }
 </style>
