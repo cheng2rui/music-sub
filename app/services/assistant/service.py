@@ -127,14 +127,20 @@ class AssistantService:
                     name = fn.get("name") or ""
                     args = _safe_json_loads(fn.get("arguments"))
                     risk = tool_risk(name)
+                    allowed, reason = self._tool_allowed(name)
+                    if not allowed:
+                        text = f"当前设置不允许执行：{name}。{reason}"
+                        self._save_message(conv.id, "assistant", text, status="failed")
+                        return {"conversation_id": conv.id, "message": text, "tool_calls": [], "needs_confirm": False}
                     if self._requires_confirm(name, risk):
                         action_id = self._create_action(conv.id, name, args, risk)
-                        text = f"需要确认后才能执行：{name}。风险级别：{risk}。"
+                        summary = self._action_summary(name, args, risk)
+                        text = f"需要确认后才能执行：{summary}"
                         self._save_message(conv.id, "assistant", text, status="needs_confirm")
                         return {
                             "conversation_id": conv.id,
                             "message": text,
-                            "tool_calls": [{"id": action_id, "name": name, "args": args, "risk": risk, "requires_confirm": True}],
+                            "tool_calls": [{"id": action_id, "name": name, "args": args, "risk": risk, "summary": summary, "requires_confirm": True}],
                             "needs_confirm": True,
                             "action_id": action_id,
                         }
@@ -164,13 +170,43 @@ class AssistantService:
             self._save_message(conv.id, "assistant", text, status="failed")
             return {"conversation_id": conv.id, "message": text, "tool_calls": tool_events, "needs_confirm": False}
 
+    def _tool_allowed(self, name: str) -> tuple[bool, str]:
+        cfg = cfg_module.config.assistant
+        if name == "download_online_song" and not cfg.allow_online_download:
+            return False, "请先在设置中打开“允许在线音乐下载工具”。"
+        if name in {"rescrape_album", "organize_task"} and not cfg.allow_library_write:
+            return False, "请先在设置中打开“允许音乐库写入工具”。"
+        if name in {"delete_task", "delete_qb_task"} and not cfg.allow_task_delete:
+            return False, "请先在设置中打开“允许任务删除工具”。"
+        return True, ""
+
     def _requires_confirm(self, name: str, risk: str) -> bool:
         cfg = cfg_module.config.assistant
+        if name in {"download_torrent", "download_online_song"}:
+            return cfg.require_confirm_for_download
+        if name in {"delete_task", "delete_qb_task"}:
+            return cfg.require_confirm_for_delete
         if risk == "high":
             return True
         if risk == "medium":
             return cfg.require_confirm_for_apply_tools
         return False
+
+    def _action_summary(self, name: str, args: dict[str, Any], risk: str) -> str:
+        if name == "download_torrent":
+            return f"下载 PT 资源《{args.get('title') or args.get('torrent_id')}》（{args.get('site')}）"
+        if name == "download_online_song":
+            song = args.get("song") or {}
+            return f"下载在线音乐《{song.get('title') or song.get('filename') or '未知歌曲'}》 - {song.get('artist') or '未知艺人'}（{song.get('source') or 'online'}）"
+        if name == "create_subscription":
+            return f"创建订阅：{args.get('keyword')}（{args.get('type') or 'artist'} / {args.get('quality') or 'any'}）"
+        if name == "organize_task":
+            return f"整理任务 #{args.get('task_id')} 并入库"
+        if name == "rescrape_album":
+            return f"重新刮削专辑：{args.get('artist')} - {args.get('album')}"
+        if name in {"pause_task", "resume_task"}:
+            return f"{name}：任务 #{args.get('task_id')}"
+        return f"{name}（风险级别：{risk}）"
 
     def _create_action(self, conversation_id: int, tool_name: str, args: dict[str, Any], risk: str) -> str:
         action_id = uuid.uuid4().hex[:16]
@@ -193,6 +229,9 @@ class AssistantService:
         if action.status != "pending":
             return {"ok": False, "message": f"操作已处理：{action.status}"}
         args = _safe_json_loads(action.tool_args_json)
+        allowed, reason = self._tool_allowed(action.tool_name)
+        if not allowed:
+            return {"ok": False, "message": reason}
         try:
             result = execute_tool(self.db, action.tool_name, args)
             action.status = "done"

@@ -188,7 +188,8 @@ onMounted(async () => {
       <div v-if="pendingAction" class="confirm-card">
         <strong>需要确认操作</strong>
         <div v-for="call in pendingAction.calls" :key="call.id" class="confirm-line">
-          {{ call.name }} · 风险 {{ call.risk }}
+          <div>{{ call.summary || call.name }} · 风险 {{ call.risk }}</div>
+          <pre>{{ JSON.stringify(call.args || {}, null, 2).slice(0, 800) }}</pre>
         </div>
         <div class="confirm-actions">
           <AppButton variant="ghost" @click="handleCancel">取消</AppButton>
