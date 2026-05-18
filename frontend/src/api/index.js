@@ -111,8 +111,17 @@ export const getLibraryFiles = (params = {}) => {
   return authFetch(`/api/library/files?${qs}`).then(r => r.json())
 }
 export const getLibraryAlbums = (params = {}) => {
-  const qs = new URLSearchParams(params).toString()
-  return authFetch(`/api/library/albums${qs ? '?' + qs : ''}`).then(r => r.json())
+  const qs = new URLSearchParams({
+    limit: 50,
+    offset: 0,
+    sort: 'updated',
+    ...params
+  }).toString()
+  return authFetch(`/api/library/albums?${qs}`)
+    .then(r => r.json())
+    .then(data => Array.isArray(data)
+      ? { total: data.length, offset: Number(params.offset || 0), limit: Number(params.limit || data.length || 50), items: data }
+      : data)
 }
 export const getLibraryHealth = (params = {}) => {
   const qs = new URLSearchParams(params).toString()

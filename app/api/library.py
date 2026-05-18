@@ -236,6 +236,9 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
             (MusicFile.album_artist.ilike(f"%{q}%")) |
             (MusicFile.title.ilike(f"%{q}%"))
         )
+
+    total = query.count()
+
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
     sort_map = {
@@ -260,7 +263,7 @@ def list_albums(artist: str = "", q: str = "", sort: str = "updated", limit: int
             "has_cover": _has_cover(r.sample_path),
             "sample_id": r.sample_id,
         })
-    return result
+    return {"total": total, "offset": offset, "limit": limit, "items": result}
 
 
 @router.get("/album-tracks")

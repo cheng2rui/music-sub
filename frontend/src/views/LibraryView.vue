@@ -16,11 +16,12 @@ const searchQ = ref('')
 const sortMode = ref('updated')
 const viewMode = ref('grid')
 const loading = ref(false)
-let searchTimer = null
 const loadingMore = ref(false)
-const albumLimit = 200
-const albumOffset = ref(0)
-const hasMoreAlbums = ref(false)
+const listAlbumPage = ref(0)
+const listAlbumPageSize = 50
+const listAlbumTotal = ref(0)
+const listAlbumPageCount = computed(() => Math.max(1, Math.ceil((listAlbumTotal.value || 0) / listAlbumPageSize)))
+const hasMoreAlbums = computed(() => albums.value.length < listAlbumTotal.value)
 
 const selectedAlbum = ref(null)
 const albumTracks = ref([])
@@ -186,7 +187,7 @@ async function pollScanJob(jobId) {
     scanPollTimer = setTimeout(() => pollScanJob(jobId), 1500)
   } else {
     scanning.value = false
-    await Promise.all([loadStats(), loadAlbums(true)])
+    await Promise.all([loadStats(), loadAlbums(0)])
   }
 }
 
@@ -222,28 +223,29 @@ async function loadStats() {
   } catch (e) { console.error(e) }
 }
 
-async function loadAlbums(reset = true) {
-  if (reset) {
+async function loadAlbums(page = 0) {
+  if (typeof page === 'boolean') page = page ? 0 : listAlbumPage.value + 1
+  if (page === 0) {
     loading.value = true
-    albumOffset.value = 0
+    listAlbumPage.value = 0
   } else {
     loadingMore.value = true
   }
   try {
-    const params = { limit: albumLimit, offset: reset ? 0 : albumOffset.value, sort: sortMode.value }
+    const params = { limit: listAlbumPageSize, offset: page * listAlbumPageSize, sort: sortMode.value }
     if (searchQ.value.trim()) params.q = searchQ.value.trim()
     const data = await getLibraryAlbums(params)
-    const rows = Array.isArray(data) ? data : []
-    albums.value = reset ? rows : albums.value.concat(rows)
-    albumOffset.value = albums.value.length
-    hasMoreAlbums.value = rows.length === albumLimit
+    const items = Array.isArray(data) ? data : (data.items || [])
+    listAlbumTotal.value = Array.isArray(data) ? items.length : (data.total || items.length)
+    albums.value = page === 0 ? items : albums.value.concat(items)
+    listAlbumPage.value = page
   } catch (e) { console.error(e) }
   finally { loading.value = false; loadingMore.value = false }
 }
 
 async function loadMoreAlbums() {
   if (!hasMoreAlbums.value || loadingMore.value) return
-  await loadAlbums(false)
+  await loadAlbums(listAlbumPage.value + 1)
 }
 
 function openAlbum(artist, album) {
@@ -361,7 +363,7 @@ async function deleteTrack_RB2(track) {
       options: { delete_files: true, delete_empty_dirs: true, library_root: '/music' }
     })
     showTrackModal.value = false
-    await loadAlbums()
+    await loadAlbums(0)
     await loadStats()
   } catch (e) { console.error(e) }
 }
@@ -383,7 +385,7 @@ async function handleScrapeUnscraped() {
   try {
     await rescrapeLibrary({})
     await loadStats()
-    await loadAlbums()
+    await loadAlbums(0)
   } catch (e) { console.error(e) }
   finally { scraping.value = false }
 }
@@ -393,8 +395,7 @@ function coverUrl(artist, album) {
 }
 
 function debounceLoadAlbums() {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => loadAlbums(true), 300)
+  loadAlbums(0)
 }
 
 function formatDuration(s) {
@@ -417,7 +418,7 @@ function formatAlbumMeta(item) {
   return parts.join(' · ')
 }
 
-onMounted(() => { loadStats(); loadAlbums() })
+onMounted(() => { loadStats(); loadAlbums(0) })
 </script>
 
 <template>
@@ -449,7 +450,7 @@ onMounted(() => { loadStats(); loadAlbums() })
     <!-- 工具栏 -->
     <div class="toolbar">
       <input v-model="searchQ" placeholder="搜索专辑 / 艺术家 / 歌名..." class="search-input" @input="debounceLoadAlbums" />
-      <select v-model="sortMode" class="sort-select" @change="loadAlbums(true)">
+      <select v-model="sortMode" class="sort-select" @change="loadAlbums(0)">
         <option value="updated">最近入库</option>
         <option value="name">专辑名</option>
         <option value="artist">艺术家</option>
@@ -537,8 +538,9 @@ onMounted(() => { loadStats(); loadAlbums() })
     </div>
 
     <div v-if="!loading && hasMoreAlbums" class="load-more-row">
+      <div class="load-more-info">第 {{ listAlbumPage + 1 }} / {{ listAlbumPageCount }} 页 · 已加载 {{ albums.length }} / {{ listAlbumTotal }} 张</div>
       <AppButton variant="ghost" size="sm" :loading="loadingMore" @click="loadMoreAlbums">
-        加载更多
+        加载更多（第 {{ listAlbumPage + 1 }} / {{ listAlbumPageCount }} 页）
       </AppButton>
     </div>
 
