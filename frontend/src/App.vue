@@ -31,7 +31,10 @@ function handleLogout() {
   <div v-else class="app-layout" :class="{ 'glass-active': isGlass }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
     <!-- Sidebar (desktop) -->
     <aside class="sidebar">
-      <div class="sidebar-logo">🎵 音乐订阅</div>
+      <div class="sidebar-logo">
+        <img src="/logo.svg" alt="Music Sub" class="sidebar-logo-img" />
+        <span>Music Sub</span>
+      </div>
       <nav class="sidebar-nav">
         <router-link to="/discover">🏠 发现</router-link>
         <router-link to="/subs">📡 订阅管理</router-link>
@@ -48,7 +51,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.6.23</div>
+        <div class="version-tag">v0.6.28</div>
       </div>
     </aside>
 
@@ -107,6 +110,16 @@ function handleLogout() {
   font-weight: 700;
   padding: 0 20px 20px;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sidebar-logo-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 10px rgba(34, 211, 238, 0.28));
 }
 .sidebar-nav {
   display: flex;

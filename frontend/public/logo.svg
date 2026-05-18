@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Music Sub logo">
+  <defs>
+    <linearGradient id="g1" x1="112" y1="92" x2="412" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#35f5a7"/>
+      <stop offset="0.48" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="156" y1="126" x2="354" y2="370" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ecfeff"/>
+      <stop offset="0.35" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="55%">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.42"/>
+      <stop offset="0.56" stop-color="#10b981" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#020617" flood-opacity="0.5"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#22d3ee" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <circle cx="256" cy="256" r="232" fill="#050b14"/>
+  <circle cx="256" cy="256" r="232" fill="url(#glow)"/>
+
+  <!-- subscription / radar rings -->
+  <path d="M118 255c0-76 62-138 138-138 34 0 66 12 90 33" fill="none" stroke="url(#g1)" stroke-width="22" stroke-linecap="round" opacity="0.68"/>
+  <path d="M82 255c0-96 78-174 174-174 45 0 86 17 117 45" fill="none" stroke="url(#g1)" stroke-width="12" stroke-linecap="round" opacity="0.28"/>
+  <path d="M386 294c-17 56-69 97-130 97-32 0-61-11-84-30" fill="none" stroke="url(#g1)" stroke-width="14" stroke-linecap="round" opacity="0.32"/>
+
+  <!-- album/library stack -->
+  <g filter="url(#softShadow)">
+    <rect x="152" y="302" width="202" height="42" rx="18" fill="#0f172a" stroke="#22d3ee" stroke-opacity="0.5" stroke-width="6"/>
+    <rect x="168" y="264" width="218" height="56" rx="20" fill="#111827" stroke="#10b981" stroke-opacity="0.62" stroke-width="7"/>
+    <rect x="190" y="223" width="214" height="66" rx="24" fill="#0b1220" stroke="url(#g1)" stroke-width="9"/>
+  </g>
+
+  <!-- music note -->
+  <g filter="url(#softShadow)">
+    <path d="M302 133c0-11 8-21 19-23l54-12c14-3 27 7 27 21v166c0 41-32 73-74 73-32 0-58-18-58-43 0-29 29-52 65-52 13 0 24 3 34 8v-89l-34 8v91c0 42-31 74-75 74-32 0-58-18-58-44 0-29 29-51 65-51 13 0 25 3 35 8V133z" fill="url(#g2)"/>
+    <path d="M335 143v42l34-8v-42l-34 8z" fill="#05101d" opacity="0.42"/>
+  </g>
+
+  <circle cx="410" cy="132" r="18" fill="#35f5a7" opacity="0.95"/>
+  <circle cx="410" cy="132" r="32" fill="none" stroke="#35f5a7" stroke-width="8" opacity="0.2"/>
+</svg>
