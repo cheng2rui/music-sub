@@ -84,6 +84,7 @@ class NotifySettingInput(BaseModel):
 
 class AssistantProviderInput(BaseModel):
     provider: str = "openai_compatible"
+    runtime: str = "openai_compatible"
     base_url: str = ""
     api_key: str = ""
     model: str = ""

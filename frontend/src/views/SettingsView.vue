@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testSite, getScheduler, runScheduler, changePasswordApi } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -18,7 +18,7 @@ const settings = ref({
   notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } },
   assistant: {
     enabled: false,
-    provider: { provider: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60 },
+    provider: { provider: 'openai_compatible', runtime: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60 },
     max_history_messages: 20,
     require_confirm_for_download: true,
     require_confirm_for_delete: true,
@@ -34,6 +34,8 @@ const testingQb = ref(false)
 const testingTg = ref(false)
 const testingSite = ref('')
 const scheduler = ref([])
+const assistantProviders = ref([])
+const testingAssistant = ref(false)
 
 // Password change
 const pwdForm = ref({ old_password: '', new_username: '', new_password: '' })
@@ -52,6 +54,8 @@ async function loadAll() {
     }
     }
     scheduler.value = await getScheduler()
+    const providerData = await getAssistantProviders()
+    assistantProviders.value = providerData.providers || []
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
@@ -93,6 +97,38 @@ async function handleTestTg() {
 
 async function handleRunScheduler(id) {
   try { await runScheduler(id) } catch (e) { console.error(e) }
+}
+
+function selectedAssistantProvider() {
+  return assistantProviders.value.find(p => p.id === settings.value.assistant.provider.provider)
+}
+
+function applyAssistantProviderDefaults() {
+  const provider = selectedAssistantProvider()
+  if (!provider) return
+  settings.value.assistant.provider.runtime = provider.runtime || 'openai_compatible'
+  settings.value.assistant.provider.base_url = provider.default_base_url || ''
+  if (!settings.value.assistant.provider.model && provider.default_model) settings.value.assistant.provider.model = provider.default_model
+}
+
+function applyAssistantPreset(presetId) {
+  const provider = selectedAssistantProvider()
+  const preset = provider?.presets?.find(p => p.id === presetId)
+  if (!preset) return
+  settings.value.assistant.provider.base_url = preset.base_url
+  settings.value.assistant.provider.runtime = preset.runtime || provider.runtime || 'openai_compatible'
+}
+
+async function handleTestAssistant() {
+  testingAssistant.value = true
+  try {
+    const res = await testAssistantProvider(settings.value.assistant.enabled, settings.value.assistant.provider)
+    alert(res.ok ? `✅ 模型测试成功\n${res.reply_preview || ''}\n耗时 ${res.duration_ms || '-'} ms` : `❌ 模型测试失败：${res.message || '未知错误'}`)
+  } catch (e) {
+    alert('❌ 模型测试失败：' + e.message)
+  } finally {
+    testingAssistant.value = false
+  }
 }
 
 async function handleChangePassword() {
@@ -305,8 +341,23 @@ onMounted(loadAll)
         <div class="fields-grid">
           <div class="field">
             <label>Provider</label>
-            <select v-model="settings.assistant.provider.provider">
+            <select v-model="settings.assistant.provider.provider" @change="applyAssistantProviderDefaults">
+              <option v-for="p in assistantProviders" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+            <small class="text-dim">{{ selectedAssistantProvider()?.hint }}</small>
+          </div>
+          <div class="field" v-if="selectedAssistantProvider()?.presets?.length">
+            <label>Base URL 预设</label>
+            <select @change="applyAssistantPreset($event.target.value)">
+              <option value="">选择预设...</option>
+              <option v-for="p in selectedAssistantProvider()?.presets || []" :key="p.id" :value="p.id">{{ p.label }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Runtime</label>
+            <select v-model="settings.assistant.provider.runtime">
               <option value="openai_compatible">OpenAI Compatible</option>
+              <option value="anthropic_compatible">Anthropic Compatible</option>
             </select>
           </div>
           <div class="field">
@@ -329,6 +380,9 @@ onMounted(loadAll)
             <label>超时秒数</label>
             <input v-model.number="settings.assistant.provider.timeout_seconds" type="number" min="10" max="300" />
           </div>
+        </div>
+        <div style="margin-top:12px">
+          <AppButton variant="ghost" size="sm" :loading="testingAssistant" @click="handleTestAssistant">测试模型调用</AppButton>
         </div>
         <div class="toggle-list" style="margin-top:12px">
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_download" /><span>下载前需要确认</span></label>

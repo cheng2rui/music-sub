@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.services.assistant.service import AssistantService
+from app.services.assistant.providers import list_providers
+from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError
 
 router = APIRouter()
 
@@ -19,6 +21,11 @@ class AssistantChatRequest(BaseModel):
 
 class AssistantConversationCreate(BaseModel):
     title: str = "新对话"
+
+
+class AssistantProviderTestRequest(BaseModel):
+    enabled: bool = True
+    provider: dict = {}
 
 
 def _conversation_row(row) -> dict[str, Any]:
@@ -47,6 +54,37 @@ def _message_row(row) -> dict[str, Any]:
 @router.get("/capabilities")
 def capabilities(db: Session = Depends(get_db)):
     return AssistantService(db).capabilities()
+
+
+@router.get("/providers")
+def providers():
+    return {"providers": list_providers()}
+
+
+@router.post("/providers/test")
+def test_provider(req: AssistantProviderTestRequest):
+    if not req.enabled:
+        return {"ok": False, "message": "请先启用智能助手"}
+    provider = req.provider or {}
+    if not provider.get("model"):
+        return {"ok": False, "message": "请先填写模型 ID"}
+    if not provider.get("api_key"):
+        return {"ok": False, "message": "请先填写 API Key"}
+    try:
+        client = AssistantLLMClient(
+            provider=provider.get("provider") or "openai_compatible",
+            runtime=provider.get("runtime") or "",
+            base_url=provider.get("base_url") or "",
+            api_key=provider.get("api_key") or "",
+            model=provider.get("model") or "",
+            temperature=float(provider.get("temperature") or 0.2),
+            timeout_seconds=int(provider.get("timeout_seconds") or 30),
+        )
+        return client.test()
+    except AssistantLLMError as e:
+        return {"ok": False, "message": str(e)}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
 
 
 @router.get("/conversations")

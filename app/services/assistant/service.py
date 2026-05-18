@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import config as cfg_module
 from app.models import AssistantAction, AssistantConversation, AssistantMessage
-from app.services.assistant.llm import AssistantLLMError, OpenAICompatibleClient
+from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError
 from app.services.assistant.prompts import SYSTEM_PROMPT
 from app.services.assistant.tools import execute_tool, openai_tools, tool_risk
 
@@ -94,9 +94,11 @@ class AssistantService:
                 messages.append({"role": "tool", "tool_call_id": row.tool_call_id or row.tool_name or "tool", "content": row.tool_result_json or row.content or "{}"})
         return messages
 
-    def _llm_client(self) -> OpenAICompatibleClient:
+    def _llm_client(self) -> AssistantLLMClient:
         cfg = cfg_module.config.assistant.provider
-        return OpenAICompatibleClient(
+        return AssistantLLMClient(
+            provider=cfg.provider,
+            runtime=cfg.runtime,
             base_url=cfg.base_url,
             api_key=cfg.api_key,
             model=cfg.model,
