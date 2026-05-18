@@ -33,6 +33,25 @@ def _album_artist_group():
     return func.coalesce(func.nullif(MusicFile.album_artist, ""), func.nullif(MusicFile.artist, ""), UNKNOWN_ARTIST)
 
 
+
+def _file_dict(f: MusicFile) -> dict:
+    return {
+        "id": f.id,
+        "file_path": f.file_path,
+        "artist": f.artist or "",
+        "album_artist": _display_album_artist(f),
+        "album": _display_album(f.album),
+        "title": f.title or "",
+        "year": f.year,
+        "format": f.format or "",
+        "scraped": f.scraped,
+        "track_number": f.track_number,
+        "disc_number": f.disc_number,
+        "duration": f.duration or 0,
+        "bitrate": f.bitrate,
+        "sample_rate": f.sample_rate,
+    }
+
 def _album_cover_path(file_path: str) -> str | None:
     """Find cover image alongside an audio file."""
     if not file_path:
@@ -125,6 +144,62 @@ def list_library(artist: str = "", album: str = "", q: str = "", limit: int = 50
         }
         for f in files
     ]
+
+
+@router.get("/files")
+def list_files(
+    q: str = "",
+    album_artist: str = "",
+    album_name: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    sort: str = "track",
+    db: Session = Depends(get_db),
+):
+    """Paginated file listing with search. Powers the tools modal file picker."""
+    query = db.query(MusicFile)
+    if album_artist:
+        query = query.filter(_album_artist_group().ilike(f"%{album_artist}%"))
+    if album_name:
+        if album_name == UNKNOWN_ALBUM:
+            query = query.filter((MusicFile.album.is_(None)) | (MusicFile.album == ""))
+        else:
+            query = query.filter(MusicFile.album.ilike(f"%{album_name}%"))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            (MusicFile.title.ilike(like)) |
+            (MusicFile.artist.ilike(like)) |
+            (MusicFile.album_artist.ilike(like)) |
+            (MusicFile.album.ilike(like)) |
+            (MusicFile.file_path.ilike(like))
+        )
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    total = query.count()
+    if sort == "title":
+        query = query.order_by(MusicFile.title.is_(None), MusicFile.title.asc(), MusicFile.id.asc())
+    elif sort == "artist":
+        query = query.order_by(MusicFile.artist.is_(None), MusicFile.artist.asc(), MusicFile.id.asc())
+    elif sort == "duration":
+        query = query.order_by(MusicFile.duration.is_(None), MusicFile.duration.desc(), MusicFile.id.asc())
+    elif sort == "size":
+        query = query.order_by(MusicFile.bitrate.is_(None), MusicFile.bitrate.desc(), MusicFile.id.asc())
+    else:
+        query = query.order_by(
+            MusicFile.track_number.is_(None),
+            MusicFile.track_number.asc(),
+            MusicFile.disc_number.is_(None),
+            MusicFile.disc_number.asc(),
+            MusicFile.id.asc(),
+        )
+    files = query.offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "items": [_file_dict(f) for f in files],
+    }
 
 
 @router.get("/albums")

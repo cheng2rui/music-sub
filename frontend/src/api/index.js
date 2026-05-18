@@ -101,6 +101,15 @@ export const getLibrary = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/${qs ? '?' + qs : ''}`).then(r => r.json())
 }
+export const getLibraryFiles = (params = {}) => {
+  const qs = new URLSearchParams({
+    limit: 50,
+    offset: 0,
+    sort: 'track',
+    ...params
+  }).toString()
+  return authFetch(`/api/library/files?${qs}`).then(r => r.json())
+}
 export const getLibraryAlbums = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return authFetch(`/api/library/albums${qs ? '?' + qs : ''}`).then(r => r.json())

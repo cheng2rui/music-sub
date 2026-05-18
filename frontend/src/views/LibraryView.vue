@@ -264,7 +264,7 @@ async function saveTrack() {
   finally { savingTrack.value = false }
 }
 
-async function deleteTrack(track) {
+async function deleteTrack_RB2(track) {
   if (!track || !confirm(`确认删除「${track.title}」？此操作不可撤销。`)) return
   try {
     await applyLibraryTool('delete_files', {
@@ -493,7 +493,7 @@ onMounted(() => { loadStats(); loadAlbums() })
           <AppButton variant="primary" size="sm" @click="playTrack(selectedTrack)">
             {{ player.currentId === selectedTrack.id ? '正在全局播放' : '用全局播放器播放' }}
           </AppButton>
-          <AppButton variant="danger" size="sm" @click="deleteTrack(selectedTrack)">删除</AppButton>
+          <AppButton variant="danger" size="sm" @click="deleteTrack_RB2(selectedTrack)">删除</AppButton>
         </div>
         <div class="detail-grid">
           <div class="detail-row"><span class="detail-label">路径</span><span class="detail-val text-dim">{{ selectedTrack.file_path }}</span></div>
