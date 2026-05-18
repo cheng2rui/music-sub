@@ -38,6 +38,17 @@ const scheduler = ref([])
 const assistantProviders = ref([])
 const assistantTools = ref([])
 const testingAssistant = ref(false)
+const settingsTabs = [
+  { key: 'sites', label: 'PT站', icon: '📡' },
+  { key: 'downloader', label: '下载器', icon: '⬇️' },
+  { key: 'paths', label: '媒体库/路径', icon: '📁' },
+  { key: 'scraper', label: '刮削', icon: '🎵' },
+  { key: 'automation', label: '自动化', icon: '⏰' },
+  { key: 'notify', label: '通知', icon: '📢' },
+  { key: 'assistant', label: '助手', icon: '🤖' },
+  { key: 'security', label: '安全', icon: '🔐' }
+]
+const activeSettingsTab = ref('sites')
 
 // Password change
 const pwdForm = ref({ old_password: '', new_username: '', new_password: '' })
@@ -194,9 +205,24 @@ onMounted(loadAll)
   <div class="settings-view">
     <div v-if="loading" class="loading-text">加载中...</div>
     <template v-else>
+      <div class="settings-tabs" role="tablist" aria-label="设置分组">
+        <button
+          v-for="tab in settingsTabs"
+          :key="tab.key"
+          type="button"
+          class="settings-tab"
+          :class="{ active: activeSettingsTab === tab.key }"
+          role="tab"
+          :aria-selected="activeSettingsTab === tab.key"
+          @click="activeSettingsTab = tab.key"
+        >
+          <span class="settings-tab-icon">{{ tab.icon }}</span>
+          <span>{{ tab.label }}</span>
+        </button>
+      </div>
 
       <!-- PT站配置 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'sites'" class="settings-section">
         <h3>📡 PT站配置</h3>
         <div class="site-grid">
           <!-- M-Team -->
@@ -252,7 +278,7 @@ onMounted(loadAll)
       </div>
 
       <!-- qBittorrent -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'downloader'" class="settings-section">
         <h3>⬇️ qBittorrent</h3>
         <div class="fields-row">
           <div class="field flex-1">
@@ -286,7 +312,7 @@ onMounted(loadAll)
       </div>
 
       <!-- 路径配置 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'paths'" class="settings-section">
         <h3>📁 路径配置</h3>
         <div class="fields-row">
           <div class="field flex-1">
@@ -305,7 +331,7 @@ onMounted(loadAll)
       </div>
 
       <!-- 刮削配置 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'scraper'" class="settings-section">
         <h3>🎵 刮削配置</h3>
         <div class="toggle-list">
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.embed_cover" /><span>嵌入封面到音频标签</span></label>
@@ -319,7 +345,7 @@ onMounted(loadAll)
       </div>
 
       <!-- 定时任务 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'automation'" class="settings-section">
         <h3>⏰ 定时任务</h3>
         <div class="fields-row" style="margin-bottom:16px">
           <div class="field">
@@ -349,7 +375,7 @@ onMounted(loadAll)
       </div>
 
       <!-- Telegram 通知 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'notify'" class="settings-section">
         <h3>📢 Telegram 通知</h3>
         <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.notify.telegram.enabled" /><span>启用 Telegram 通知</span></label>
         <div v-if="settings.notify.telegram.enabled">
@@ -375,7 +401,7 @@ onMounted(loadAll)
       </div>
 
       <!-- 智能助手 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'assistant'" class="settings-section">
         <h3>🤖 智能助手</h3>
         <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.assistant.enabled" /><span>启用智能助手</span></label>
         <div class="fields-grid">
@@ -457,7 +483,7 @@ onMounted(loadAll)
       </div>
 
       <!-- 账号安全 -->
-      <div class="settings-section">
+      <div v-show="activeSettingsTab === 'security'" class="settings-section">
         <h3>账号安全</h3>
         <div class="pwd-form">
           <input v-model="pwdForm.old_password" type="password" placeholder="旧密码" />
@@ -477,8 +503,14 @@ onMounted(loadAll)
 </template>
 
 <style scoped>
-.settings-view { padding: 24px; display: flex; flex-direction: column; gap: 24px; overflow-y: auto; height: 100%; }
+.settings-view { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; height: 100%; }
 .loading-text { color: var(--text-dim); padding: 20px 0; }
+.settings-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; margin: -2px -2px 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 9px 14px; color: var(--text-dim); background: var(--surface); font-size: 14px; font-weight: 600; cursor: pointer; transition: all .15s ease; white-space: nowrap; }
+.settings-tab:hover { color: var(--text); border-color: var(--accent); }
+.settings-tab.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
+.settings-tab-icon { font-size: 15px; }
 .settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .settings-section h3 { font-size: 16px; font-weight: 600; }
 .site-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
@@ -515,6 +547,9 @@ onMounted(loadAll)
 .assistant-tool-main small { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 768px) {
+  .settings-view { padding: 16px; gap: 14px; }
+  .settings-tabs { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 4px 0 10px; margin: -4px -16px 0; padding-left: 16px; padding-right: 16px; }
+  .settings-tab { padding: 8px 12px; font-size: 13px; }
   .settings-section { padding: 14px; border-radius: 16px; }
   .site-grid, .fields-grid, .assistant-tool-grid { grid-template-columns: 1fr; }
   .fields-row { flex-direction: column; align-items: stretch; }
