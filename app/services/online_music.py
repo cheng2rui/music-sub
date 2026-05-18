@@ -374,6 +374,73 @@ def _kuwo_pick_download_url(rid: str) -> tuple[str, str, int, int]:
     return "", "mp3", 0, 0
 
 
+def _nki_api_key() -> str:
+    try:
+        site = (config.sites or {}).get("nki")
+        if site and site.api_key:
+            return site.api_key
+    except Exception:
+        pass
+    return os.environ.get("ONLINE_MUSIC_NKI_APIKEY", "")
+
+
+def _nki_pick_qq_download_url(song_mid: str) -> tuple[str, str, int, int, dict]:
+    """Resolve QQ songmid through user-configured NKI open API.
+
+    Returns best available quality as (url, ext, size, bitrate, raw_metadata).
+    The API key is loaded from config.sites.nki.api_key or ONLINE_MUSIC_NKI_APIKEY.
+    """
+    api_key = _nki_api_key()
+    if not api_key or not song_mid:
+        return "", "", 0, 0, {}
+    try:
+        data = _SESSION.get(
+            "https://api.nki.pw/API/music_open_api.php",
+            params={"mid": song_mid, "apikey": api_key},
+            timeout=20,
+        ).json()
+    except Exception as e:
+        logger.debug(f"[online:nki] resolve failed for {song_mid}: {e}")
+        return "", "", 0, 0, {}
+
+    # Prefer lossless SQ, then high quality, then standard.
+    for suffix, ext in (("sq", "flac"), ("pq", "flac"), ("hq", "m4a"), ("standard", "m4a"), ("fq", "m4a")):
+        url_key = "song_play_url" if suffix == "" else f"song_play_url_{suffix}"
+        size_key = "song_size_str" if suffix == "" else f"song_size_{suffix}_str"
+        kbps_key = "kbps" if suffix == "" else f"kbps_{suffix}"
+        filename_key = "song_filename" if suffix == "" else ("song_filename_lq" if suffix == "standard" else f"song_filename_{suffix}")
+        url = (data.get(url_key) or "").strip()
+        if not url:
+            continue
+        filename = str(data.get(filename_key) or "").lower()
+        inferred_ext = "flac" if filename.endswith(".flac") or ".flac" in url.lower() else ext
+        try:
+            size = int(data.get(size_key) or 0)
+        except Exception:
+            size = 0
+        try:
+            bitrate = int(data.get(kbps_key) or 0)
+        except Exception:
+            bitrate = 0
+        return url, inferred_ext, size, bitrate, data
+
+    # Some responses expose the default fields without a suffix.
+    url = (data.get("song_play_url") or "").strip()
+    if url:
+        try:
+            size = int(data.get("song_size_str") or 0)
+        except Exception:
+            size = 0
+        try:
+            bitrate = int(data.get("kbps") or 0)
+        except Exception:
+            bitrate = 0
+        filename = str(data.get("song_filename") or "").lower()
+        ext = "flac" if filename.endswith(".flac") or ".flac" in url.lower() else "m4a"
+        return url, ext, size, bitrate, data
+    return "", "", 0, 0, data
+
+
 def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
     """Search QQ Music. 参考 music-lib qq: 先 search_for_qq_cp 拿 songmid，再 musicu.fcg 拿 vkey。
 
@@ -415,7 +482,15 @@ def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
                 else ""
             )
             url, ext, size = _qq_pick_download_url(song_mid)
-            disabled = (not bool(url)) or paydownload == 1
+            bitrate = 0
+            nki_url, nki_ext, nki_size, nki_bitrate, nki_meta = _nki_pick_qq_download_url(song_mid)
+            if nki_url:
+                url, ext, size, bitrate = nki_url, nki_ext or ext, nki_size or size, nki_bitrate
+                title = nki_meta.get("song_name") or nki_meta.get("song_title") or title
+                artist = nki_meta.get("singer_name") or artist
+                album = nki_meta.get("album_name") or nki_meta.get("album_title") or album
+                cover = nki_meta.get("album_pic") or cover
+            disabled = not bool(url)
             results.append(OnlineSong(
                 source="qq",
                 song_id=song_mid,
@@ -428,6 +503,8 @@ def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
                 cover_url=cover,
                 size=size or int(row.get("size128") or 0),
                 format=ext,
+                duration=int(nki_meta.get("song_play_time") or 0) if nki_meta else 0,
+                bitrate=bitrate,
                 disabled=disabled,
             ))
         except Exception as e:
