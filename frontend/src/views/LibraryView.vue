@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -264,6 +264,19 @@ async function saveTrack() {
   finally { savingTrack.value = false }
 }
 
+async function deleteTrack(track) {
+  if (!track || !confirm(`确认删除「${track.title}」？此操作不可撤销。`)) return
+  try {
+    await applyLibraryTool('delete_files', {
+      file_ids: [track.id],
+      options: { delete_files: true, delete_empty_dirs: true, library_root: '/music' }
+    })
+    showTrackModal.value = false
+    await loadAlbums()
+    await loadStats()
+  } catch (e) { console.error(e) }
+}
+
 async function rescrapeTrack() {
   if (!selectedTrack.value) return
   scraping.value = true
@@ -458,12 +471,12 @@ onMounted(() => { loadStats(); loadAlbums() })
             :key="track.id"
             class="track-row"
           >
-            <div class="track-info" @click="openTrack(track.id)">
+            <div class="track-info" @click="playTrack(track)">
               <div class="track-title">{{ track.title }}</div>
               <div class="track-sub">{{ track.artist }} · {{ track.album }}</div>
             </div>
             <div class="track-actions">
-              <button class="play-btn" @click.stop="playTrack(track)">{{ player.currentId === track.id ? '正在播放' : '播放' }}</button>
+              <button class="play-btn" @click.stop="openTrack(track.id)">编辑</button>
               <AppBadge :color="track.scraped ? 'green' : 'orange'">
                 {{ track.scraped ? '已刮削' : '未刮削' }}
               </AppBadge>
@@ -480,6 +493,7 @@ onMounted(() => { loadStats(); loadAlbums() })
           <AppButton variant="primary" size="sm" @click="playTrack(selectedTrack)">
             {{ player.currentId === selectedTrack.id ? '正在全局播放' : '用全局播放器播放' }}
           </AppButton>
+          <AppButton variant="danger" size="sm" @click="deleteTrack(selectedTrack)">删除</AppButton>
         </div>
         <div class="detail-grid">
           <div class="detail-row"><span class="detail-label">路径</span><span class="detail-val text-dim">{{ selectedTrack.file_path }}</span></div>

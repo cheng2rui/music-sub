@@ -69,7 +69,7 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
 
     if delete_files and paths:
         for f in files:
-            if not f.file_path or not os.path.exists(f.file_path):
+            if not f.file_path or not Path(f.file_path).is_file():
                 continue
             size = 0
             try:
@@ -129,7 +129,9 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
             if not f.file_path:
                 continue
             fp = Path(f.file_path)
-            if not fp.exists():
+            # Use is_file() instead of exists() to handle hardlinks that may be missing.
+            # is_file() returns True for symlinks/hardlinks pointing to regular files.
+            if not fp.is_file():
                 continue
             try:
                 fp.unlink()
