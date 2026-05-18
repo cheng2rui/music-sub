@@ -10,9 +10,10 @@ html, body {
   line-height: 1.5;
   background-color: var(--bg);
   color: var(--text);
+  overscroll-behavior: none;
 }
 
-#app { height: 100%; }
+#app { height: 100%; min-width: 0; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -56,5 +57,43 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 @media (max-width: 768px) {
   input, textarea, select {
     font-size: 16px; /* prevent iOS zoom */
+  }
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+  .discover,
+  .subs-view,
+  .search-view,
+  .online-view,
+  .tasks-view,
+  .assistant-view,
+  .library-view,
+  .album-view,
+  .logs-view,
+  .settings-view {
+    padding: 14px !important;
+    padding-bottom: 104px !important;
+    gap: 14px !important;
+  }
+  .table-wrap {
+    margin-left: -2px;
+    margin-right: -2px;
+    padding-bottom: 4px;
+  }
+}
+
+@media (max-width: 430px) {
+  .discover,
+  .subs-view,
+  .search-view,
+  .online-view,
+  .tasks-view,
+  .assistant-view,
+  .library-view,
+  .album-view,
+  .logs-view,
+  .settings-view {
+    padding: 12px !important;
+    padding-bottom: 104px !important;
   }
 }

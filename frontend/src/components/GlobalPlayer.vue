@@ -549,27 +549,41 @@ function formatDuration(seconds) {
 
 @media (max-width: 768px) {
   .global-player {
-    left: 12px;
-    right: 12px;
-    bottom: 68px;
-    min-height: 62px;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    min-height: 60px;
     gap: 8px;
-    padding: 10px;
-    border-radius: 16px;
+    padding: 9px 10px;
+    border-radius: 18px;
   }
   .global-player.collapsed {
-    left: 12px;
-    right: 12px;
-    bottom: 68px;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(72px + env(safe-area-inset-bottom));
     width: auto;
   }
+  .collapse-toggle, .player-close, .transport-btn, .queue-close {
+    width: 30px;
+    height: 30px;
+    font-size: 14px;
+  }
   .player-info { min-width: 0; max-width: none; flex: 1; }
-  .seek-wrap { min-width: 120px; }
-  .panel-toggle { padding: 0 9px; }
-  .queue-panel { left: 0; right: 0; width: auto; max-height: min(420px, calc(100vh - 180px)); }
-  .now-panel { left: 0; right: 0; width: auto; grid-template-columns: 92px minmax(0, 1fr); max-height: min(520px, calc(100vh - 180px)); overflow-y: auto; }
+  .player-title { font-size: 13px; }
+  .player-sub { font-size: 11px; }
+  .transport { gap: 4px; }
+  .seek-wrap { display: none; }
+  .panel-toggle { height: 30px; padding: 0 9px; }
+  .queue-panel { left: 0; right: 0; width: auto; max-height: min(420px, calc(100dvh - 180px)); }
+  .now-panel { left: 0; right: 0; width: auto; grid-template-columns: 92px minmax(0, 1fr); max-height: min(520px, calc(100dvh - 180px)); overflow-y: auto; }
   .now-cover { width: 92px; height: 92px; border-radius: 14px; }
   .now-head strong { font-size: 15px; }
   .lyrics-box { grid-column: 1 / -1; max-height: 180px; }
+}
+
+@media (max-width: 430px) {
+  .panel-toggle { width: 32px; padding: 0; overflow: hidden; white-space: nowrap; }
+  .panel-toggle:first-of-type::first-letter { font-size: 14px; }
+  .transport-btn[title="上一首"], .transport-btn[title="下一首"] { display: none; }
 }
 </style>

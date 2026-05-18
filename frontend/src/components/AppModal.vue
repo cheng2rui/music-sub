@@ -37,6 +37,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
   background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
+  padding: 16px;
 }
 .modal-box {
   background: var(--surface);
@@ -62,4 +63,20 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 }
 .modal-close:hover { color: var(--text); }
 .modal-body { padding: 20px; overflow-y: auto; }
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 12px max(10px, env(safe-area-inset-right)) calc(84px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+  .modal-box {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    max-height: min(82vh, 720px);
+    border-radius: 20px;
+  }
+  .modal-header { padding: 14px 16px; }
+  .modal-body { padding: 14px; }
+}
 </style>
