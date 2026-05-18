@@ -129,9 +129,15 @@ def search_pt(db: Session, keyword: str, sites: list[str] | None = None, limit: 
                 "quality": item.quality,
                 "format": item.media_format,
                 "reasons": item.reasons,
+                "download_args": {
+                    "site": item.torrent.site,
+                    "torrent_id": item.torrent.torrent_id,
+                    "title": item.torrent.title,
+                },
             }
             for item in resp.results[:max(1, min(int(limit or 10), 30))]
         ],
+        "instruction": "如果用户要下载某个结果，调用 download_torrent，并原样传入该结果的 download_args。",
     }
 
 
