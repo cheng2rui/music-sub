@@ -22,6 +22,7 @@ from app.services.library_tools import (
     zh_convert as zh_convert_mod,
     fix_garble as fix_garble_mod,
     cue_candidates as cue_candidates_mod,
+    album_artist as album_artist_mod,
 )
 from app.services.scrape_jobs import runner as job_runner, JobStep, mark_step
 
@@ -46,6 +47,12 @@ _TOOLS: dict[str, dict[str, Any]] = {
         "description": "\u4ece\u6df7\u5728 title \u91cc\u7684 artist - title / title (Live) \u7b49\u683c\u5f0f\u62c6\u51fa\u5404\u5b57\u6bb5\u3002",
         "preview": split_meta_mod.preview,
         "apply": split_meta_mod.apply,
+    },
+    "album_artist": {
+        "label": "专辑艺人修复",
+        "description": "只修复 album_artist，不改 track artist；用于把历史库里被 feat./单曲艺人拆开的专辑合并回同一张。",
+        "preview": album_artist_mod.preview,
+        "apply": album_artist_mod.apply,
     },
     "organize": {
         "label": "\u6574\u7406\u6587\u4ef6",

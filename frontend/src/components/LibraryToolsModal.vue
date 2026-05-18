@@ -41,6 +41,7 @@ const optionPlaceholder = computed(() => {
   if (id === 'organize') return JSON.stringify({ template: '{artist}/{album}/{disc:02d}-{track:02d} {title}{ext}' }, null, 2)
   if (id === 'split_meta') return JSON.stringify({ prefer_artist_left: true, write_tags: false }, null, 2)
   if (id === 'identify') return JSON.stringify({ write_tags: false }, null, 2)
+  if (id === 'album_artist') return JSON.stringify({ album_artist: '', write_tags: false }, null, 2)
   if (id === 'dedupe') return JSON.stringify({ mode: 'trash' }, null, 2)
   if (id === 'split_audio' || id === 'cue_candidates') return JSON.stringify({ keep_original: true, overwrite_existing: false, output_subdir: '' }, null, 2)
   if (id === 'zh_t2s' || id === 'zh_s2t') return JSON.stringify({ fields: ['title', 'artist', 'album', 'genre'], write_tags: false }, null, 2)
