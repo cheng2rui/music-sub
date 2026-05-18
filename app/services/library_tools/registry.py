@@ -23,6 +23,7 @@ from app.services.library_tools import (
     fix_garble as fix_garble_mod,
     cue_candidates as cue_candidates_mod,
     album_artist as album_artist_mod,
+    delete_files as delete_files_mod,
 )
 from app.services.scrape_jobs import runner as job_runner, JobStep, mark_step
 
@@ -95,6 +96,12 @@ _TOOLS: dict[str, dict[str, Any]] = {
         "description": "查找带 .cue 的整轨音频，并批量拆成分轨。",
         "preview": cue_candidates_mod.preview,
         "apply": cue_candidates_mod.apply,
+    },
+    "delete_files": {
+        "label": "删除文件",
+        "description": "删除选中的文件，并清理由此产生的空目录。",
+        "preview": delete_files_mod.preview,
+        "apply": delete_files_mod.apply,
     },
 }
 
