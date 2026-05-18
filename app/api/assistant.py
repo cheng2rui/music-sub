@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+import app.config as cfg_module
+from app.api.settings import _is_unchanged_mask
 from app.services.assistant.service import AssistantService
 from app.services.assistant.providers import list_providers
 from app.services.assistant.tools import tool_catalog
@@ -80,14 +82,18 @@ def test_provider(req: AssistantProviderTestRequest):
     provider = req.provider or {}
     if not provider.get("model"):
         return {"ok": False, "message": "请先填写模型 ID"}
-    if not provider.get("api_key"):
+    api_key = provider.get("api_key") or ""
+    saved_key = cfg_module.config.assistant.provider.api_key
+    if _is_unchanged_mask(api_key, saved_key, 6):
+        api_key = saved_key
+    if not api_key:
         return {"ok": False, "message": "请先填写 API Key"}
     try:
         client = AssistantLLMClient(
             provider=provider.get("provider") or "openai_compatible",
             runtime=provider.get("runtime") or "",
             base_url=provider.get("base_url") or "",
-            api_key=provider.get("api_key") or "",
+            api_key=api_key,
             model=provider.get("model") or "",
             temperature=float(provider.get("temperature") or 0.2),
             timeout_seconds=int(provider.get("timeout_seconds") or 30),

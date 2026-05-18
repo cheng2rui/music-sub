@@ -396,6 +396,8 @@ class AssistantService:
             action.status = "failed"
             action.result_json = _json_dumps({"error": str(e)})
             action.updated_at = datetime.datetime.utcnow()
+            text = f"执行失败：{action.tool_name}。原因：{e}"
+            self._save_message(action.conversation_id, "assistant", text, status="failed")
             self.db.commit()
             return {"ok": False, "message": str(e)}
 
