@@ -298,6 +298,30 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
     return ToolPreview(tool="split_audio", items=items, summary={"changed": plans, "planned": plans, "tracks": track_total, "total": len(items)})
 
 
+def _ffmpeg_audio_codec_args(out_path: Path, options: dict[str, Any]) -> list[str]:
+    """Choose precise split encoding args.
+
+    Stream-copying FLAC/APE can preserve the original container duration in
+    metadata even when the audio payload is cut. Default to re-encoding common
+    formats so each split track has a correct independent duration. Users can
+    still opt into stream_copy for speed.
+    """
+    if bool(options.get("stream_copy", False)):
+        return ["-c", "copy"]
+    ext = out_path.suffix.lower()
+    if ext == ".flac":
+        return ["-c:a", "flac"]
+    if ext == ".wav":
+        return ["-c:a", "pcm_s16le"]
+    if ext == ".mp3":
+        return ["-c:a", "libmp3lame", "-q:a", "0"]
+    if ext in {".m4a", ".aac"}:
+        return ["-c:a", "aac", "-b:a", "320k"]
+    # Unknown/lossless formats: copy is the least surprising fallback, but
+    # callers can use output_subdir and manual conversion if needed.
+    return ["-c", "copy"]
+
+
 def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progress) -> dict:
     if shutil.which("ffmpeg") is None:
         return {"split": 0, "tracks": 0, "total": len(files), "error": "ffmpeg 不可用"}
@@ -338,7 +362,8 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                 ]
                 if duration > 0:
                     args.extend(["-t", f"{duration:.3f}"])
-                args.extend(["-c", "copy", str(out_path)])
+                args.extend(_ffmpeg_audio_codec_args(out_path, options))
+                args.append(str(out_path))
                 proc = subprocess.run(args, capture_output=True, text=True)
                 if proc.returncode != 0:
                     on_progress(idx, f"err:track {track['index']} ffmpeg failed: {proc.stderr.strip()[:200]}")
