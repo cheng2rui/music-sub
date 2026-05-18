@@ -153,7 +153,7 @@ onMounted(loadAll)
           <!-- Dis.Music -->
           <div class="site-card">
             <div class="site-header">
-              <span class="site-name">🐬 Dis.Music 海豚</span>
+              <span class="site-name">🐬 Dic.Music 海豚</span>
               <label class="toggle-label"><input type="checkbox" v-model="settings.sites.dismusic.enabled" /><span>启用</span></label>
             </div>
             <div v-if="settings.sites.dismusic.enabled" class="site-fields">
