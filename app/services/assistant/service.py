@@ -105,6 +105,51 @@ class AssistantService:
         self.db.commit()
         return {"ok": True}
 
+    def recent_activity(self, limit: int = 50) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit or 50), 200))
+        actions = self.db.query(AssistantAction).order_by(AssistantAction.created_at.desc()).limit(limit).all()
+        tool_messages = (
+            self.db.query(AssistantMessage)
+            .filter(AssistantMessage.role == "tool")
+            .order_by(AssistantMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        rows: list[dict[str, Any]] = []
+        for action in actions:
+            args = _safe_json_loads(action.tool_args_json)
+            result = _safe_json_loads(action.result_json)
+            rows.append({
+                "type": "action",
+                "id": action.action_id,
+                "conversation_id": action.conversation_id,
+                "tool_name": action.tool_name,
+                "status": action.status,
+                "risk": action.risk,
+                "summary": self._action_summary(action.tool_name, args, action.risk),
+                "args": args,
+                "result": _compact_tool_result(action.tool_name, result) if result else {},
+                "created_at": action.created_at,
+                "updated_at": action.updated_at,
+            })
+        for msg in tool_messages:
+            result = _safe_json_loads(msg.tool_result_json)
+            rows.append({
+                "type": "tool",
+                "id": msg.id,
+                "conversation_id": msg.conversation_id,
+                "tool_name": msg.tool_name,
+                "status": msg.status or "done",
+                "risk": tool_risk(msg.tool_name or ""),
+                "summary": f"调用工具：{msg.tool_name}",
+                "args": _safe_json_loads(msg.tool_args_json),
+                "result": _compact_tool_result(msg.tool_name or "", result) if result else {},
+                "created_at": msg.created_at,
+                "updated_at": msg.created_at,
+            })
+        rows.sort(key=lambda x: x.get("updated_at") or x.get("created_at") or datetime.datetime.min, reverse=True)
+        return rows[:limit]
+
     def _save_message(self, conversation_id: int, role: str, content: str = "", **kwargs) -> AssistantMessage:
         msg = AssistantMessage(conversation_id=conversation_id, role=role, content=content or "", **kwargs)
         self.db.add(msg)

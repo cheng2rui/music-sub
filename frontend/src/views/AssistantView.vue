@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   getAssistantCapabilities,
+  getAssistantActivity,
   getAssistantConversations,
   getAssistantMessages,
   sendAssistantMessage,
@@ -21,6 +22,7 @@ const loading = ref(false)
 const caps = ref(null)
 const errorText = ref('')
 const pendingAction = ref(null)
+const activity = ref([])
 
 const enabled = computed(() => caps.value?.enabled)
 const groupedTools = computed(() => {
@@ -49,6 +51,11 @@ async function loadMessages() {
     return
   }
   messages.value = await getAssistantMessages(currentId.value)
+}
+
+async function loadActivity() {
+  const data = await getAssistantActivity(30)
+  activity.value = data.items || []
 }
 
 async function newConversation() {
@@ -93,6 +100,7 @@ async function sendMessage() {
     pendingAction.value = res.needs_confirm ? { id: res.action_id, calls: res.tool_calls || [] } : null
     await loadConversations()
     await loadMessages()
+    await loadActivity()
   } catch (e) {
     errorText.value = e.message || '发送失败'
   } finally {
@@ -108,6 +116,7 @@ async function handleConfirm() {
     pushLocal('assistant', res.message || (res.ok ? '已执行。' : '执行失败。'))
     pendingAction.value = null
     await loadMessages()
+    await loadActivity()
   } catch (e) {
     alert(e.message || '确认失败')
   } finally {
@@ -120,6 +129,7 @@ async function handleCancel() {
   await cancelAssistantAction(pendingAction.value.id)
   pendingAction.value = null
   await loadMessages()
+  await loadActivity()
 }
 
 function roleLabel(role) { return role === 'user' ? '你' : role === 'tool' ? '工具' : '助手' }
@@ -170,10 +180,13 @@ function cardMeta(item) {
 
 function previewDetails(call) { return call.preview?.details || [] }
 function riskColor(risk) { return risk === 'high' ? 'red' : risk === 'medium' ? 'orange' : 'green' }
+function activityTime(item) { return item.updated_at || item.created_at ? new Date(item.updated_at || item.created_at).toLocaleString() : '-' }
+function activityStatusColor(status) { return status === 'failed' ? 'red' : status === 'pending' ? 'orange' : status === 'cancelled' ? 'dim' : 'green' }
 
 onMounted(async () => {
   await loadCaps()
   await loadConversations()
+  await loadActivity()
 })
 </script>
 
@@ -199,10 +212,22 @@ onMounted(async () => {
         <summary>工具能力</summary>
         <div v-for="(items, group) in groupedTools" :key="group" class="tool-group">
           <strong>{{ group }}</strong>
-          <div v-for="tool in items" :key="tool.name" class="tool-chip">
+          <div v-for="tool in items" :key="tool.name" class="tool-chip" :class="{ disabled: !tool.enabled }">
             <span>{{ tool.name }}</span>
-            <AppBadge :color="riskColor(tool.risk)">{{ tool.risk }}</AppBadge>
+            <AppBadge :color="tool.enabled ? riskColor(tool.risk) : 'dim'">{{ tool.enabled ? tool.risk : 'off' }}</AppBadge>
           </div>
+        </div>
+      </details>
+      <details class="activity-panel" open>
+        <summary>活动记录</summary>
+        <div v-if="!activity.length" class="activity-empty">暂无活动</div>
+        <div v-for="item in activity.slice(0, 12)" :key="`${item.type}-${item.id}`" class="activity-item">
+          <div class="activity-main">
+            <span>{{ item.tool_name }}</span>
+            <AppBadge :color="activityStatusColor(item.status)">{{ item.status }}</AppBadge>
+          </div>
+          <div class="activity-summary">{{ item.summary }}</div>
+          <div class="activity-time">{{ activityTime(item) }}</div>
         </div>
       </details>
     </aside>
@@ -290,11 +315,17 @@ onMounted(async () => {
 .conversation-item span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 18px; }
 .conversation-item small { color: var(--text-dim); font-size: 11px; }
 .conversation-item i { position: absolute; right: 8px; top: 8px; font-style: normal; color: var(--text-dim); }
-.tool-catalog { border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-dim); font-size: 12px; }
-.tool-catalog summary { cursor: pointer; color: var(--text); font-weight: 650; }
+.tool-catalog, .activity-panel { border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-dim); font-size: 12px; }
+.tool-catalog summary, .activity-panel summary { cursor: pointer; color: var(--text); font-weight: 650; }
 .tool-group { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .tool-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 6px 8px; background: var(--surface); }
+.tool-chip.disabled { opacity: .55; }
 .tool-chip span { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.activity-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; background: var(--surface); margin-top: 8px; }
+.activity-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-main span { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.activity-summary { color: var(--text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-time, .activity-empty { color: var(--text-muted); margin-top: 4px; font-size: 11px; }
 .chat-panel { display: flex; flex-direction: column; overflow: hidden; }
 .chat-toolbar { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chat-toolbar h2 { margin: 0; font-size: 20px; }

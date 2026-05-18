@@ -68,6 +68,11 @@ def tools(db: Session = Depends(get_db)):
     return {"tools": tool_catalog(cfg)}
 
 
+@router.get("/activity")
+def activity(limit: int = 50, db: Session = Depends(get_db)):
+    return {"items": AssistantService(db).recent_activity(limit)}
+
+
 @router.post("/providers/test")
 def test_provider(req: AssistantProviderTestRequest):
     if not req.enabled:
