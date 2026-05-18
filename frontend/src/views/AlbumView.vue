@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -15,6 +15,29 @@ const artist = computed(() => String(route.query.artist || ''))
 const album = computed(() => String(route.query.album || ''))
 const tracks = ref([])
 const loading = ref(false)
+const trackPage = ref(0)
+const trackPageSize = 50
+const trackTotal = ref(0)
+const trackPagedMode = ref(false)
+const trackFiles = ref([])
+const trackLoading = ref(false)
+const trackPageCount = computed(() => Math.max(1, Math.ceil((trackTotal.value || 0) / trackPageSize)))
+const trackPageNumbers = computed(() => {
+  const total = trackPageCount.value
+  const current = trackPage.value + 1
+  const nums = new Set([1, total])
+  for (let i = current - 2; i <= current + 2; i += 1) {
+    if (i >= 1 && i <= total) nums.add(i)
+  }
+  const sorted = Array.from(nums).sort((a, b) => a - b)
+  const out = []
+  sorted.forEach((n, idx) => {
+    if (idx && n - sorted[idx - 1] > 1) out.push('...')
+    out.push(n)
+  })
+  return out
+})
+const displayTracks = computed(() => trackPagedMode.value ? trackFiles.value : tracks.value)
 const scraping = ref(false)
 const selectedTrack = ref(null)
 const showTrackModal = ref(false)
@@ -28,11 +51,53 @@ const formats = computed(() => [...new Set(tracks.value.map(t => (t.format || ''
 async function loadTracks() {
   if (!artist.value || !album.value) return
   loading.value = true
+  trackLoading.value = true
   try {
-    tracks.value = await getAlbumTracks(artist.value, album.value)
+    const probe = await getLibraryFiles({ album_artist: artist.value, album_name: album.value, limit: 1, offset: 0, sort: 'track' })
+    trackTotal.value = probe.total || 0
+    if (trackTotal.value <= 200) {
+      trackPagedMode.value = false
+      tracks.value = await getAlbumTracks(artist.value, album.value)
+      trackTotal.value = tracks.value.length
+    } else {
+      trackPagedMode.value = true
+      trackPage.value = 0
+      trackFiles.value = []
+      await loadTrackPage(0)
+    }
+  } catch (e) {
+    console.error(e)
   } finally {
     loading.value = false
+    trackLoading.value = false
   }
+}
+
+async function loadTrackPage(page = 0) {
+  const target = Math.min(Math.max(0, page), trackPageCount.value - 1)
+  trackLoading.value = true
+  try {
+    const data = await getLibraryFiles({
+      album_artist: artist.value,
+      album_name: album.value,
+      limit: trackPageSize,
+      offset: target * trackPageSize,
+      sort: 'track'
+    })
+    trackTotal.value = data.total || 0
+    trackFiles.value = data.items || []
+    trackPage.value = target
+  } catch (e) {
+    console.error(e)
+  } finally {
+    trackLoading.value = false
+  }
+}
+
+async function changeTrackPage(page) {
+  const target = Math.min(Math.max(0, page), trackPageCount.value - 1)
+  if (target === trackPage.value || trackLoading.value) return
+  await loadTrackPage(target)
 }
 
 function coverUrl() {
@@ -52,7 +117,8 @@ async function rescrapeAlbum() {
   scraping.value = true
   try {
     await rescrapeLibrary({ album_artist: artist.value, album_name: album.value })
-    await loadTracks()
+    if (trackPagedMode.value) await loadTrackPage(trackPage.value)
+    else await loadTracks()
   } finally {
     scraping.value = false
   }
@@ -107,7 +173,8 @@ onMounted(loadTracks)
         <h2>{{ album }}</h2>
         <div class="artist-line">{{ artist }}</div>
         <div class="meta-line">
-          <span>{{ tracks.length }} 首</span>
+          <span v-if="!trackPagedMode">{{ tracks.length }} 首</span>
+          <span v-else>第 {{ trackPage + 1 }} / {{ trackPageCount }} 页 · 共 {{ trackTotal }} 首</span>
           <span>{{ formatDuration(totalDuration) }}</span>
           <span v-if="formats.length">{{ formats.join('/') }}</span>
           <span>{{ scrapedCount }}/{{ tracks.length }} 已刮削</span>
@@ -125,7 +192,7 @@ onMounted(loadTracks)
         <span>#</span><span>歌曲</span><span>格式</span><span>时长</span><span>状态</span><span></span>
       </div>
       <div
-        v-for="(track, index) in tracks"
+        v-for="(track, index) in displayTracks"
         :key="track.id"
         :class="['track-row', { active: player.currentId === track.id, 'is-unscraped': !track.scraped }]"
         @click="openTrack(track.id)"
@@ -160,6 +227,15 @@ onMounted(loadTracks)
           <label>年份<input v-model="trackEdit.year" type="number" /></label>
           <label>流派<input v-model="trackEdit.genre" /></label>
           <AppButton variant="primary" size="sm" :loading="savingTrack" @click="saveTrack">保存</AppButton>
+        <div class="pager" v-if="trackPagedMode && trackPageCount > 1">
+          <button :disabled="trackPage === 0 || trackLoading" @click="changeTrackPage(0)">&lt;&lt;</button>
+          <button :disabled="trackPage === 0 || trackLoading" @click="changeTrackPage(trackPage - 1)">&lt;</button>
+          <template v-for="p in trackPageNumbers" :key="p + '-track-page'">
+            <span v-if="p === '...'" class="pager-ellipsis">...</span>
+            <button v-else :class="{ active: p === trackPage + 1 }" :disabled="trackLoading" @click="changeTrackPage(p - 1)">{{ p }}</button>
+          </template>
+          <button :disabled="trackPage >= trackPageCount - 1 || trackLoading" @click="changeTrackPage(trackPage + 1)">&gt;</button>
+          <button :disabled="trackPage >= trackPageCount - 1 || trackLoading" @click="changeTrackPage(trackPageCount - 1)">&gt;&gt;</button>
         </div>
       </div>
     </AppModal>
@@ -180,6 +256,11 @@ h2 { font-size: clamp(28px, 5vw, 56px); line-height: 1; margin: 0; word-break: b
 .meta-line span:not(:last-child)::after { content: '·'; margin-left: 8px; color: var(--text-muted); }
 .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .loading-text { color: var(--text-dim); }
+.pager { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.pager button { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-dim); cursor: pointer; }
+.pager button:hover:not(:disabled), .pager button.active { border-color: var(--accent); color: var(--text); background: var(--surface-hover); }
+.pager button:disabled { opacity: .45; cursor: not-allowed; }
+.pager-ellipsis { color: var(--text-muted); padding: 0 2px; }
 .track-table { display: flex; flex-direction: column; gap: 4px; }
 .table-head, .track-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 80px 80px 88px 72px; align-items: center; gap: 10px; }
 .table-head { padding: 0 12px 8px; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border); }

@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -25,6 +25,29 @@ const hasMoreAlbums = ref(false)
 const selectedAlbum = ref(null)
 const albumTracks = ref([])
 const showAlbumModal = ref(false)
+const albumPage = ref(0)
+const albumPageSize = 50
+const albumTotal = ref(0)
+const albumTrackFiles = ref([])
+const albumLoading = ref(false)
+const albumPageCount = computed(() => Math.max(1, Math.ceil((albumTotal.value || 0) / albumPageSize)))
+const albumPagedMode = computed(() => albumTotal.value > 200)
+const albumVisibleTracks = computed(() => albumPagedMode.value ? albumTrackFiles.value : albumTracks.value)
+const albumPageNumbers = computed(() => {
+  const total = albumPageCount.value
+  const current = albumPage.value + 1
+  const nums = new Set([1, total])
+  for (let i = current - 2; i <= current + 2; i += 1) {
+    if (i >= 1 && i <= total) nums.add(i)
+  }
+  const sorted = Array.from(nums).sort((a, b) => a - b)
+  const out = []
+  sorted.forEach((n, idx) => {
+    if (idx && n - sorted[idx - 1] > 1) out.push('...')
+    out.push(n)
+  })
+  return out
+})
 
 const selectedTrack = ref(null)
 const showTrackModal = ref(false)
@@ -227,12 +250,78 @@ function openAlbum(artist, album) {
   router.push({ name: 'album', query: { artist, album } })
 }
 
+async function openAlbumModal(artist, album) {
+  selectedAlbum.value = { artist, album }
+  showAlbumModal.value = true
+  albumTracks.value = []
+  albumTrackFiles.value = []
+  albumTotal.value = 0
+  albumPage.value = 0
+  albumLoading.value = true
+  try {
+    const probe = await getLibraryFiles({ album_artist: artist, album_name: album, limit: 1, offset: 0, sort: 'track' })
+    albumTotal.value = probe.total || 0
+    if (albumTotal.value <= 200) {
+      albumTracks.value = await getAlbumTracks(artist, album)
+      albumTotal.value = albumTracks.value.length
+    } else {
+      await loadAlbumPage(0)
+    }
+  } catch (e) {
+    console.error(e)
+  } finally {
+    albumLoading.value = false
+  }
+}
+
+async function loadAlbumPage(page = 0) {
+  if (!selectedAlbum.value) return
+  const target = Math.min(Math.max(0, page), albumPageCount.value - 1)
+  albumLoading.value = true
+  try {
+    const data = await getLibraryFiles({
+      album_artist: selectedAlbum.value.artist,
+      album_name: selectedAlbum.value.album,
+      limit: albumPageSize,
+      offset: target * albumPageSize,
+      sort: 'track'
+    })
+    albumTotal.value = data.total || 0
+    albumTrackFiles.value = data.items || []
+    albumPage.value = target
+  } catch (e) {
+    console.error(e)
+  } finally {
+    albumLoading.value = false
+  }
+}
+
+async function changeAlbumPage(page) {
+  const target = Math.min(Math.max(0, page), albumPageCount.value - 1)
+  if (target === albumPage.value || albumLoading.value) return
+  await loadAlbumPage(target)
+}
+
+async function loadNextAlbumPage() {
+  if (albumPage.value >= albumPageCount.value - 1) return
+  await changeAlbumPage(albumPage.value + 1)
+}
+
+function playFirstAlbumTrack() {
+  const first = albumVisibleTracks.value[0]
+  if (first) playTrack(first)
+}
+
 async function rescrapeAlbum() {
   if (!selectedAlbum.value) return
   scraping.value = true
   try {
     await rescrapeLibrary({ album_artist: selectedAlbum.value.artist, album_name: selectedAlbum.value.album })
-    albumTracks.value = await getAlbumTracks(selectedAlbum.value.artist, selectedAlbum.value.album)
+    if (albumPagedMode.value) await loadAlbumPage(albumPage.value)
+    else {
+      albumTracks.value = await getAlbumTracks(selectedAlbum.value.artist, selectedAlbum.value.album)
+      albumTotal.value = albumTracks.value.length
+    }
     await loadStats()
   } catch (e) { console.error(e) }
   finally { scraping.value = false }
@@ -417,8 +506,7 @@ onMounted(() => { loadStats(); loadAlbums() })
       <div
         v-for="item in albums"
         :key="item.artist + item.album"
-        class="album-card"
-        @click="openAlbum(item.artist, item.album)"
+        @click="openAlbumModal(item.artist, item.album)"
       >
         <MusicCover :src="coverUrl(item.artist, item.album)" />
         <div class="album-info">
@@ -434,8 +522,7 @@ onMounted(() => { loadStats(); loadAlbums() })
       <div
         v-for="item in albums"
         :key="item.artist + item.album"
-        class="album-row"
-        @click="openAlbum(item.artist, item.album)"
+        @click="openAlbumModal(item.artist, item.album)"
       >
         <MusicCover :src="coverUrl(item.artist, item.album)" class="row-cover" />
         <div class="row-info">
@@ -461,13 +548,15 @@ onMounted(() => { loadStats(); loadAlbums() })
         <img :src="coverUrl(selectedAlbum?.artist, selectedAlbum?.album)" class="modal-cover" />
         <div class="modal-meta">{{ selectedAlbum?.artist }} · {{ selectedAlbum?.album }}</div>
         <div class="modal-actions">
-          <AppButton variant="primary" size="sm" @click="albumTracks[0] && playTrack(albumTracks[0])">播放第一首</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="!albumVisibleTracks.length" @click="playFirstAlbumTrack">播放第一首</AppButton>
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
           <AppButton variant="ghost" size="sm" @click="openToolbox({ album_artist: selectedAlbum?.artist, album_name: selectedAlbum?.album })">工具箱</AppButton>
         </div>
-        <div class="track-list">
+        <div v-if="albumPagedMode" class="album-page-info">第 {{ albumPage + 1 }} / {{ albumPageCount }} 页 · 共 {{ albumTotal }} 首</div>
+        <div v-if="albumLoading && !albumVisibleTracks.length" class="loading-text">加载曲目中...</div>
+        <div v-else class="track-list">
           <div
-            v-for="track in albumTracks"
+            v-for="track in albumVisibleTracks"
             :key="track.id"
             class="track-row"
           >
@@ -482,6 +571,17 @@ onMounted(() => { loadStats(); loadAlbums() })
               </AppBadge>
             </div>
           </div>
+          <div v-if="!albumVisibleTracks.length" class="loading-text">暂无曲目。</div>
+        </div>
+        <div class="pager" v-if="albumPagedMode && albumPageCount > 1">
+          <button :disabled="albumPage === 0 || albumLoading" @click="changeAlbumPage(0)">&lt;&lt;</button>
+          <button :disabled="albumPage === 0 || albumLoading" @click="changeAlbumPage(albumPage - 1)">&lt;</button>
+          <template v-for="p in albumPageNumbers" :key="p + '-album-page'">
+            <span v-if="p === '...'" class="pager-ellipsis">...</span>
+            <button v-else :class="{ active: p === albumPage + 1 }" :disabled="albumLoading" @click="changeAlbumPage(p - 1)">{{ p }}</button>
+          </template>
+          <button :disabled="albumPage >= albumPageCount - 1 || albumLoading" @click="loadNextAlbumPage">&gt;</button>
+          <button :disabled="albumPage >= albumPageCount - 1 || albumLoading" @click="changeAlbumPage(albumPageCount - 1)">&gt;&gt;</button>
         </div>
       </div>
     </AppModal>
@@ -654,6 +754,7 @@ button.scan-health-chip { cursor: pointer; }
 .modal-cover { width: 180px; height: 180px; border-radius: var(--radius-lg); object-fit: cover; }
 .modal-meta { font-size: 14px; color: var(--text-dim); }
 .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.album-page-info { color: var(--text-dim); font-size: 12px; }
 .track-list { display: flex; flex-direction: column; gap: 4px; max-height: 350px; overflow-y: auto; }
 .track-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
 .track-row:hover { background: var(--surface-hover); }
@@ -661,6 +762,11 @@ button.scan-health-chip { cursor: pointer; }
 .track-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .play-btn { border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: var(--radius-sm); padding: 4px 8px; cursor: pointer; font-size: 12px; }
 .play-btn:hover { color: var(--text); background: var(--surface); }
+.pager { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.pager button { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-dim); cursor: pointer; }
+.pager button:hover:not(:disabled), .pager button.active { border-color: var(--accent); color: var(--text); background: var(--surface-hover); }
+.pager button:disabled { opacity: .45; cursor: not-allowed; }
+.pager-ellipsis { color: var(--text-muted); padding: 0 2px; }
 .track-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-sub { font-size: 12px; color: var(--text-dim); }
 .track-modal { display: flex; flex-direction: column; gap: 20px; min-width: 460px; }
