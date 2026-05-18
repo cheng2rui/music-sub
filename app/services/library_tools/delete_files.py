@@ -1,6 +1,7 @@
 """Delete files and/or empty folders tool."""
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -11,21 +12,23 @@ from sqlalchemy.orm import Session
 from app.models import MusicFile
 from app.services.library_tools.base import PreviewItem, ToolPreview
 
+logger = logging.getLogger(__name__)
+
 
 def _collect_dirs(paths: list[str]) -> set[str]:
-    """Collect all unique parent directories from file paths."""
+    """Collect all unique parent directories from file paths, stopping at root."""
     dirs: set[str] = set()
     for p in paths:
         if not p:
             continue
-        dirs.add(str(Path(p).parent))
-        # Walk up and collect all ancestors.
-        parent = Path(p).parent
+        dp = Path(p).resolve()
         while True:
-            parent = parent.parent
-            if not parent or str(parent) == parent:  # reached root
+            parent = dp.parent
+            # Stop when parent equals self (can't go higher) or at filesystem root.
+            if parent == dp or str(parent) == "/":
                 break
             dirs.add(str(parent))
+            dp = parent
     return dirs
 
 
@@ -75,6 +78,7 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
                 pass
             file_items.append(PreviewItem(
                 file_id=f.id,
+                file_path=f.file_path,
                 label=Path(f.file_path).name,
                 before={"file_path": f.file_path},
                 after={"deleted": True},
@@ -88,6 +92,7 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
         for dir_path, depth, label in empty_dirs:
             dir_items.append(PreviewItem(
                 file_id=None,
+                file_path=dir_path,
                 label=label,
                 before={"dir_path": dir_path},
                 after={"deleted": True},
