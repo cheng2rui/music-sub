@@ -333,7 +333,7 @@ onUnmounted(() => {
                 <div class="progress-meta">
                   {{ progressPercent(task) }}%
                   <span v-if="task.download_speed"> · {{ formatSpeed(task.download_speed) }}</span>
-                  <span v-if="task.eta"> · ETA {{ formatEta(task.eta) }}</span>
+                  <span v-if="task.eta && progressPercent(task) < 100"> · ETA {{ formatEta(task.eta) }}</span>
                 </div>
               </template>
               <span v-else class="text-dim">-</span>
@@ -416,7 +416,7 @@ onUnmounted(() => {
               <div class="progress-bar"><span :style="{ width: progressPercent(task) + '%' }"></span></div>
               <div class="progress-meta">
                 {{ progressPercent(task) }}%
-                <span v-if="task.eta"> · ETA {{ formatEta(task.eta) }}</span>
+                <span v-if="task.eta && progressPercent(task) < 100"> · ETA {{ formatEta(task.eta) }}</span>
               </div>
             </template>
             <span v-else class="text-dim">进度 -</span>
