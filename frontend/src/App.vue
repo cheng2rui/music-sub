@@ -23,7 +23,7 @@ const navItems = [
   { to: '/settings', icon: '⚙️', label: '设置', short: '设置' },
 ]
 
-const mobileNavItems = computed(() => navItems.filter(item => item.mobile))
+const mobileNavItems = computed(() => navItems)
 
 const pageTitle = computed(() => route.meta?.title || '音乐订阅管理')
 const isGlass = computed(() => theme.current.includes('glass'))
@@ -58,7 +58,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.7.4</div>
+        <div class="version-tag">v0.7.5</div>
       </div>
     </aside>
 
@@ -256,8 +256,7 @@ function handleLogout() {
   }
   .mobile-theme, .mobile-logout { display: flex; }
   .bottom-tabs {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
     position: fixed;
     bottom: 0;
     left: 0;
@@ -267,21 +266,29 @@ function handleLogout() {
     border-top: 1px solid var(--border);
     align-items: stretch;
     z-index: 100;
-    padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
-    gap: 3px;
-    overflow: hidden;
+    padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     backdrop-filter: blur(18px);
   }
+  .bottom-tabs::-webkit-scrollbar { display: none; }
   .bottom-tab {
-    min-width: 0;
+    min-width: 66px;
     height: 52px;
     border-radius: 16px;
     color: var(--text-dim);
     display: inline-flex;
+    flex: 0 0 66px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 3px;
+    scroll-snap-align: center;
     transition: color .15s, background .15s, transform .15s;
     -webkit-tap-highlight-color: transparent;
   }
@@ -311,11 +318,11 @@ function handleLogout() {
 @media (max-width: 430px) {
   .app-layout { --mobile-tab-height: 58px; }
   .bottom-tabs {
-    padding-left: max(4px, env(safe-area-inset-left));
-    padding-right: max(4px, env(safe-area-inset-right));
-    gap: 2px;
+    padding-left: max(6px, env(safe-area-inset-left));
+    padding-right: max(6px, env(safe-area-inset-right));
+    gap: 5px;
   }
-  .bottom-tab { height: 46px; border-radius: 14px; }
+  .bottom-tab { min-width: 62px; flex-basis: 62px; height: 46px; border-radius: 14px; }
   .tab-icon { width: 28px; height: 28px; font-size: 15px; }
   .tab-label { display: block; }
 }

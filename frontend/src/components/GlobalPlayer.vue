@@ -44,12 +44,23 @@ function toggleQueuePanel() {
   player.toggleQueue()
 }
 
+async function openNowPanel() {
+  player.expand()
+  player.closeQueue()
+  isNowOpen.value = true
+  await loadTrackDetail()
+}
+
 async function toggleNowPanel() {
   isNowOpen.value = !isNowOpen.value
   if (isNowOpen.value) {
     player.closeQueue()
     await loadTrackDetail()
   }
+}
+
+async function handleTitleClick() {
+  await openNowPanel()
 }
 
 watch(() => player.currentId, () => {
@@ -201,10 +212,13 @@ function formatDuration(seconds) {
       {{ player.isCollapsed ? '▴' : '▾' }}
     </button>
 
-    <div class="player-info" @click="player.expand">
-      <div class="player-title">{{ title }}</div>
+    <button class="player-info" type="button" title="查看正在播放详情" @click="handleTitleClick">
+      <div class="player-title">
+        <span class="player-title-text">{{ title }}</span>
+        <span class="detail-chip" aria-hidden="true">详情</span>
+      </div>
       <div class="player-sub">{{ subtitle || '未知来源' }}</div>
-    </div>
+    </button>
 
     <div v-show="!player.isCollapsed" class="transport">
       <button class="transport-btn" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev">⏮</button>
@@ -261,7 +275,7 @@ function formatDuration(seconds) {
 
     <button
       v-show="!player.isCollapsed"
-      :class="['panel-toggle', { active: isNowOpen }]"
+      :class="['panel-toggle', 'now-toggle', { active: isNowOpen }]"
       title="正在播放详情"
       aria-label="正在播放详情"
       @click="toggleNowPanel"
@@ -404,13 +418,38 @@ function formatDuration(seconds) {
   max-width: 360px;
   overflow: hidden;
   cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
 }
+.player-info:hover .player-title-text { color: var(--accent); }
 .player-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 14px;
   font-weight: 800;
   white-space: nowrap;
+}
+.player-title-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.detail-chip {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 800;
 }
 .player-sub {
   margin-top: 2px;
@@ -585,6 +624,7 @@ function formatDuration(seconds) {
   .transport { gap: 4px; }
   .seek-wrap { display: none; }
   .panel-toggle { height: 30px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; }
+  .now-toggle { display: none; }
   .mobile-progress { display: block; position: absolute; left: 14px; right: 14px; bottom: 5px; height: 3px; border-radius: 999px; background: var(--surface); overflow: hidden; }
   .mobile-progress > div { height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s linear; }
   .queue-panel { left: 0; right: 0; width: auto; max-height: min(420px, calc(100dvh - 180px)); }
