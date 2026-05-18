@@ -98,6 +98,7 @@ export const organizeQbTask = (hash) => authFetch(`/api/tasks/qb/${hash}/organiz
 // ============ Assistant ============
 export const getAssistantCapabilities = () => authFetch('/api/assistant/capabilities').then(r => r.json())
 export const getAssistantProviders = () => authFetch('/api/assistant/providers').then(r => r.json())
+export const getAssistantTools = () => authFetch('/api/assistant/tools').then(r => r.json())
 export const testAssistantProvider = (enabled, provider) => authFetch('/api/assistant/providers/test', {
   method: 'POST',
   body: JSON.stringify({ enabled, provider })

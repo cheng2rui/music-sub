@@ -23,6 +23,15 @@ const errorText = ref('')
 const pendingAction = ref(null)
 
 const enabled = computed(() => caps.value?.enabled)
+const groupedTools = computed(() => {
+  const groups = {}
+  for (const tool of caps.value?.tool_catalog || []) {
+    const group = tool.group || '其他'
+    groups[group] = groups[group] || []
+    groups[group].push(tool)
+  }
+  return groups
+})
 
 async function loadCaps() { caps.value = await getAssistantCapabilities() }
 
@@ -160,6 +169,7 @@ function cardMeta(item) {
 }
 
 function previewDetails(call) { return call.preview?.details || [] }
+function riskColor(risk) { return risk === 'high' ? 'red' : risk === 'medium' ? 'orange' : 'green' }
 
 onMounted(async () => {
   await loadCaps()
@@ -185,6 +195,16 @@ onMounted(async () => {
           <i @click.stop="removeConversation(conv)">×</i>
         </button>
       </div>
+      <details class="tool-catalog">
+        <summary>工具能力</summary>
+        <div v-for="(items, group) in groupedTools" :key="group" class="tool-group">
+          <strong>{{ group }}</strong>
+          <div v-for="tool in items" :key="tool.name" class="tool-chip">
+            <span>{{ tool.name }}</span>
+            <AppBadge :color="riskColor(tool.risk)">{{ tool.risk }}</AppBadge>
+          </div>
+        </div>
+      </details>
     </aside>
 
     <section class="chat-panel">
@@ -270,6 +290,11 @@ onMounted(async () => {
 .conversation-item span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 18px; }
 .conversation-item small { color: var(--text-dim); font-size: 11px; }
 .conversation-item i { position: absolute; right: 8px; top: 8px; font-style: normal; color: var(--text-dim); }
+.tool-catalog { border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-dim); font-size: 12px; }
+.tool-catalog summary { cursor: pointer; color: var(--text); font-weight: 650; }
+.tool-group { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.tool-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 6px 8px; background: var(--surface); }
+.tool-chip span { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .chat-panel { display: flex; flex-direction: column; overflow: hidden; }
 .chat-toolbar { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chat-toolbar h2 { margin: 0; font-size: 20px; }

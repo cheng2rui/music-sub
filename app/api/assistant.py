@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.services.assistant.service import AssistantService
 from app.services.assistant.providers import list_providers
+from app.services.assistant.tools import tool_catalog
 from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError
 
 router = APIRouter()
@@ -59,6 +60,11 @@ def capabilities(db: Session = Depends(get_db)):
 @router.get("/providers")
 def providers():
     return {"providers": list_providers()}
+
+
+@router.get("/tools")
+def tools():
+    return {"tools": tool_catalog()}
 
 
 @router.post("/providers/test")

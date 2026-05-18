@@ -13,7 +13,7 @@ from app import config as cfg_module
 from app.models import AssistantAction, AssistantConversation, AssistantMessage
 from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError
 from app.services.assistant.prompts import SYSTEM_PROMPT
-from app.services.assistant.tools import execute_tool, openai_tools, tool_risk
+from app.services.assistant.tools import execute_tool, openai_tools, tool_catalog, tool_risk
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,7 @@ class AssistantService:
             "provider": cfg.provider.provider,
             "model": cfg.provider.model,
             "tools": [t["function"]["name"] for t in openai_tools()],
+            "tool_catalog": tool_catalog(),
             "risk_control": {
                 "download": cfg.require_confirm_for_download,
                 "delete": cfg.require_confirm_for_delete,
@@ -333,16 +334,41 @@ class AssistantService:
                 tool_args_json=action.tool_args_json,
                 tool_result_json=action.result_json,
             )
-            text = f"已执行：{action.tool_name}。"
+            text = self._tool_success_message(action.tool_name, args, result)
+            preview = self._action_preview(action.tool_name, args, action.risk, self._action_summary(action.tool_name, args, action.risk))
             self._save_message(action.conversation_id, "assistant", text)
             self.db.commit()
-            return {"ok": True, "message": text, "result": result}
+            return {"ok": True, "message": text, "result": result, "preview": preview}
         except Exception as e:
             action.status = "failed"
             action.result_json = _json_dumps({"error": str(e)})
             action.updated_at = datetime.datetime.utcnow()
             self.db.commit()
             return {"ok": False, "message": str(e)}
+
+    def _tool_success_message(self, name: str, args: dict[str, Any], result: dict[str, Any]) -> str:
+        if not isinstance(result, dict):
+            return f"已执行：{name}。"
+        if name == "download_torrent":
+            if result.get("already_exists"):
+                return f"任务已存在：#{result.get('task_id')}，没有重复添加。"
+            return f"已添加下载任务：#{result.get('task_id')}《{result.get('title') or args.get('title') or args.get('torrent_id')}》。你可以到任务列表查看进度。"
+        if name == "download_online_song":
+            return f"已下载在线音乐并创建任务：#{result.get('task_id')}。文件：{result.get('file_path') or '-'}；整理入库：{'是' if result.get('organized') else '否'}。"
+        if name == "create_subscription":
+            sub = result.get("subscription") or {}
+            return f"已创建订阅：#{sub.get('id')} {sub.get('keyword')}（{sub.get('type')} / {sub.get('quality')} / {sub.get('sites')}）。"
+        if name == "organize_task":
+            return f"已提交整理任务：#{result.get('task_id')}，状态：{result.get('status') or 'ok'}。"
+        if name == "rescrape_album":
+            if result.get("job_id"):
+                return f"已提交重新刮削后台任务：{result.get('job_id')}，共 {result.get('total', 1)} 张专辑。"
+            return "已执行专辑重新刮削。"
+        if name == "pause_task":
+            return f"已暂停任务：#{result.get('task_id')}。"
+        if name == "resume_task":
+            return f"已继续任务：#{result.get('task_id')}。"
+        return f"已执行：{name}。"
 
     def cancel_action(self, action_id: str) -> dict[str, Any]:
         action = self.db.query(AssistantAction).filter(AssistantAction.action_id == action_id).first()

@@ -316,3 +316,32 @@ def execute_tool(db: Session, name: str, args: dict[str, Any] | None = None) -> 
 
 def tool_risk(name: str) -> str:
     return (TOOL_SPECS.get(name) or {}).get("risk", "high")
+
+
+def tool_catalog() -> list[dict[str, Any]]:
+    group_map = {
+        "get_system_status": "系统",
+        "get_library_stats": "音乐库",
+        "search_library": "音乐库",
+        "list_tasks": "任务",
+        "list_subscriptions": "订阅",
+        "search_pt": "搜索",
+        "search_online": "搜索",
+        "pause_task": "任务动作",
+        "resume_task": "任务动作",
+        "create_subscription": "订阅动作",
+        "download_torrent": "下载动作",
+        "download_online_song": "下载动作",
+        "organize_task": "音乐库动作",
+        "rescrape_album": "音乐库动作",
+    }
+    return [
+        {
+            "name": name,
+            "description": spec.get("description", ""),
+            "risk": spec.get("risk", "high"),
+            "group": group_map.get(name, "其他"),
+            "requires_confirm_by_default": spec.get("risk") in {"medium", "high"},
+        }
+        for name, spec in TOOL_SPECS.items()
+    ]
