@@ -1,4 +1,5 @@
 """Hardlink organizer - link downloaded files to library structure."""
+import errno
 import os
 import logging
 from pathlib import Path
@@ -30,6 +31,26 @@ def get_audio_files(path: str) -> list[str]:
     return sorted(files)
 
 
+def _same_device(source: str | Path, target: str | Path) -> bool | None:
+    """Return whether source and target are on the same filesystem.
+
+    None means the check could not be completed because neither the path nor a
+    parent exists yet.
+    """
+    try:
+        src = Path(source)
+        dst = Path(target)
+        while not src.exists() and src.parent != src:
+            src = src.parent
+        while not dst.exists() and dst.parent != dst:
+            dst = dst.parent
+        if src.exists() and dst.exists():
+            return src.stat().st_dev == dst.stat().st_dev
+    except Exception:
+        return None
+    return None
+
+
 def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> list[str]:
     """Hardlink audio files from source to library directory.
 
@@ -57,6 +78,13 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
     target_dir = os.path.join(library_base, rel_path)
     os.makedirs(target_dir, exist_ok=True)
 
+    if _same_device(source_dir, target_dir) is False:
+        logger.warning(
+            "Download path and library path are on different filesystems; "
+            "hardlinks are unavailable and files will be copied instead. "
+            f"source={source_dir} target={target_dir}"
+        )
+
     audio_files = get_audio_files(source_dir)
     linked = []
 
@@ -78,7 +106,7 @@ def hardlink_to_library(source_dir: str, artist: str = "", album: str = "") -> l
             _copy_album_sidecars(Path(src_file).parent, Path(target_file).parent)
             logger.info(f"Hardlinked: {src_file} -> {target_file}")
         except OSError as e:
-            if e.errno == 18:  # Cross-device link
+            if e.errno == errno.EXDEV:  # Cross-device link
                 logger.warning(f"Cross-device link not supported, copying: {src_file}")
                 import shutil
                 shutil.copy2(src_file, target_file)

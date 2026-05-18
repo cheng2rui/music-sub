@@ -67,7 +67,10 @@ async function loadAll() {
 async function handleSave() {
   saving.value = true
   try {
-    await updateSettings(settings.value)
+    const res = await updateSettings(settings.value)
+    if (res?.warnings?.length) {
+      alert(`⚠️ 设置已保存\n${res.warnings.join('\n')}`)
+    }
   } catch (e) { console.error(e) }
   finally { saving.value = false }
 }

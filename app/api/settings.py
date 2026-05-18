@@ -1,4 +1,5 @@
 """Settings API routes."""
+from pathlib import Path
 import yaml
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -146,11 +147,36 @@ def get_settings():
     return data
 
 
+def _existing_device(path: str) -> int | None:
+    """Return st_dev for path or its nearest existing parent."""
+    try:
+        p = Path(path).expanduser()
+        while not p.exists() and p.parent != p:
+            p = p.parent
+        if p.exists():
+            return p.stat().st_dev
+    except Exception:
+        return None
+    return None
+
+
+def _path_warnings(paths: PathsSettingInput) -> list[str]:
+    warnings: list[str] = []
+    downloads_dev = _existing_device(paths.downloads)
+    library_dev = _existing_device(paths.library)
+    if downloads_dev is not None and library_dev is not None and downloads_dev != library_dev:
+        warnings.append(
+            "下载目录和音乐库目录位于不同文件系统，无法使用硬链接；整理时会复制文件并占用额外空间。"
+        )
+    return warnings
+
+
 @router.put("/")
 def save_settings(settings: AllSettings):
     """Save settings to config.yaml and reload."""
 
-    # Build raw dict for YAML
+    # Build raw dict for YAML. Keep auth even though it is managed through the
+    # dedicated password API; older versions accidentally dropped auth on save.
     raw = {
         "sites": {},
         "qbittorrent": settings.qbittorrent.model_dump(),
@@ -158,6 +184,7 @@ def save_settings(settings: AllSettings):
         "scraper": settings.scraper.model_dump(),
         "scheduler": settings.scheduler.model_dump(),
         "notify": settings.notify.model_dump(),
+        "auth": cfg_module.config.auth.model_dump(),
         "assistant": settings.assistant.model_dump(),
     }
 
@@ -197,7 +224,11 @@ def save_settings(settings: AllSettings):
     from app.scheduler import apply_scheduler_config
     apply_scheduler_config()
 
-    return {"ok": True, "message": "Settings saved and reloaded"}
+    warnings = _path_warnings(settings.paths)
+    message = "Settings saved and reloaded"
+    if warnings:
+        message += "；" + "；".join(warnings)
+    return {"ok": True, "message": message, "warnings": warnings}
 
 
 @router.post("/test_qb")
