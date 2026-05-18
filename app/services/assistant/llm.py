@@ -34,7 +34,7 @@ class AssistantLLMClient:
         self.api_key = api_key or ""
         self.model = model or ""
         self.temperature = temperature
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = max(5, min(int(timeout_seconds or 60), 180))
 
     @property
     def configured(self) -> bool:
@@ -74,14 +74,24 @@ class AssistantLLMClient:
                 timeout=self.timeout_seconds,
             )
             if resp.status_code >= 400:
-                raise AssistantLLMError(f"HTTP {resp.status_code}: {resp.text[:800]}")
-            data = resp.json()
+                raise AssistantLLMError(_http_error_message(resp, self.api_key))
+            try:
+                data = resp.json()
+            except ValueError as e:
+                raise AssistantLLMError(f"模型返回了非 JSON 响应：{_sanitize_error(resp.text[:300], self.api_key)}") from e
             choices = data.get("choices") or []
             if not choices:
-                raise AssistantLLMError("模型没有返回内容。")
-            return choices[0].get("message") or {}
+                raise AssistantLLMError("模型没有返回 choices，请检查模型 ID 或服务兼容性。")
+            message = choices[0].get("message") or {}
+            if not message.get("content") and not message.get("tool_calls"):
+                raise AssistantLLMError("模型返回为空，没有文字或工具调用。")
+            return message
         except AssistantLLMError:
             raise
+        except requests.Timeout as e:
+            raise AssistantLLMError(f"模型调用超时（{self.timeout_seconds}s），请稍后重试或调大 Assistant 超时。") from e
+        except requests.ConnectionError as e:
+            raise AssistantLLMError(f"连接模型服务失败：{_sanitize_error(e, self.api_key)}") from e
         except Exception as e:
             logger.exception("assistant openai-compatible request failed")
             raise AssistantLLMError(f"模型调用失败：{_sanitize_error(e, self.api_key)}") from e
@@ -151,8 +161,11 @@ class AssistantLLMClient:
                 timeout=self.timeout_seconds,
             )
             if resp.status_code >= 400:
-                raise AssistantLLMError(f"HTTP {resp.status_code}: {resp.text[:800]}")
-            data = resp.json()
+                raise AssistantLLMError(_http_error_message(resp, self.api_key))
+            try:
+                data = resp.json()
+            except ValueError as e:
+                raise AssistantLLMError(f"模型返回了非 JSON 响应：{_sanitize_error(resp.text[:300], self.api_key)}") from e
             content = data.get("content") or []
             text_parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
             tool_calls = []
@@ -166,17 +179,39 @@ class AssistantLLMClient:
             out = {"role": "assistant", "content": "\n".join([p for p in text_parts if p]).strip()}
             if tool_calls:
                 out["tool_calls"] = tool_calls
+            if not out.get("content") and not out.get("tool_calls"):
+                raise AssistantLLMError("模型返回为空，没有文字或工具调用。")
             return out
+        except AssistantLLMError:
+            raise
+        except requests.Timeout as e:
+            raise AssistantLLMError(f"模型调用超时（{self.timeout_seconds}s），请稍后重试或调大 Assistant 超时。") from e
+        except requests.ConnectionError as e:
+            raise AssistantLLMError(f"连接模型服务失败：{_sanitize_error(e, self.api_key)}") from e
         except Exception as e:
             logger.exception("assistant anthropic-compatible request failed")
             raise AssistantLLMError(f"模型调用失败：{_sanitize_error(e, self.api_key)}") from e
 
 
-def _sanitize_error(error: Exception, api_key: str = "") -> str:
-    text = str(error) or error.__class__.__name__
+def _sanitize_error(error: Exception | str, api_key: str = "") -> str:
+    text = str(error) or getattr(error, "__class__", type(error)).__name__
     if api_key:
         text = text.replace(api_key, "***")
     return text
+
+
+def _http_error_message(resp: requests.Response, api_key: str = "") -> str:
+    preview = resp.text[:800]
+    try:
+        data = resp.json()
+        detail = data.get("error") or data.get("detail") or data.get("message")
+        if isinstance(detail, dict):
+            preview = detail.get("message") or json.dumps(detail, ensure_ascii=False)[:800]
+        elif detail:
+            preview = str(detail)[:800]
+    except ValueError:
+        pass
+    return f"模型服务返回 HTTP {resp.status_code}：{_sanitize_error(preview, api_key)}"
 
 
 # Backwards-compatible alias used by older service code/tests.

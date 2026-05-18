@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import config as cfg_module
 from app.models import AssistantAction, AssistantConversation, AssistantMessage
-from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError
+from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError, _sanitize_error
 from app.services.assistant.prompts import SYSTEM_PROMPT
 from app.services.assistant.tools import execute_tool, openai_tools, tool_catalog, tool_risk
 
@@ -70,12 +70,20 @@ class AssistantService:
         cfg = cfg_module.config.assistant
         enabled_tools = self._enabled_tool_names()
         tools = openai_tools(enabled_tools)
+        warnings = []
+        if not cfg.enabled:
+            warnings.append("智能助手未启用")
+        if cfg.enabled and not cfg.provider.model:
+            warnings.append("未配置模型 ID")
+        if cfg.enabled and not cfg.provider.base_url:
+            warnings.append("未配置模型服务地址")
         return {
             "enabled": cfg.enabled,
             "provider": cfg.provider.provider,
             "model": cfg.provider.model,
             "tools": [t["function"]["name"] for t in tools],
             "tool_catalog": tool_catalog(enabled_tools),
+            "warnings": warnings,
             "risk_control": {
                 "download": cfg.require_confirm_for_download,
                 "delete": cfg.require_confirm_for_delete,
@@ -191,10 +199,37 @@ class AssistantService:
             timeout_seconds=cfg.timeout_seconds,
         )
 
+    def _chat_response(
+        self,
+        conversation_id: int,
+        message: str,
+        *,
+        ok: bool = True,
+        error_code: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        needs_confirm: bool = False,
+        action_id: str | None = None,
+    ) -> dict[str, Any]:
+        data = {
+            "ok": ok,
+            "conversation_id": conversation_id,
+            "message": message,
+            "tool_calls": tool_calls or [],
+            "needs_confirm": needs_confirm,
+        }
+        if action_id:
+            data["action_id"] = action_id
+        if not ok:
+            data["error"] = {"code": error_code or "assistant_error", "message": message}
+        return data
+
     def chat(self, message: str, conversation_id: int | None = None) -> dict[str, Any]:
         cfg = cfg_module.config.assistant
+        message = (message or "").strip()
+        if not message:
+            return self._chat_response(conversation_id or 0, "请输入要发送给助手的内容。", ok=False, error_code="empty_message")
         if not cfg.enabled:
-            return {"conversation_id": conversation_id or 0, "message": "智能助手未启用，请先到设置里开启 Assistant。", "tool_calls": [], "needs_confirm": False}
+            return self._chat_response(conversation_id or 0, "智能助手未启用，请先到设置里开启 Assistant。", ok=False, error_code="assistant_disabled")
         conv = self.db.query(AssistantConversation).filter(AssistantConversation.id == conversation_id).first() if conversation_id else None
         if not conv:
             conv = self.create_conversation((message or "新对话")[:40])
@@ -211,7 +246,7 @@ class AssistantService:
                 if not tool_calls:
                     content = assistant_msg.get("content") or "我查到了，但模型没有生成文字总结。"
                     self._save_message(conv.id, "assistant", content)
-                    return {"conversation_id": conv.id, "message": content, "tool_calls": tool_events, "needs_confirm": False}
+                    return self._chat_response(conv.id, content, tool_calls=tool_events)
 
                 messages.append(assistant_msg)
                 for call in tool_calls[:5]:
@@ -221,52 +256,71 @@ class AssistantService:
 
             text = "这次调用的工具步骤太多，我先暂停一下。请确认下一步要继续搜索、下载还是整理。"
             self._save_message(conv.id, "assistant", text)
-            return {"conversation_id": conv.id, "message": text, "tool_calls": tool_events, "needs_confirm": False}
+            return self._chat_response(conv.id, text, tool_calls=tool_events)
         except AssistantLLMError as e:
             text = str(e)
             self._save_message(conv.id, "assistant", text, status="failed")
-            return {"conversation_id": conv.id, "message": text, "tool_calls": tool_events, "needs_confirm": False}
+            return self._chat_response(conv.id, text, ok=False, error_code="llm_error", tool_calls=tool_events)
         except Exception as e:
             logger.exception("assistant chat failed")
-            text = f"助手执行失败：{e}"
+            text = f"助手执行失败：{_sanitize_error(e, cfg.provider.api_key)}"
             self._save_message(conv.id, "assistant", text, status="failed")
-            return {"conversation_id": conv.id, "message": text, "tool_calls": tool_events, "needs_confirm": False}
+            return self._chat_response(conv.id, text, ok=False, error_code="assistant_error", tool_calls=tool_events)
 
     def _execute_or_request_confirm(self, conversation_id: int, call: dict[str, Any], messages: list[dict[str, Any]], tool_events: list[dict[str, Any]]) -> dict[str, Any] | None:
         fn = call.get("function") or {}
         name = fn.get("name") or ""
-        args = _safe_json_loads(fn.get("arguments"))
+        raw_args = fn.get("arguments") or "{}"
+        try:
+            args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+        except Exception:
+            args = {}
+            result = {"ok": False, "error": f"工具参数不是合法 JSON：{_truncate_text(str(raw_args), 300)}"}
+            tool_events.append({"name": name or "unknown", "args": {}, "result": result, "risk": "high", "status": "failed"})
+            self._save_message(conversation_id, "tool", tool_name=name, tool_args_json="{}", tool_result_json=_json_dumps(result), status="failed")
+            messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": _json_dumps(result)})
+            return None
         risk = tool_risk(name)
         allowed, reason = self._tool_allowed(name)
         if not allowed:
             text = f"当前设置不允许执行：{name}。{reason}"
             self._save_message(conversation_id, "assistant", text, status="failed")
-            return {"conversation_id": conversation_id, "message": text, "tool_calls": [], "needs_confirm": False}
+            return self._chat_response(conversation_id, text, ok=False, error_code="tool_not_allowed")
         if self._requires_confirm(name, risk):
             action_id = self._create_action(conversation_id, name, args, risk)
             summary = self._action_summary(name, args, risk)
             preview = self._action_preview(name, args, risk, summary)
             text = f"需要确认后才能执行：{summary}"
             self._save_message(conversation_id, "assistant", text, status="needs_confirm")
-            return {
-                "conversation_id": conversation_id,
-                "message": text,
-                "tool_calls": [{"id": action_id, "name": name, "args": args, "risk": risk, "summary": summary, "preview": preview, "requires_confirm": True}],
-                "needs_confirm": True,
-                "action_id": action_id,
-            }
-        result = execute_tool(self.db, name, args)
-        compact_result = _compact_tool_result(name, result)
-        tool_events.append({"name": name, "args": args, "result": compact_result, "risk": risk})
-        self._save_message(
-            conversation_id,
-            "tool",
-            tool_name=name,
-            tool_call_id=call.get("id"),
-            tool_args_json=_json_dumps(args),
-            tool_result_json=_json_dumps(result),
-        )
-        messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": _json_dumps(compact_result)})
+            tool_call = {"id": action_id, "name": name, "args": args, "risk": risk, "summary": summary, "preview": preview, "requires_confirm": True}
+            return self._chat_response(conversation_id, text, tool_calls=[tool_call], needs_confirm=True, action_id=action_id)
+        try:
+            result = execute_tool(self.db, name, args)
+            compact_result = _compact_tool_result(name, result)
+            tool_events.append({"name": name, "args": args, "result": compact_result, "risk": risk, "status": "done"})
+            self._save_message(
+                conversation_id,
+                "tool",
+                tool_name=name,
+                tool_call_id=call.get("id"),
+                tool_args_json=_json_dumps(args),
+                tool_result_json=_json_dumps(result),
+            )
+            messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": _json_dumps(compact_result)})
+        except Exception as e:
+            logger.exception("assistant tool failed: %s", name)
+            result = {"ok": False, "error": _sanitize_error(e, cfg_module.config.assistant.provider.api_key), "tool": name}
+            tool_events.append({"name": name, "args": args, "result": result, "risk": risk, "status": "failed"})
+            self._save_message(
+                conversation_id,
+                "tool",
+                tool_name=name,
+                tool_call_id=call.get("id"),
+                tool_args_json=_json_dumps(args),
+                tool_result_json=_json_dumps(result),
+                status="failed",
+            )
+            messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": _json_dumps(result)})
         return None
 
     def _tool_allowed(self, name: str) -> tuple[bool, str]:
@@ -393,13 +447,15 @@ class AssistantService:
             self.db.commit()
             return {"ok": True, "message": text, "result": result, "preview": preview}
         except Exception as e:
+            logger.exception("assistant confirmed action failed: %s", action.tool_name)
+            safe_error = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
             action.status = "failed"
-            action.result_json = _json_dumps({"error": str(e)})
+            action.result_json = _json_dumps({"error": safe_error})
             action.updated_at = datetime.datetime.utcnow()
-            text = f"执行失败：{action.tool_name}。原因：{e}"
+            text = f"执行失败：{action.tool_name}。原因：{safe_error}"
             self._save_message(action.conversation_id, "assistant", text, status="failed")
             self.db.commit()
-            return {"ok": False, "message": str(e)}
+            return {"ok": False, "message": safe_error, "error": {"code": "tool_error", "message": safe_error}}
 
     def _tool_success_message(self, name: str, args: dict[str, Any], result: dict[str, Any]) -> str:
         if not isinstance(result, dict):

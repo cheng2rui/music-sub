@@ -1,5 +1,6 @@
 """Assistant API routes."""
 import datetime
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -12,8 +13,9 @@ from app.api.settings import _is_unchanged_mask
 from app.services.assistant.service import AssistantService
 from app.services.assistant.providers import list_providers
 from app.services.assistant.tools import tool_catalog
-from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError
+from app.services.assistant.llm import AssistantLLMClient, AssistantLLMError, _sanitize_error
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -100,9 +102,11 @@ def test_provider(req: AssistantProviderTestRequest):
         )
         return client.test()
     except AssistantLLMError as e:
-        return {"ok": False, "message": str(e)}
+        return {"ok": False, "message": str(e), "error": {"code": "llm_error", "message": str(e)}}
     except Exception as e:
-        return {"ok": False, "message": str(e)}
+        logger.exception("assistant provider test failed")
+        message = _sanitize_error(e, api_key)
+        return {"ok": False, "message": message, "error": {"code": "provider_test_failed", "message": message}}
 
 
 @router.get("/conversations")
@@ -127,14 +131,29 @@ def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
 
 @router.post("/chat")
 def chat(req: AssistantChatRequest, db: Session = Depends(get_db)):
-    return AssistantService(db).chat(req.message, req.conversation_id)
+    try:
+        return AssistantService(db).chat(req.message, req.conversation_id)
+    except Exception as e:
+        logger.exception("assistant chat route failed")
+        message = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
+        return {"ok": False, "conversation_id": req.conversation_id or 0, "message": f"助手接口异常：{message}", "tool_calls": [], "needs_confirm": False, "error": {"code": "api_error", "message": message}}
 
 
 @router.post("/actions/{action_id}/confirm")
 def confirm_action(action_id: str, db: Session = Depends(get_db)):
-    return AssistantService(db).confirm_action(action_id)
+    try:
+        return AssistantService(db).confirm_action(action_id)
+    except Exception as e:
+        logger.exception("assistant confirm route failed")
+        message = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
+        return {"ok": False, "message": message, "error": {"code": "api_error", "message": message}}
 
 
 @router.post("/actions/{action_id}/cancel")
 def cancel_action(action_id: str, db: Session = Depends(get_db)):
-    return AssistantService(db).cancel_action(action_id)
+    try:
+        return AssistantService(db).cancel_action(action_id)
+    except Exception as e:
+        logger.exception("assistant cancel route failed")
+        message = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
+        return {"ok": False, "message": message, "error": {"code": "api_error", "message": message}}
