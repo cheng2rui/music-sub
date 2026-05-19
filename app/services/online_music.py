@@ -6,10 +6,12 @@ can later swap to go-music-dl/musicn CLI without changing the frontend API.
 """
 import hashlib
 import logging
+import math
 import os
 import random
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
@@ -384,23 +386,29 @@ def _nki_api_key() -> str:
     return os.environ.get("ONLINE_MUSIC_NKI_APIKEY", "")
 
 
-def _nki_pick_qq_download_url(song_mid: str) -> tuple[str, str, int, int, dict]:
+def _nki_pick_qq_download_url(song_mid: str, timeout: float | tuple[float, float] = (3, 10)) -> tuple[str, str, int, int, dict]:
     """Resolve QQ songmid through user-configured NKI open API.
 
     Returns best available quality as (url, ext, size, bitrate, raw_metadata).
     The API key is loaded from config.sites.nki.api_key or ONLINE_MUSIC_NKI_APIKEY.
+    NKI is intentionally used during download resolution instead of bulk search,
+    because one request per search row can make search appear stuck when the API
+    is slow. It gets first priority on click, with a bounded timeout before the
+    built-in QQ vkey fallback is tried.
     """
     api_key = _nki_api_key()
     if not api_key or not song_mid:
         return "", "", 0, 0, {}
+    started = time.perf_counter()
     try:
         data = _SESSION.get(
             "https://api.nki.pw/API/music_open_api.php",
             params={"mid": song_mid, "apikey": api_key},
-            timeout=20,
+            timeout=timeout,
         ).json()
+        logger.info(f"[online:nki] resolved {song_mid} in {time.perf_counter() - started:.2f}s")
     except Exception as e:
-        logger.debug(f"[online:nki] resolve failed for {song_mid}: {e}")
+        logger.warning(f"[online:nki] resolve failed for {song_mid} after {time.perf_counter() - started:.2f}s: {e}")
         return "", "", 0, 0, {}
 
     # Prefer lossless SQ, then high quality, then standard.
@@ -481,16 +489,14 @@ def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
                 if album_mid
                 else ""
             )
-            url, ext, size = _qq_pick_download_url(song_mid)
+            # Search must stay fast: only collect metadata here.  QQ download
+            # URLs (NKI first, then musicu.fcg fallback) are resolved on click in
+            # download_online_song(), because NKI can take 20s+ or timeout.
+            size = int(row.get("sizeflac") or row.get("size320") or row.get("size128") or 0)
+            ext = "flac" if int(row.get("sizeflac") or 0) > 0 else "mp3"
             bitrate = 0
-            nki_url, nki_ext, nki_size, nki_bitrate, nki_meta = _nki_pick_qq_download_url(song_mid)
-            if nki_url:
-                url, ext, size, bitrate = nki_url, nki_ext or ext, nki_size or size, nki_bitrate
-                title = nki_meta.get("song_name") or nki_meta.get("song_title") or title
-                artist = nki_meta.get("singer_name") or artist
-                album = nki_meta.get("album_name") or nki_meta.get("album_title") or album
-                cover = nki_meta.get("album_pic") or cover
-            disabled = not bool(url)
+            url = ""
+            disabled = False
             results.append(OnlineSong(
                 source="qq",
                 song_id=song_mid,
@@ -503,7 +509,7 @@ def search_qq(keyword: str, limit: int = 20) -> list[OnlineSong]:
                 cover_url=cover,
                 size=size or int(row.get("size128") or 0),
                 format=ext,
-                duration=int(nki_meta.get("song_play_time") or 0) if nki_meta else 0,
+                duration=int(row.get("interval") or row.get("duration") or 0),
                 bitrate=bitrate,
                 disabled=disabled,
             ))
@@ -579,22 +585,44 @@ def _qq_pick_download_url(song_mid: str) -> tuple[str, str, int]:
 
 
 def search_online(keyword: str, sources: list[str] | None = None, limit: int = 20) -> list[dict]:
-    sources = sources or ["qq", "migu", "kugou", "netease"]
+    sources = list(dict.fromkeys(sources or ["qq", "migu", "kugou", "netease"]))
     results: list[OnlineSong] = []
-    per_source = max(5, min(limit, 20))
-    for src in sources:
-        if src == "migu":
-            results.extend(search_migu(keyword, per_source))
-        elif src == "kugou":
-            results.extend(search_kugou(keyword, per_source))
-        elif src == "netease":
-            results.extend(search_netease(keyword, per_source))
-        elif src == "qq":
-            results.extend(search_qq(keyword, per_source))
-        elif src == "kuwo":
-            results.extend(search_kuwo(keyword, per_source))
+    if not sources:
+        return []
+
+    # The old path used `limit` per source sequentially, so a 30-result search
+    # across 5 sources could trigger ~100 network requests before the UI updated.
+    # Keep enough candidates per source, but cap fan-out and run sources in
+    # parallel so slow providers no longer block every other result.
+    per_source = max(3, min(20, math.ceil(limit / len(sources)) + 2))
+    source_funcs = {
+        "migu": search_migu,
+        "kugou": search_kugou,
+        "netease": search_netease,
+        "qq": search_qq,
+        "kuwo": search_kuwo,
+    }
+
+    started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=min(len(sources), 5)) as pool:
+        futures = {}
+        for src in sources:
+            fn = source_funcs.get(src)
+            if not fn:
+                continue
+            futures[pool.submit(fn, keyword, per_source)] = src
+        for fut in as_completed(futures):
+            src = futures[fut]
+            try:
+                rows = fut.result()
+                logger.info(f"[online:{src}] search returned {len(rows)} rows; aggregate elapsed={time.perf_counter() - started:.2f}s")
+                results.extend(rows)
+            except Exception as e:
+                logger.warning(f"[online:{src}] search failed: {e}")
+
     # Prefer enabled/downloadable first, then larger files.
     results.sort(key=lambda x: (x.disabled, -(x.size or 0)))
+    logger.info(f"[online] search keyword={keyword!r} sources={sources} per_source={per_source} total={len(results)} elapsed={time.perf_counter() - started:.2f}s")
     return [r.to_dict() for r in results[:limit]]
 
 
@@ -641,28 +669,29 @@ def _qq_download_candidates(song: dict) -> list[tuple[str, str]]:
 
     song_mid = song.get("song_id") or ""
     if song_mid:
-        try:
-            url, ext, _size = _qq_pick_download_url(song_mid)
-            if url and all(url != u for u, _ in candidates):
-                candidates.append((url, ext or "mp3"))
-        except Exception as e:
-            logger.debug(f"[online:qq] builtin fallback resolve failed: {e}")
+        # User-provided NKI API is the preferred QQ downloader.  Built-in vkey
+        # is only a fallback for free tracks / API failures.
         try:
             url, ext, _size, _bitrate, _meta = _nki_pick_qq_download_url(song_mid)
             if url and all(url != u for u, _ in candidates):
                 candidates.append((url, ext or original_ext or "mp3"))
         except Exception as e:
             logger.debug(f"[online:qq] nki fallback resolve failed: {e}")
+        try:
+            url, ext, _size = _qq_pick_download_url(song_mid)
+            if url and all(url != u for u, _ in candidates):
+                candidates.append((url, ext or "mp3"))
+        except Exception as e:
+            logger.debug(f"[online:qq] builtin fallback resolve failed: {e}")
     return candidates
 
 
 def download_online_song(song: dict) -> str:
     """Download an online song to config.paths.downloads/online and return file path."""
     url = song.get("url") or ""
-    if not url:
-        raise ValueError("没有可下载链接")
-
     source = song.get("source") or "online"
+    if not url and source != "qq":
+        raise ValueError("没有可下载链接")
     filename = _clean_filename(song.get("filename") or f"{song.get('title','unknown')} - {song.get('artist','unknown')}.{song.get('format','mp3')}")
     target_dir = Path(config.paths.downloads) / "online"
     target_dir.mkdir(parents=True, exist_ok=True)

@@ -40,7 +40,7 @@ async function handleSearch() {
 }
 
 async function handleDownload(song) {
-  if (song.disabled || !song.url) return
+  if (song.disabled) return
   downloading.value = song.source + ':' + song.song_id
   try {
     const res = await downloadOnlineSong(song, true)
@@ -104,7 +104,7 @@ async function handleDownload(song) {
                   :disabled="song.disabled"
                   :loading="downloading === song.source + ':' + song.song_id"
                   @click="handleDownload(song)"
-                >下载</AppButton>
+                >{{ song.url ? '下载' : '解析下载' }}</AppButton>
               </td>
             </tr>
           </tbody>
