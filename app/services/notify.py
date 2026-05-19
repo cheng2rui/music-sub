@@ -15,6 +15,7 @@ import requests
 from sqlalchemy.orm import Session
 
 import app.config as cfg_module
+from app.models import AssistantAction, AssistantConversation
 
 logger = logging.getLogger(__name__)
 
@@ -199,8 +200,50 @@ def send_all(event: str, text: str) -> list[SendResult]:
     return results
 
 
+def _assistant_channel_key(channel: str, user_id: str = "", target: str = "") -> str:
+    identity = (user_id or target or "anonymous").strip() or "anonymous"
+    safe = "".join(ch if ch.isalnum() or ch in "-_:." else "_" for ch in f"{channel}:{identity}")
+    return f"notify:{safe}"[:240]
+
+
+def _get_or_create_notify_conversation(db: Session, channel: str, user_id: str = "", target: str = "") -> AssistantConversation:
+    title = _assistant_channel_key(channel, user_id, target)
+    conv = db.query(AssistantConversation).filter(AssistantConversation.title == title).order_by(AssistantConversation.updated_at.desc()).first()
+    if conv:
+        return conv
+    conv = AssistantConversation(title=title)
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def _latest_pending_action(db: Session, conversation_id: int) -> AssistantAction | None:
+    return (
+        db.query(AssistantAction)
+        .filter(AssistantAction.conversation_id == conversation_id, AssistantAction.status == "pending")
+        .order_by(AssistantAction.created_at.desc())
+        .first()
+    )
+
+
+def _looks_confirm(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized in {"确认", "确认执行", "执行", "同意", "可以", "是", "yes", "y", "ok", "confirm"}
+
+
+def _looks_cancel(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized in {"取消", "不要", "停止", "算了", "否", "no", "n", "cancel"}
+
+
 def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: str = "", target: str = "", group: bool | None = None, msg_id: str | None = None) -> dict[str, Any]:
-    """Forward a normalized inbound chat message to Music Sub Assistant and reply on the same channel."""
+    """Forward a normalized inbound chat message to Music Sub Assistant and reply on the same channel.
+
+    Unlike the web UI, messaging surfaces need sticky sessions and a simple
+    confirm/cancel grammar so high-risk assistant actions can be completed from
+    WeCom/QQ/WeChat without opening the browser.
+    """
     from app.services.assistant.service import AssistantService
 
     text = (text or "").strip()
@@ -209,12 +252,26 @@ def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: 
     ch_cfg = getattr(cfg_module.config.notify, "wechatbot" if channel in {"wechatbot", "weichatbot"} else channel, None)
     if not ch_cfg or not getattr(ch_cfg, "assistant_chat", True):
         return {"ok": False, "message": "assistant chat disabled for channel"}
+
     service = AssistantService(db)
-    res = service.chat(text, None)
-    reply = res.get("message") or "助手没有返回内容。"
+    conv = _get_or_create_notify_conversation(db, channel, user_id, target)
+    pending = _latest_pending_action(db, conv.id)
+
+    if pending and _looks_cancel(text):
+        res = service.cancel_action(pending.action_id)
+        reply = res.get("message") or "已取消。"
+    elif pending and _looks_confirm(text):
+        res = service.confirm_action(pending.action_id)
+        reply = res.get("message") or ("已执行。" if res.get("ok") else "执行失败。")
+    else:
+        res = service.chat(text, conv.id)
+        reply = res.get("message") or "助手没有返回内容。"
+        if res.get("needs_confirm") and res.get("action_id"):
+            reply += "\n\n回复“确认”执行，或回复“取消”放弃。"
+
     # Prefer explicit target; otherwise reply to inbound user id.
     send_res = send_channel(channel, reply, target=target or user_id or None, group=group, msg_id=msg_id)
-    return {"ok": bool(res.get("ok", True)), "assistant": res, "send": send_res.__dict__}
+    return {"ok": bool(res.get("ok", True)), "conversation_id": conv.id, "assistant": res, "send": send_res.__dict__}
 
 
 # Event helpers ----------------------------------------------------------------
