@@ -278,6 +278,14 @@ def get_toplist():
         return {"source": "none", "items": []}
 
 
+def _resolve_qq_short_url(url: str) -> str:
+    """Follow QQ Music short URL redirects and return final URL."""
+    try:
+        resp = _session.get(url, allow_redirects=True, timeout=10)
+        return resp.url
+    except Exception:
+        return url
+
 @router.post("/parse-playlist-url")
 def parse_playlist_url(url: str = ""):
     """Parse a QQ Music or NetEase playlist URL and return song list."""
@@ -291,31 +299,38 @@ def parse_playlist_url(url: str = ""):
     title = ""
     source = ""
 
-    # QQ Music playlist: y.qq.com/n/ryqq/playlist/XXXXXXX
-    qq_match = re.search(r"playlist[/=](\d+)", url)
-    if qq_match or "y.qq.com" in url or "qq.com" in url:
-        playlist_id = qq_match.group(1) if qq_match else re.search(r"(\d{6,})", url)
-        if playlist_id:
-            pid = playlist_id if isinstance(playlist_id, str) else playlist_id.group(1)
-            try:
-                resp = _session.get(
-                    "https://u.y.qq.com/cgi-bin/musicu.fcg",
-                    params={
-                        "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(pid), "onlysonglist": 0, "song_num": 50, "song_begin": 0}}})
-                    },
-                    timeout=15,
-                )
-                data = resp.json()
-                detail = data.get("detail", {}).get("data", {})
-                dirinfo = detail.get("dirinfo", {})
-                title = dirinfo.get("title", "")
-                source = "qqmusic"
-                for s in detail.get("songlist", []):
-                    singers = s.get("singer", [])
-                    artist = "/".join(x.get("name", "") for x in singers) if singers else ""
-                    songs.append({"title": s.get("name", ""), "artist": artist})
-            except Exception as e:
-                logger.warning(f"QQ playlist parse failed: {e}")
+    # QQ Music short URL (c6.y.qq.com/base/fcgi-bin/u?__=XXX) → resolve redirect
+    if "c6.y.qq.com" in url or ("__=" in url and "y.qq.com" in url):
+        resolved = _resolve_qq_short_url(url)
+        logger.info(f"QQ short URL resolved: {url} → {resolved}")
+        url = resolved
+
+    # QQ Music: y.qq.com/n/ryqq/playlist/XXXXXXX or any URL with ?id= or playlist=
+    # Also handles resolved short URLs like i.y.qq.com/n2/m/share/details/taoge.html?id=9220096531
+    qq_match = re.search(r"playlist[/=](\d+)", url) or re.search(r"[?&]id=(\d+)", url)
+    if not qq_match and ("y.qq.com" in url or "qq.com" in url):
+        qq_match = re.search(r"(\d{10,})", url)  # fallback: any 10+ digit number
+    if qq_match:
+        pid = qq_match.group(1)
+        try:
+            resp = _session.get(
+                "https://u.y.qq.com/cgi-bin/musicu.fcg",
+                params={
+                    "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(pid), "onlysonglist": 0, "song_num": 100, "song_begin": 0}}})
+                },
+                timeout=15,
+            )
+            data = resp.json()
+            detail = data.get("detail", {}).get("data", {})
+            dirinfo = detail.get("dirinfo", {})
+            title = dirinfo.get("title", "")
+            source = "qqmusic"
+            for s in detail.get("songlist", []):
+                singers = s.get("singer", [])
+                artist = "/".join(x.get("name", "") for x in singers) if singers else ""
+                songs.append({"title": s.get("name", ""), "artist": artist})
+        except Exception as e:
+            logger.warning(f"QQ playlist parse failed: {e}")
 
     # NetEase playlist: music.163.com/playlist?id=XXXXXXX or #/playlist?id=
     if not songs:
