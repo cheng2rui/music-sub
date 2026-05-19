@@ -192,7 +192,10 @@ function formatSizeGb(value) {
 
 function toolItems(message) {
   const parsed = parseToolResult(message)
-  return Array.isArray(parsed?.items) ? parsed.items : []
+  if (Array.isArray(parsed?.items)) return parsed.items
+  if (message.tool_name === 'complete_album' && Array.isArray(parsed?.candidates)) return parsed.candidates
+  if (message.tool_name === 'complete_album' && Array.isArray(parsed?.downloaded)) return parsed.downloaded
+  return []
 }
 
 function toolSummary(message) {
@@ -201,6 +204,7 @@ function toolSummary(message) {
   if (message.tool_name === 'get_system_status') return `版本 ${parsed.version || '-'} · 站点 ${parsed.sites_enabled?.length || 0} · 任务 ${parsed.tasks || 0}`
   if (message.tool_name === 'get_library_stats') return `曲目 ${parsed.tracks || 0} · 专辑 ${parsed.albums || 0} · ${parsed.total_hours || 0} 小时`
   if (Array.isArray(parsed.items)) return `${parsed.items.length} 条结果`
+  if (message.tool_name === 'complete_album') return `本地已有 ${parsed.existing || 0} 首 · 候选 ${parsed.candidate_count ?? parsed.candidates?.length ?? 0} 首 · 已下载 ${parsed.downloaded?.length || 0} 首`
   return ''
 }
 
@@ -239,7 +243,7 @@ function itemActions(message, item) {
   }
   if (message.tool_name === 'complete_album') {
     return [
-      { key: 'complete-album-download', label: '下载补齐', variant: 'primary' }
+      { key: 'download-online', label: item.url ? '下载此曲' : '解析下载', variant: 'primary' }
     ]
   }
   if (message.tool_name === 'query_library_health') {

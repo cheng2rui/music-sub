@@ -193,7 +193,7 @@ onMounted(loadAll)
       </article>
     </section>
 
-    <div v-if="visibleMasonryModules.length" class="dashboard-grid">
+    <div v-if="visibleMasonryModules.length" class="dashboard-grid" :class="{ single: visibleMasonryModules.length === 1 }">
       <section v-if="isHomeModuleEnabled('recommend')" class="panel panel-wide">
         <div class="section-header">
           <div>
@@ -291,6 +291,7 @@ onMounted(loadAll)
 .quick-card h3 { margin: 0 0 4px; font-size: 14px; }
 .quick-card p { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.35; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 16px; align-items: start; }
+.dashboard-grid.single { grid-template-columns: 1fr; }
 .panel { width: 100%; padding: 16px; min-width: 0; }
 .panel-wide { min-width: 0; }
 .section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }

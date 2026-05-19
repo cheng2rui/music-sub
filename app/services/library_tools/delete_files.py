@@ -136,6 +136,7 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
     deleted_dirs = 0
     failed_files = 0
     failed_dirs = 0
+    removed_db_rows = 0
 
     file_ids_to_delete: set[int] = set()
 
@@ -149,16 +150,16 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
             if not fp.is_file():
                 if delete_missing_db_rows:
                     file_ids_to_delete.add(f.id)
-                    on_progress(idx + 1, f"文件不存在，已移除库记录: {fp.name}")
+                    on_progress(idx, f"文件不存在，已移除库记录: {fp.name}")
                 continue
             try:
                 fp.unlink()
                 deleted_files += 1
                 file_ids_to_delete.add(f.id)
-                on_progress(idx + 1, f"已删除: {fp.name}")
+                on_progress(idx, f"已删除: {fp.name}")
             except OSError as e:
                 failed_files += 1
-                on_progress(idx + 1, f"删除失败: {fp.name}: {e}")
+                on_progress(idx, f"删除失败: {fp.name}: {e}")
 
     if delete_empty_dirs:
         paths = [f.file_path for f in files if f.file_path]
@@ -168,15 +169,15 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
             try:
                 shutil.rmtree(dir_path)
                 deleted_dirs += 1
-                on_progress(idx + 1, f"已删除空目录: {Path(dir_path).name}")
+                on_progress(len(files) + idx, f"已删除空目录: {Path(dir_path).name}")
             except OSError as e:
                 failed_dirs += 1
-                on_progress(idx + 1, f"删除目录失败: {dir_path}: {e}")
+                on_progress(len(files) + idx, f"删除目录失败: {dir_path}: {e}")
 
     # Remove DB rows for deleted files.
     if file_ids_to_delete:
         try:
-            db.query(MusicFile).filter(MusicFile.id.in_(file_ids_to_delete)).delete(synchronize_session=False)
+            removed_db_rows = db.query(MusicFile).filter(MusicFile.id.in_(file_ids_to_delete)).delete(synchronize_session=False)
             db.commit()
         except Exception as e:
             logger.warning(f"[delete_files] DB row delete failed: {e}")
@@ -187,5 +188,6 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
         "deleted_dirs": deleted_dirs,
         "failed_files": failed_files,
         "failed_dirs": failed_dirs,
-        "total": deleted_files + deleted_dirs,
+        "removed_db_rows": removed_db_rows,
+        "total": deleted_files + deleted_dirs + removed_db_rows,
     }

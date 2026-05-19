@@ -1034,6 +1034,16 @@ def _norm_song_key(title: str | None, artist: str | None = "") -> str:
     return f"{re.sub(r'\\s+', '', (title or '').lower())}::{re.sub(r'\\s+', '', (artist or '').split('/')[0].lower())}"
 
 
+def _bool_value(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def _quality_score(song: dict) -> tuple[int, int, int]:
     fmt = (song.get("format") or "").lower()
     url = (song.get("url") or "").lower()
@@ -1053,7 +1063,7 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
     """
     artist = (payload.get("artist") or payload.get("album_artist") or "").strip()
     album = (payload.get("album") or payload.get("album_name") or "").strip()
-    dry_run = bool(payload.get("dry_run", True))
+    dry_run = _bool_value(payload.get("dry_run"), True)
     limit = max(5, min(int(payload.get("limit") or 30), 80))
     sources = payload.get("sources") or ["qq", "migu", "kugou", "netease", "kuwo"]
     if not artist or not album:

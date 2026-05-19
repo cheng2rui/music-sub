@@ -175,15 +175,12 @@ def apply(tool_id: str, *, file_ids=None, album_artist="", album_name="",
         try:
             inner_files = resolve_files(inner_db, file_ids=file_ids_resolved or None)
             def on_progress(idx: int, message: str):
-                # Tool implementations historically report either zero-based or
-                # one-based progress indexes. Normalize to a valid step index so
-                # the final item is not silently ignored by async jobs.
-                step_idx = idx - 1 if idx >= len(job.steps) or idx > 0 else idx
-                step_idx = max(0, min(step_idx, len(job.steps) - 1)) if job.steps else 0
-                if job.steps:
-                    mark_step(job.steps[step_idx], "ok" if not message.startswith("err:") else "failed",
+                # Library tools use zero-based file indexes. Keep this contract
+                # strict so progress maps to the correct file row.
+                if 0 <= idx < len(job.steps):
+                    mark_step(job.steps[idx], "ok" if not message.startswith("err:") else "failed",
                               message[4:] if message.startswith("err:") else message)
-                job.progress = min(max(idx, step_idx + 1), len(job.steps)) if job.steps else 0
+                job.progress = min(max(idx + 1, 0), len(job.steps)) if job.steps else 0
             try:
                 summary = apply_fn(inner_db, inner_files, options, on_progress)
                 inner_db.commit()
