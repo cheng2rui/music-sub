@@ -13,29 +13,41 @@ const theme = useThemeStore()
 const auth = useAuthStore()
 const player = usePlayerStore()
 
+const animalAsset = (name) => `/animal-island/${name}`
+const nookAsset = (name) => animalAsset(`nook-phone/${name}`)
+
 const navItems = [
-  { to: '/discover', icon: '🏠', label: '发现', short: '发现', mobile: true },
-  { to: '/subs', icon: '📡', label: '订阅管理', short: '订阅' },
-  { to: '/search', icon: '🔍', label: 'PT 搜索', short: '搜索', mobile: true },
-  { to: '/online', icon: '🎧', label: '在线下载', short: '在线' },
-  { to: '/tasks', icon: '⬇️', label: '任务列表', short: '任务', mobile: true },
-  { to: '/assistant', icon: '🤖', label: '智能助手', short: '助手', mobile: true },
-  { to: '/library', icon: '🎶', label: '音乐库', short: '曲库', mobile: true },
-  { to: '/logs', icon: '📜', label: '日志', short: '日志' },
-  { to: '/settings', icon: '⚙️', label: '设置', short: '设置' },
+  { to: '/discover', icon: '🏠', islandIconSrc: nookAsset('nook1.svg'), label: '发现', short: '发现', mobile: true },
+  { to: '/subs', icon: '📡', islandIconSrc: nookAsset('Property-Chat.svg'), label: '订阅管理', short: '订阅' },
+  { to: '/search', icon: '🔍', islandIconSrc: nookAsset('Property-Camera.svg'), label: 'PT 搜索', short: '搜索', mobile: true },
+  { to: '/online', icon: '🎧', islandIconSrc: nookAsset('Property-Shopping.svg'), label: '在线下载', short: '在线' },
+  { to: '/tasks', icon: '⬇️', islandIconSrc: nookAsset('Property-Helicopter.svg'), label: '任务列表', short: '任务', mobile: true },
+  { to: '/assistant', icon: '🤖', islandIconSrc: nookAsset('nook2.svg'), label: '智能助手', short: '助手', mobile: true },
+  { to: '/library', icon: '🎶', islandIconSrc: nookAsset('AppIcons.svg'), label: '音乐库', short: '曲库', mobile: true },
+  { to: '/logs', icon: '📜', islandIconSrc: nookAsset('Property-Recipes.svg'), label: '日志', short: '日志' },
+  { to: '/settings', icon: '⚙️', islandIconSrc: animalAsset('animal_icon.svg'), label: '设置', short: '设置' },
 ]
 
 const mobileNavItems = computed(() => [
-  { to: '/discover', icon: '🏠', label: '发现', short: '发现' },
-  { to: '/search', icon: '🔍', label: 'PT 搜索', short: '搜索' },
-  { to: '/library', icon: '🎶', label: '音乐库', short: '曲库' },
-  { to: '/tasks', icon: '⬇️', label: '任务列表', short: '任务' },
-  { to: '/more', icon: '☰', label: '更多', short: '更多', matches: ['/more', '/subs', '/online', '/assistant', '/logs', '/settings'] },
+  { to: '/discover', icon: '🏠', islandIconSrc: nookAsset('nook1.svg'), label: '发现', short: '发现' },
+  { to: '/search', icon: '🔍', islandIconSrc: nookAsset('Property-Camera.svg'), label: 'PT 搜索', short: '搜索' },
+  { to: '/library', icon: '🎶', islandIconSrc: nookAsset('AppIcons.svg'), label: '音乐库', short: '曲库' },
+  { to: '/tasks', icon: '⬇️', islandIconSrc: nookAsset('Property-Helicopter.svg'), label: '任务列表', short: '任务' },
+  { to: '/more', icon: '☰', islandIconSrc: animalAsset('animal_icon.svg'), label: '更多', short: '更多', matches: ['/more', '/subs', '/online', '/assistant', '/logs', '/settings'] },
 ])
 
 const pageTitle = computed(() => route.meta?.title || '音乐订阅管理')
 const isGlass = computed(() => theme.current.includes('glass'))
+const isIsland = computed(() => theme.current === 'island')
 const isLoginPage = computed(() => route.name === 'login')
+
+function displayIcon(item) {
+  return item.icon
+}
+
+function displayIconSrc(item) {
+  return isIsland.value ? item.islandIconSrc : ''
+}
 
 function isMobileNavActive(item) {
   const matches = item.matches || [item.to]
@@ -53,7 +65,7 @@ function handleLogout() {
     <router-view />
   </div>
 
-  <div v-else class="app-layout" :class="{ 'glass-active': isGlass, 'has-player': player.currentTrack }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
+  <div v-else class="app-layout" :class="{ 'glass-active': isGlass, 'island-active': isIsland, 'has-player': player.currentTrack }" :style="isGlass && theme.backgroundImage ? { backgroundImage: `url(${theme.backgroundImage})` } : {}">
     <aside class="sidebar">
       <div class="sidebar-logo">
         <img src="/logo.svg" alt="Music Sub" class="sidebar-logo-img" />
@@ -61,7 +73,10 @@ function handleLogout() {
       </div>
       <nav class="sidebar-nav" aria-label="主导航">
         <router-link v-for="item in navItems" :key="item.to" :to="item.to" class="nav-link">
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span class="nav-icon" aria-hidden="true">
+            <img v-if="displayIconSrc(item)" :src="displayIconSrc(item)" alt="" class="animal-nav-icon" />
+            <span v-else>{{ displayIcon(item) }}</span>
+          </span>
           <span class="nav-label">{{ item.label }}</span>
         </router-link>
       </nav>
@@ -71,7 +86,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.7.53</div>
+        <div class="version-tag">v0.7.54</div>
       </div>
     </aside>
 
@@ -92,7 +107,10 @@ function handleLogout() {
 
     <nav class="bottom-tabs" aria-label="移动端导航">
       <router-link v-for="item in mobileNavItems" :key="item.to" :to="item.to" class="bottom-tab" :class="{ 'is-active': isMobileNavActive(item) }" :title="item.label">
-        <span class="tab-icon" aria-hidden="true">{{ item.icon }}</span>
+        <span class="tab-icon" aria-hidden="true">
+          <img v-if="displayIconSrc(item)" :src="displayIconSrc(item)" alt="" class="animal-nav-icon" />
+          <span v-else>{{ displayIcon(item) }}</span>
+        </span>
         <span class="tab-label">{{ item.short }}</span>
       </router-link>
     </nav>

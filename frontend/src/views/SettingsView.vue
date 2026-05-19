@@ -1,8 +1,14 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getNotifyStatus, getNotifyEvents, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
+import { useThemeStore } from '@/stores/theme.js'
+
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
+const animalAsset = (name) => `/animal-island/${name}`
+const nookAsset = (name) => animalAsset(`nook-phone/${name}`)
 
 const settings = ref({
   sites: {
@@ -53,14 +59,14 @@ const assistantProviders = ref([])
 const assistantTools = ref([])
 const testingAssistant = ref(false)
 const settingsTabs = [
-  { key: 'sites', label: 'PT站', icon: '📡' },
-  { key: 'downloader', label: '下载器', icon: '⬇️' },
-  { key: 'paths', label: '媒体库/路径', icon: '📁' },
-  { key: 'scraper', label: '刮削', icon: '🎵' },
-  { key: 'automation', label: '自动化', icon: '⏰' },
-  { key: 'notify', label: '通知', icon: '📢' },
-  { key: 'assistant', label: '助手', icon: '🤖' },
-  { key: 'security', label: '安全', icon: '🔐' }
+  { key: 'sites', label: 'PT站', icon: '📡', islandIconSrc: nookAsset('Property-Chat.svg') },
+  { key: 'downloader', label: '下载器', icon: '⬇️', islandIconSrc: nookAsset('Property-Helicopter.svg') },
+  { key: 'paths', label: '媒体库/路径', icon: '📁', islandIconSrc: nookAsset('AppIcons.svg') },
+  { key: 'scraper', label: '刮削', icon: '🎵', islandIconSrc: nookAsset('Property-Recipes.svg') },
+  { key: 'automation', label: '自动化', icon: '⏰', islandIconSrc: nookAsset('nook1.svg') },
+  { key: 'notify', label: '通知', icon: '📢', islandIconSrc: nookAsset('Property-Camera.svg') },
+  { key: 'assistant', label: '助手', icon: '🤖', islandIconSrc: nookAsset('nook2.svg') },
+  { key: 'security', label: '安全', icon: '🔐', islandIconSrc: animalAsset('animal_icon.svg') }
 ]
 const activeSettingsTab = ref('sites')
 
@@ -326,7 +332,10 @@ onMounted(loadAll)
           :aria-selected="activeSettingsTab === tab.key"
           @click="activeSettingsTab = tab.key"
         >
-          <span class="settings-tab-icon">{{ tab.icon }}</span>
+          <span class="settings-tab-icon">
+            <img v-if="isIsland && tab.islandIconSrc" :src="tab.islandIconSrc" alt="" class="animal-settings-icon" />
+            <span v-else>{{ tab.icon }}</span>
+          </span>
           <span>{{ tab.label }}</span>
         </button>
       </div>
