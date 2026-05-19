@@ -13,6 +13,7 @@ const playbackModes = [
   { key: 'shuffle', label: '随机', title: '随机播放', icon: '⤨' },
   { key: 'repeat', label: '循环', title: '循环播放', icon: '↻' },
 ]
+const playbackModeMeta = computed(() => playbackModes.find(mode => mode.key === player.playbackMode) || playbackModes[0])
 const isNowOpen = ref(false)
 const detailLoading = ref(false)
 const trackDetail = ref(null)
@@ -98,13 +99,6 @@ const seekPercent = computed(() => {
   return Math.max(0, Math.min(100, ((isSeeking.value ? seekValue.value : player.currentTime) / d) * 100))
 })
 const parsedLyrics = computed(() => parseLrc(trackDetail.value?.lyrics))
-const activeLyricText = computed(() => {
-  const idx = activeLyricIndex.value
-  return idx >= 0 ? parsedLyrics.value[idx]?.text || '' : ''
-})
-
-const collapsedLyricText = computed(() => activeLyricText.value || title.value)
-
 const activeLyricIndex = computed(() => {
   const lines = parsedLyrics.value
   if (!lines.length) return -1
@@ -115,6 +109,20 @@ const activeLyricIndex = computed(() => {
     else break
   }
   return idx
+})
+
+const collapsedLyricWindow = computed(() => {
+  const lines = parsedLyrics.value
+  const idx = activeLyricIndex.value
+  if (!lines.length || idx < 0) {
+    return [
+      { key: 'title', text: title.value, active: true },
+      { key: 'subtitle', text: subtitle.value || '未知来源', active: false },
+    ].filter(line => line.text)
+  }
+  return [idx - 1, idx, idx + 1]
+    .filter(i => i >= 0 && i < lines.length)
+    .map(i => ({ key: `${lines[i].time}-${i}`, text: lines[i].text, active: i === idx }))
 })
 
 function parseLrc(text) {
@@ -301,22 +309,26 @@ function formatDuration(seconds) {
       @pause="isPlaying = false"
     />
 
-    <div v-if="player.isCollapsed" class="collapsed-lyric" :title="collapsedLyricText">
-      <span>{{ collapsedLyricText }}</span>
+    <div v-if="player.isCollapsed" class="collapsed-lyrics" aria-label="当前歌词">
+      <TransitionGroup name="mini-lyric" tag="div" class="collapsed-lyrics-window">
+        <div
+          v-for="line in collapsedLyricWindow"
+          :key="line.key"
+          :class="['collapsed-lyric-line', { active: line.active }]"
+        >{{ line.text }}</div>
+      </TransitionGroup>
     </div>
 
-    <div v-show="!player.isCollapsed" class="mode-actions" aria-label="播放模式">
-      <button
-        v-for="mode in playbackModes"
-        :key="mode.key"
-        :class="['mode-toggle', { active: player.playbackMode === mode.key }]"
-        :title="mode.title"
-        @click="player.setPlaybackMode(mode.key)"
-      >
-        <span aria-hidden="true">{{ mode.icon }}</span>
-        <em>{{ mode.label }}</em>
-      </button>
-    </div>
+    <button
+      v-show="!player.isCollapsed"
+      :class="['mode-toggle', { active: player.playbackMode !== 'order' }]"
+      :title="playbackModeMeta.title"
+      aria-label="切换播放模式"
+      @click="player.togglePlaybackMode"
+    >
+      <span aria-hidden="true">{{ playbackModeMeta.icon }}</span>
+      <em>{{ playbackModeMeta.label }}</em>
+    </button>
 
     <button
       v-show="!player.isCollapsed"
@@ -427,6 +439,14 @@ function formatDuration(seconds) {
   width: min(360px, calc(100vw - 48px));
   min-height: 48px;
   padding: 8px 10px;
+}
+.global-player.collapsed .player-info,
+.global-player.collapsed .transport,
+.global-player.collapsed .seek-wrap,
+.global-player.collapsed .mode-toggle,
+.global-player.collapsed .panel-toggle,
+.global-player.collapsed .mobile-progress {
+  display: none;
 }
 .collapse-toggle,
 .player-close,
@@ -568,10 +588,14 @@ function formatDuration(seconds) {
 .player-audio {
   display: none;
 }
-.collapsed-lyric { flex: 1; min-width: 0; overflow: hidden; color: var(--text-dim); font-size: 12px; white-space: nowrap; mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%); }
-.collapsed-lyric span { display: inline-block; min-width: 100%; padding-left: 100%; animation: lyric-marquee 14s linear infinite; }
-@keyframes lyric-marquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }
-.mode-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.collapsed-lyrics { flex: 1; min-width: 0; height: 36px; overflow: hidden; display: flex; align-items: center; }
+.collapsed-lyrics-window { width: 100%; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; }
+.collapsed-lyric-line { width: 100%; color: var(--text-muted); font-size: 11px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .62; transform: translateY(0); }
+.collapsed-lyric-line.active { color: var(--text); font-size: 13px; font-weight: 800; opacity: 1; }
+.mini-lyric-move, .mini-lyric-enter-active, .mini-lyric-leave-active { transition: all .32s cubic-bezier(.2,.8,.2,1); }
+.mini-lyric-enter-from { opacity: 0; transform: translateY(10px); }
+.mini-lyric-leave-to { opacity: 0; transform: translateY(-10px); }
+.mini-lyric-leave-active { position: absolute; }
 .mode-toggle { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-dim); cursor: pointer; font-size: 12px; font-weight: 800; }
 .mode-toggle em { font-style: normal; font-size: 11px; }
 .mode-toggle:hover, .mode-toggle.active { color: var(--text); background: var(--surface-hover); border-color: var(--accent); }
@@ -693,7 +717,6 @@ function formatDuration(seconds) {
   .global-player.collapsed .player-info,
   .global-player.collapsed .transport,
   .global-player.collapsed .seek-wrap,
-  .global-player.collapsed .mode-actions,
   .global-player.collapsed .panel-toggle,
   .global-player.collapsed .mobile-progress {
     display: none !important;
