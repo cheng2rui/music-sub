@@ -25,6 +25,8 @@ STATE_PATH = Path(__file__).resolve().parents[2] / "data" / "wechatclaw_state.js
 _state_lock = threading.Lock()
 _poll_thread: threading.Thread | None = None
 _stop_event: threading.Event | None = None
+_processed_ids: set[str] = set()
+_processed_lock = threading.Lock()
 
 
 def _cfg():
@@ -238,6 +240,8 @@ def send_text(to_user: str, text: str, context_token: str | None = None) -> bool
     token = state.get("bot_token")
     if not token:
         return False
+    if context_token is None:
+        context_token = (state.get("context_tokens") or {}).get(str(to_user))
     candidates = [str(to_user)]
     if str(to_user).endswith("@im.wechat"):
         candidates.append(str(to_user)[:-10])
@@ -253,7 +257,8 @@ def send_text(to_user: str, text: str, context_token: str | None = None) -> bool
         try:
             resp = requests.post(f"{_base_url()}/ilink/bot/sendmessage", json=_with_base(payload), headers=_headers(True), timeout=20)
             data = _json(resp)
-            if 200 <= resp.status_code < 300 and not str(_find_first(data, ["errmsg", "error", "detail"]) or "").lower() not in {"", "ok", "success"}:
+            err = str(_find_first(data, ["errmsg", "error", "error_msg", "detail"]) or "").strip().lower()
+            if 200 <= resp.status_code < 300 and err in {"", "ok", "success", "succeed", "sent"}:
                 return True
             if _ok(data):
                 return True
@@ -268,7 +273,14 @@ def _parse_message(item: dict[str, Any]) -> dict[str, str] | None:
         if isinstance(msg, dict) and isinstance(msg.get(key), dict):
             msg = msg[key]
             break
-    user = _find_first(msg, ["user_id", "from_user_id", "sender_id", "from", "from_user", "wxid", "uid"]) or _find_first(item, ["user_id", "from_user_id", "sender_id", "from", "from_user", "wxid", "uid"])
+    sender = None
+    for key in ["from", "sender", "user", "from_user", "author"]:
+        if isinstance(msg, dict) and isinstance(msg.get(key), dict):
+            sender = msg.get(key)
+            break
+    user = (
+        _find_first(sender, ["user_id", "id", "wxid", "uid", "from_user_id", "sender_id"]) if sender else None
+    ) or _find_first(msg, ["user_id", "from_user_id", "sender_id", "from_user", "wxid", "uid"]) or _find_first(item, ["user_id", "from_user_id", "sender_id", "from_user", "wxid", "uid"])
     text = _find_first(msg, ["content", "text", "message", "msg", "body", "msg_content", "msgContent"])
     if isinstance(text, dict):
         text = _find_first(text, ["content", "text", "value", "message"])
@@ -299,6 +311,18 @@ def _poll_once() -> tuple[list[dict[str, str]], str | None, dict[str, Any]]:
     return parsed, sync_buf, {"success": True, "count": len(items), "parsed": len(parsed)}
 
 
+def _is_duplicate(message_id: str) -> bool:
+    if not message_id:
+        return False
+    with _processed_lock:
+        if message_id in _processed_ids:
+            return True
+        _processed_ids.add(message_id)
+        if len(_processed_ids) > 2000:
+            _processed_ids.clear()
+        return False
+
+
 def _remember_target(user_id: str, context_token: str = "") -> None:
     state = load_state()
     targets = state.setdefault("known_targets", {})
@@ -318,6 +342,8 @@ def _poll_loop() -> None:
             if not result.get("success"):
                 raise RuntimeError(result.get("message") or "poll failed")
             for msg in messages:
+                if _is_duplicate(msg.get("message_id") or ""):
+                    continue
                 _remember_target(msg["user_id"], msg.get("context_token") or "")
                 db = SessionLocal()
                 try:

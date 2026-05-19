@@ -288,6 +288,14 @@ def save_settings(settings: AllSettings):
     cfg_module.config = new_config
     from app.scheduler import apply_scheduler_config
     apply_scheduler_config()
+    # Apply notification runtime changes without requiring a container restart.
+    try:
+        from app.services.qqbot_gateway import restart_qqbot_gateway
+        from app.services.wechatclaw import restart_wechatclaw_polling
+        restart_qqbot_gateway()
+        restart_wechatclaw_polling()
+    except Exception as exc:
+        warnings.append(f"通知运行时重启失败：{str(exc)[:120]}")
 
     warnings = _path_warnings(settings.paths)
     message = "Settings saved and reloaded"
