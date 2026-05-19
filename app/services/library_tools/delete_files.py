@@ -1,6 +1,7 @@
 """Delete files and/or empty folders tool."""
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import shutil
@@ -30,6 +31,20 @@ def _collect_dirs(paths: list[str]) -> set[str]:
             dirs.add(str(parent))
             dp = parent
     return dirs
+
+
+def _trash_path(file_path: Path, library_root: str) -> Path:
+    root = Path(library_root).resolve()
+    trash_root = root / ".trash" / datetime.datetime.now().strftime("%Y%m%d")
+    try:
+        rel = file_path.resolve().relative_to(root)
+    except ValueError:
+        rel = Path(file_path.name)
+    dest = trash_root / rel
+    if dest.exists():
+        dest = dest.with_name(f"{dest.stem}-{datetime.datetime.now().strftime('%H%M%S')}{dest.suffix}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def _find_empty_dirs(dirs: set[str], library_root: str) -> list[tuple[str, int, str]]:
@@ -63,8 +78,9 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
     delete_files = options.get("delete_files", False)
     delete_empty_dirs = options.get("delete_empty_dirs", True)
     delete_missing_db_rows = options.get("delete_missing_db_rows", True)
+    mode = options.get("mode") or ("delete" if options.get("permanent") else "trash")
 
-    # Collect all files that would be deleted.
+    # Collect all files that would be deleted or moved to trash.
     file_items: list[PreviewItem] = []
     dir_items: list[PreviewItem] = []
     paths = [f.file_path for f in files if f.file_path]
@@ -96,9 +112,9 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
                 file_path=f.file_path,
                 label=fp.name,
                 before={"file_path": f.file_path, "exists": True},
-                after={"deleted": True, "db_row_deleted": True},
+                after={"deleted": mode == "delete", "trashed": mode != "delete", "db_row_deleted": True},
                 would_change=True,
-                reason=f"删除文件 ({(size // 1024)}KB)",
+                reason=f"{'永久删除' if mode == 'delete' else '移入回收站'}文件 ({(size // 1024)}KB)",
             ))
 
     if delete_empty_dirs:
@@ -133,8 +149,11 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
     delete_files = options.get("delete_files", False)
     delete_empty_dirs = options.get("delete_empty_dirs", True)
     delete_missing_db_rows = options.get("delete_missing_db_rows", True)
+    mode = options.get("mode") or ("delete" if options.get("permanent") else "trash")
+    permanent = mode == "delete"
 
     deleted_files = 0
+    trashed_files = 0
     deleted_dirs = 0
     failed_files = 0
     failed_dirs = 0
@@ -155,10 +174,16 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                     on_progress(idx, f"文件不存在，已移除库记录: {fp.name}")
                 continue
             try:
-                fp.unlink()
-                deleted_files += 1
+                if permanent:
+                    fp.unlink()
+                    deleted_files += 1
+                    on_progress(idx, f"已永久删除: {fp.name}")
+                else:
+                    dest = _trash_path(fp, library_root)
+                    shutil.move(str(fp), str(dest))
+                    trashed_files += 1
+                    on_progress(idx, f"已移入回收站: {fp.name}")
                 file_ids_to_delete.add(f.id)
-                on_progress(idx, f"已删除: {fp.name}")
             except OSError as e:
                 failed_files += 1
                 on_progress(idx, f"删除失败: {fp.name}: {e}")
@@ -187,9 +212,11 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
 
     return {
         "deleted_files": deleted_files,
+        "trashed_files": trashed_files,
         "deleted_dirs": deleted_dirs,
         "failed_files": failed_files,
         "failed_dirs": failed_dirs,
         "removed_db_rows": removed_db_rows,
-        "total": deleted_files + deleted_dirs + removed_db_rows,
+        "total": deleted_files + trashed_files + deleted_dirs + removed_db_rows,
+        "mode": mode,
     }

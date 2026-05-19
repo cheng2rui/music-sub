@@ -397,11 +397,11 @@ async function saveTrack() {
 }
 
 async function deleteTrack_RB2(track) {
-  if (!track || !confirm(`确认删除「${track.title}」？\n会同时删除音乐库里的本地音频文件，并清理空目录。此操作不可撤销。`)) return
+  if (!track || !confirm(`确认删除「${track.title}」？\n会把本地音频文件移入音乐库 .trash 回收站，并清理空目录；库记录会同步移除。`)) return
   try {
     await applyLibraryTool('delete_files', {
       file_ids: [track.id],
-      options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true },
+      options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, mode: 'trash' },
       async: false
     })
     showTrackModal.value = false
@@ -512,10 +512,18 @@ onMounted(() => { loadStats(); loadAlbums(0) })
     </div>
 
     <div v-if="scanJob" class="scan-status">
-      <div class="scan-status-line">
-        资料库扫描：{{ scanJob.status }} · {{ scanJob.progress }} / {{ scanJob.total || '?' }}
-        <span v-if="scanJob.summary?.created !== undefined"> · 新增 {{ scanJob.summary.created }} · 更新 {{ scanJob.summary.updated }} · 移除 {{ scanJob.summary.removed || 0 }} · 错误 {{ scanJob.summary.errors }}</span>
-        <span v-else-if="scanJob.summary?.current"> · {{ scanJob.summary.current }}</span>
+      <div class="scan-report-head">
+        <div>
+          <strong>资料库体检</strong>
+          <span>状态：{{ scanJob.status }} · {{ scanJob.progress }} / {{ scanJob.total || '?' }}</span>
+        </div>
+        <span v-if="scanJob.summary?.current" class="scan-current">{{ scanJob.summary.current }}</span>
+      </div>
+      <div v-if="scanJob.summary?.created !== undefined" class="scan-summary-grid">
+        <div><strong>{{ scanJob.summary.created }}</strong><span>新增</span></div>
+        <div><strong>{{ scanJob.summary.updated }}</strong><span>更新</span></div>
+        <div><strong>{{ scanJob.summary.removed || 0 }}</strong><span>移除缺失</span></div>
+        <div :class="{ warn: scanJob.summary.errors > 0 }"><strong>{{ scanJob.summary.errors }}</strong><span>错误</span></div>
       </div>
       <div v-if="hasScanHealthReport()" class="scan-health-report">
         <button
@@ -530,7 +538,7 @@ onMounted(() => { loadStats(); loadAlbums(0) })
         <span class="scan-health-chip" :class="{ warn: scanJob.summary.health.missing_files > 0 }">文件缺失 <strong>{{ scanJob.summary.health.missing_files || 0 }}</strong></span>
       </div>
       <div v-if="hasScanHealthReport()" class="scan-next-actions">
-        <AppButton variant="ghost" size="sm" @click="openHealthModal">打开治理</AppButton>
+        <AppButton variant="primary" size="sm" @click="openHealthModal">查看问题</AppButton>
         <AppButton variant="ghost" size="sm" @click="openToolbox">打开工具箱</AppButton>
       </div>
     </div>
@@ -761,8 +769,16 @@ onMounted(() => { loadStats(); loadAlbums(0) })
 .stat-val { font-size: 24px; font-weight: 700; }
 .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.scan-status { margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text-dim); font-size: 12px; display: flex; flex-direction: column; gap: 8px; }
-.scan-status-line { color: var(--text-dim); }
+.scan-status { margin: 10px 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--surface)), var(--surface)); color: var(--text-dim); font-size: 12px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow-soft); }
+.scan-report-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.scan-report-head > div { display: flex; flex-direction: column; gap: 3px; }
+.scan-report-head strong { color: var(--text); font-size: 15px; }
+.scan-current { max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.scan-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.scan-summary-grid div { padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--bg-elevated) 88%, transparent); display: flex; flex-direction: column; gap: 2px; }
+.scan-summary-grid strong { color: var(--text); font-size: 18px; }
+.scan-summary-grid span { color: var(--text-muted); }
+.scan-summary-grid .warn strong { color: var(--warning); }
 .scan-health-report { display: flex; gap: 6px; flex-wrap: wrap; }
 .scan-health-chip { border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: default; }
 button.scan-health-chip { cursor: pointer; }
@@ -858,6 +874,9 @@ button.scan-health-chip { cursor: pointer; }
   .search-input, .sort-select { width: 100%; min-width: 0; }
   .view-toggles { width: 100%; }
   .view-btn { flex: 1; }
+  .scan-report-head { flex-direction: column; }
+  .scan-current { max-width: 100%; white-space: normal; }
+  .scan-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .album-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
   .album-row { padding: 8px; }
   .row-count { display: none; }

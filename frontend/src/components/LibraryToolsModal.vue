@@ -70,7 +70,7 @@ const optionPlaceholder = computed(() => {
   if (id === 'identify') return JSON.stringify({ write_tags: false }, null, 2)
   if (id === 'album_artist') return JSON.stringify({ album_artist: '', write_tags: false }, null, 2)
   if (id === 'dedupe') return JSON.stringify({ mode: 'trash' }, null, 2)
-  if (id === 'delete_files') return JSON.stringify({ delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true }, null, 2)
+  if (id === 'delete_files') return JSON.stringify({ delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, mode: 'trash' }, null, 2)
   if (id === 'split_audio' || id === 'cue_candidates') return JSON.stringify({ keep_original: true, overwrite_existing: false, output_subdir: '', stream_copy: false }, null, 2)
   if (id === 'zh_t2s' || id === 'zh_s2t') return JSON.stringify({ fields: ['title', 'artist', 'album', 'genre'], write_tags: false }, null, 2)
   if (id === 'fix_garble') return JSON.stringify({ fields: ['title', 'artist', 'album', 'genre'], write_tags: false }, null, 2)
@@ -306,7 +306,7 @@ async function runApply() {
       return
     }
   }
-  if (activeTool.value.id === 'delete_files' && !confirm('确认删除选中文件？会同时移除对应库记录，此操作不可撤销。')) return
+  if (activeTool.value.id === 'delete_files' && !confirm('确认处理选中文件？默认会移入音乐库 .trash 回收站，并移除对应库记录。只有 mode=delete 才会永久删除。')) return
   applying.value = true
   try {
     const res = await applyLibraryTool(activeTool.value.id, { ...buildToolPayload(options), async: true })

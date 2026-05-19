@@ -187,10 +187,10 @@ async function saveTrack() {
 }
 
 async function deleteTrack(track) {
-  if (!track || !confirm(`确认删除「${track.title || track.file_path}」？\n会同时删除音乐库里的本地音频文件，并清理空目录。此操作不可撤销。`)) return
+  if (!track || !confirm(`确认删除「${track.title || track.file_path}」？\n会把本地音频文件移入音乐库 .trash 回收站，并清理空目录；库记录会同步移除。`)) return
   await applyLibraryTool('delete_files', {
     file_ids: [track.id],
-    options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true },
+    options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, mode: 'trash' },
     async: false
   })
   showTrackModal.value = false
@@ -282,7 +282,7 @@ onMounted(loadTracks)
           <label>流派<input v-model="trackEdit.genre" /></label>
           <div class="tag-actions">
             <AppButton variant="primary" size="sm" :loading="savingTrack" @click="saveTrack">保存</AppButton>
-            <AppButton variant="danger" size="sm" @click="deleteTrack(selectedTrack)">删除本地文件</AppButton>
+            <AppButton variant="danger" size="sm" @click="deleteTrack(selectedTrack)">移入回收站</AppButton>
           </div>
         </div>
         <div class="pager" v-if="trackPagedMode && trackPageCount > 1">
