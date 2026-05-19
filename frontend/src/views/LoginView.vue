@@ -1,11 +1,14 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
 import AppButton from '@/components/AppButton.vue'
+import { useThemeStore } from '@/stores/theme.js'
 
 const router = useRouter()
 const auth = useAuthStore()
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
 
 const username = ref('')
 const password = ref('')
@@ -33,7 +36,7 @@ async function handleLogin() {
 <template>
   <div class="login-page">
     <div class="login-card">
-      <div class="login-logo">🎵</div>
+      <div class="login-logo"><img v-if="isIsland" src="/animal-island/nook-phone/nook1.svg" alt="" /><span v-else>🎵</span></div>
       <h1 class="login-title">音乐订阅管理</h1>
       <form @submit.prevent="handleLogin" class="login-form">
         <div class="form-group">
@@ -73,7 +76,8 @@ async function handleLogin() {
   align-items: center;
   gap: 16px;
 }
-.login-logo { font-size: 56px; }
+.login-logo { font-size: 56px; display: flex; align-items: center; justify-content: center; }
+.login-logo img { width: 78px; height: 78px; object-fit: contain; filter: drop-shadow(0 8px 8px rgba(61, 52, 40, .18)); }
 .login-title { font-size: 22px; font-weight: 700; }
 .login-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
 .form-group { display: flex; flex-direction: column; gap: 6px; }

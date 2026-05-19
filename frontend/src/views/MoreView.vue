@@ -1,23 +1,30 @@
 <script setup>
+import { computed } from 'vue'
+import { useThemeStore } from '@/stores/theme.js'
+
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
+const animalAsset = (name) => `/animal-island/${name}`
+const nookAsset = (name) => animalAsset(`nook-phone/${name}`)
 const groups = [
   {
     title: '管理',
     items: [
-      { to: '/subs', icon: '📡', title: '订阅管理', subtitle: '维护订阅源、专辑与规则' },
-      { to: '/online', icon: '🎧', title: '在线下载', subtitle: '搜索在线资源并加入下载' },
+      { to: '/subs', icon: '📡', islandIconSrc: nookAsset('Property-Chat.svg'), title: '订阅管理', subtitle: '维护订阅源、专辑与规则' },
+      { to: '/online', icon: '🎧', islandIconSrc: nookAsset('Property-Shopping.svg'), title: '在线下载', subtitle: '搜索在线资源并加入下载' },
     ],
   },
   {
     title: '工具',
     items: [
-      { to: '/assistant', icon: '🤖', title: '智能助手', subtitle: '用自然语言处理音乐订阅' },
-      { to: '/logs', icon: '📜', title: '日志', subtitle: '查看运行状态与错误记录' },
+      { to: '/assistant', icon: '🤖', islandIconSrc: nookAsset('nook2.svg'), title: '智能助手', subtitle: '用自然语言处理音乐订阅' },
+      { to: '/logs', icon: '📜', islandIconSrc: nookAsset('Property-Recipes.svg'), title: '日志', subtitle: '查看运行状态与错误记录' },
     ],
   },
   {
     title: '系统',
     items: [
-      { to: '/settings', icon: '⚙️', title: '设置', subtitle: '配置下载器、路径与系统选项' },
+      { to: '/settings', icon: '⚙️', islandIconSrc: animalAsset('animal_icon.svg'), title: '设置', subtitle: '配置下载器、路径与系统选项' },
     ],
   },
 ]
@@ -29,7 +36,7 @@ const groups = [
       <h2 class="section-title">{{ group.title }}</h2>
       <div class="more-list">
         <router-link v-for="item in group.items" :key="item.to" :to="item.to" class="more-card">
-          <span class="more-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span class="more-icon" aria-hidden="true"><img v-if="isIsland && item.islandIconSrc" :src="item.islandIconSrc" alt="" class="animal-more-icon" /><span v-else>{{ item.icon }}</span></span>
           <span class="more-copy">
             <span class="more-title">{{ item.title }}</span>
             <span class="more-subtitle">{{ item.subtitle }}</span>
@@ -93,6 +100,7 @@ const groups = [
   background: var(--surface);
   font-size: 20px;
 }
+.animal-more-icon { width: 34px; height: 34px; object-fit: contain; filter: drop-shadow(0 3px 2px rgba(61, 52, 40, .16)); }
 .more-copy {
   min-width: 0;
   display: flex;
