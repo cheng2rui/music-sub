@@ -70,19 +70,47 @@ class SchedulerSettingInput(BaseModel):
     cleanup_scan_interval_hours: int = 24
 
 
-class TelegramNotifyInput(BaseModel):
+class NotifyEventInput(BaseModel):
     enabled: bool = False
-    bot_token: str = ""
-    chat_id: str = ""
     on_download_added: bool = False
     on_download_complete: bool = True
     on_scrape_complete: bool = True
     on_error: bool = True
     on_cleanup_candidates: bool = True
+    assistant_chat: bool = True
+
+
+class TelegramNotifyInput(NotifyEventInput):
+    bot_token: str = ""
+    chat_id: str = ""
+
+
+class WeComNotifyInput(NotifyEventInput):
+    corp_id: str = ""
+    agent_id: str = ""
+    app_secret: str = ""
+    to_user: str = "@all"
+    proxy: str = "https://qyapi.weixin.qq.com"
+
+
+class QQBotNotifyInput(NotifyEventInput):
+    app_id: str = ""
+    app_secret: str = ""
+    user_openid: str = ""
+    group_openid: str = ""
+
+
+class WeChatBotNotifyInput(NotifyEventInput):
+    webhook_url: str = ""
+    token: str = ""
 
 
 class NotifySettingInput(BaseModel):
+    webhook_token: str = ""
     telegram: TelegramNotifyInput = TelegramNotifyInput()
+    wecom: WeComNotifyInput = WeComNotifyInput()
+    qqbot: QQBotNotifyInput = QQBotNotifyInput()
+    wechatbot: WeChatBotNotifyInput = WeChatBotNotifyInput()
 
 
 class AssistantProviderInput(BaseModel):
@@ -128,7 +156,11 @@ def get_settings():
         scraper=ScraperSettingInput(**cfg_module.config.scraper.model_dump()),
         scheduler=SchedulerSettingInput(**cfg_module.config.scheduler.model_dump()),
         notify=NotifySettingInput(
+            webhook_token=cfg_module.config.notify.webhook_token,
             telegram=TelegramNotifyInput(**cfg_module.config.notify.telegram.model_dump()),
+            wecom=WeComNotifyInput(**cfg_module.config.notify.wecom.model_dump()),
+            qqbot=QQBotNotifyInput(**cfg_module.config.notify.qqbot.model_dump()),
+            wechatbot=WeChatBotNotifyInput(**cfg_module.config.notify.wechatbot.model_dump()),
         ),
         assistant=AssistantSettingInput(**cfg_module.config.assistant.model_dump()),
     )
@@ -142,8 +174,16 @@ def get_settings():
             s.token = _mask_secret(s.token, 6)
     if data.qbittorrent.password:
         data.qbittorrent.password = QB_PASSWORD_MASK
+    if data.notify.webhook_token:
+        data.notify.webhook_token = _mask_secret(data.notify.webhook_token, 6)
     if data.notify.telegram.bot_token:
         data.notify.telegram.bot_token = _mask_secret(data.notify.telegram.bot_token, 6)
+    if data.notify.wecom.app_secret:
+        data.notify.wecom.app_secret = _mask_secret(data.notify.wecom.app_secret, 6)
+    if data.notify.qqbot.app_secret:
+        data.notify.qqbot.app_secret = _mask_secret(data.notify.qqbot.app_secret, 6)
+    if data.notify.wechatbot.token:
+        data.notify.wechatbot.token = _mask_secret(data.notify.wechatbot.token, 6)
     if data.assistant.provider.api_key:
         data.assistant.provider.api_key = _mask_secret(data.assistant.provider.api_key, 6)
     return data
@@ -208,9 +248,17 @@ def save_settings(settings: AllSettings):
     if raw["qbittorrent"]["password"] == QB_PASSWORD_MASK and cfg_module.config.qbittorrent.password:
         raw["qbittorrent"]["password"] = cfg_module.config.qbittorrent.password
 
-    # Preserve telegram bot_token only if the exact generated mask was submitted.
+    # Preserve notify secrets only if the exact generated mask was submitted.
+    if _is_unchanged_mask(raw["notify"].get("webhook_token", ""), cfg_module.config.notify.webhook_token, 6):
+        raw["notify"]["webhook_token"] = cfg_module.config.notify.webhook_token
     if _is_unchanged_mask(raw["notify"]["telegram"].get("bot_token", ""), cfg_module.config.notify.telegram.bot_token, 6):
         raw["notify"]["telegram"]["bot_token"] = cfg_module.config.notify.telegram.bot_token
+    if _is_unchanged_mask(raw["notify"]["wecom"].get("app_secret", ""), cfg_module.config.notify.wecom.app_secret, 6):
+        raw["notify"]["wecom"]["app_secret"] = cfg_module.config.notify.wecom.app_secret
+    if _is_unchanged_mask(raw["notify"]["qqbot"].get("app_secret", ""), cfg_module.config.notify.qqbot.app_secret, 6):
+        raw["notify"]["qqbot"]["app_secret"] = cfg_module.config.notify.qqbot.app_secret
+    if _is_unchanged_mask(raw["notify"]["wechatbot"].get("token", ""), cfg_module.config.notify.wechatbot.token, 6):
+        raw["notify"]["wechatbot"]["token"] = cfg_module.config.notify.wechatbot.token
 
     # Preserve assistant api_key only if the exact generated mask was submitted.
     if _is_unchanged_mask(raw["assistant"]["provider"].get("api_key", ""), cfg_module.config.assistant.provider.api_key, 6):

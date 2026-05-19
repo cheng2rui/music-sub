@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -15,7 +15,13 @@ const settings = ref({
   paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
   scraper: { sources: ['qqmusic', 'netease', 'kugou', 'migu', 'kuwo', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false, tag_write_mode: 'fill_missing', break_hardlink_before_tag: true },
   scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
-  notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } },
+  notify: {
+    webhook_token: '',
+    telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
+    wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
+    qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
+    wechatbot: { enabled: false, webhook_url: '', token: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true }
+  },
   assistant: {
     enabled: false,
     provider: { provider: 'openai_compatible', runtime: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60 },
@@ -33,6 +39,7 @@ const loading = ref(false)
 const saving = ref(false)
 const testingQb = ref(false)
 const testingTg = ref(false)
+const testingNotify = ref('')
 const testingSite = ref('')
 const scheduler = ref([])
 const assistantProviders = ref([])
@@ -108,10 +115,28 @@ async function handleTestTg() {
   testingTg.value = true
   try {
     const res = await testTelegram()
-    alert(res.ok ? 'Telegram 消息发送成功' : '发送失败: ' + (res.error || ''))
+    alert(res.ok ? 'Telegram 消息发送成功' : '发送失败: ' + (res.message || res.error || ''))
   } catch (e) { alert('发送失败: ' + e.message) }
   finally { testingTg.value = false }
 }
+
+async function handleTestNotify(channel) {
+  testingNotify.value = channel
+  try {
+    const res = await testNotifyChannel(channel)
+    alert(res.ok ? `${channel} 消息发送成功` : `发送失败: ${res.message || res.error || ''}`)
+  } catch (e) { alert('发送失败: ' + e.message) }
+  finally { testingNotify.value = '' }
+}
+
+const notifyEvents = [
+  ['on_download_added', '开始下载'],
+  ['on_download_complete', '下载完成'],
+  ['on_scrape_complete', '刮削完成'],
+  ['on_error', '错误告警'],
+  ['on_cleanup_candidates', '清理候选提醒'],
+  ['assistant_chat', '允许和智能助手对话']
+]
 
 async function handleRunScheduler(id) {
   try { await runScheduler(id) } catch (e) { console.error(e) }
@@ -381,29 +406,65 @@ onMounted(loadAll)
         </div>
       </div>
 
-      <!-- Telegram 通知 -->
+      <!-- 通知 -->
       <div v-show="activeSettingsTab === 'notify'" class="settings-section">
-        <h3>📢 Telegram 通知</h3>
-        <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.notify.telegram.enabled" /><span>启用 Telegram 通知</span></label>
-        <div v-if="settings.notify.telegram.enabled">
-          <div class="fields-row">
-            <div class="field flex-1">
-              <label>Bot Token</label>
-              <input v-model="settings.notify.telegram.bot_token" placeholder="123456:ABC-DEF..." />
-            </div>
-            <div class="field flex-1">
-              <label>Chat ID</label>
-              <input v-model="settings.notify.telegram.chat_id" placeholder="-100... 或 user id" />
-            </div>
+        <h3>📢 通知与消息入口</h3>
+        <div class="field" style="margin-bottom:14px">
+          <label>Webhook Token（入站消息校验）</label>
+          <input v-model="settings.notify.webhook_token" placeholder="必填；/api/notify/webhook/... 必须带 ?token=" />
+          <small class="text-dim">入站地址：/api/notify/webhook/wecom、/api/notify/webhook/qqbot、/api/notify/webhook/wechatbot。未配置 token 时拒绝入站。</small>
+        </div>
+
+        <div class="notify-channel-card">
+          <div class="notify-channel-head">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.enabled" /><span>Telegram</span></label>
             <AppButton variant="ghost" size="sm" :loading="testingTg" @click="handleTestTg">测试发送</AppButton>
           </div>
-          <div class="toggle-list" style="margin-top:12px">
-            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_download_added" /><span>开始下载</span></label>
-            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_download_complete" /><span>下载完成</span></label>
-            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_scrape_complete" /><span>刮削完成</span></label>
-            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_error" /><span>错误告警</span></label>
-            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.on_cleanup_candidates" /><span>清理候选提醒</span></label>
+          <div class="fields-row" v-if="settings.notify.telegram.enabled">
+            <div class="field flex-1"><label>Bot Token</label><input v-model="settings.notify.telegram.bot_token" placeholder="123456:ABC-DEF..." /></div>
+            <div class="field flex-1"><label>Chat ID</label><input v-model="settings.notify.telegram.chat_id" placeholder="-100... 或 user id" /></div>
           </div>
+          <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'tg-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
+        </div>
+
+        <div class="notify-channel-card">
+          <div class="notify-channel-head">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.wecom.enabled" /><span>企业微信应用</span></label>
+            <AppButton variant="ghost" size="sm" :loading="testingNotify === 'wecom'" @click="handleTestNotify('wecom')">测试发送</AppButton>
+          </div>
+          <div class="fields-row" v-if="settings.notify.wecom.enabled">
+            <div class="field flex-1"><label>Corp ID</label><input v-model="settings.notify.wecom.corp_id" /></div>
+            <div class="field flex-1"><label>Agent ID</label><input v-model="settings.notify.wecom.agent_id" /></div>
+            <div class="field flex-1"><label>App Secret</label><input v-model="settings.notify.wecom.app_secret" type="password" /></div>
+            <div class="field flex-1"><label>ToUser</label><input v-model="settings.notify.wecom.to_user" placeholder="@all / UserID" /></div>
+          </div>
+          <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'wc-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.wecom[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
+        </div>
+
+        <div class="notify-channel-card">
+          <div class="notify-channel-head">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.qqbot.enabled" /><span>QQBot</span></label>
+            <AppButton variant="ghost" size="sm" :loading="testingNotify === 'qqbot'" @click="handleTestNotify('qqbot')">测试发送</AppButton>
+          </div>
+          <div class="fields-row" v-if="settings.notify.qqbot.enabled">
+            <div class="field flex-1"><label>App ID</label><input v-model="settings.notify.qqbot.app_id" /></div>
+            <div class="field flex-1"><label>App Secret</label><input v-model="settings.notify.qqbot.app_secret" type="password" /></div>
+            <div class="field flex-1"><label>User OpenID</label><input v-model="settings.notify.qqbot.user_openid" /></div>
+            <div class="field flex-1"><label>Group OpenID</label><input v-model="settings.notify.qqbot.group_openid" /></div>
+          </div>
+          <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'qq-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.qqbot[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
+        </div>
+
+        <div class="notify-channel-card">
+          <div class="notify-channel-head">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.wechatbot.enabled" /><span>WeChatBot / WeichatBot Webhook</span></label>
+            <AppButton variant="ghost" size="sm" :loading="testingNotify === 'wechatbot'" @click="handleTestNotify('wechatbot')">测试发送</AppButton>
+          </div>
+          <div class="fields-row" v-if="settings.notify.wechatbot.enabled">
+            <div class="field flex-1"><label>Webhook URL</label><input v-model="settings.notify.wechatbot.webhook_url" placeholder="http://.../send" /></div>
+            <div class="field flex-1"><label>Token</label><input v-model="settings.notify.wechatbot.token" type="password" /></div>
+          </div>
+          <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'wb-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.wechatbot[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
         </div>
       </div>
 
@@ -535,7 +596,10 @@ onMounted(loadAll)
 .field input, .field select { min-width: 0; }
 .field small { line-height: 1.45; }
 .toggle-list { display: flex; flex-direction: column; gap: 8px; }
+.toggle-list.compact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .toggle-item { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 14px; line-height: 1.35; }
+.notify-channel-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 14px; margin-top: 12px; }
+.notify-channel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .toggle-item input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--accent); }
 .toggle-item span { min-width: 0; }
 .scheduler-list { display: flex; flex-direction: column; gap: 8px; }

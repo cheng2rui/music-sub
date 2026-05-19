@@ -55,20 +55,47 @@ class SchedulerConfig(BaseModel):
     cleanup_scan_interval_hours: int = 24
 
 
-class TelegramNotifyConfig(BaseModel):
+class NotifyChannelEvents(BaseModel):
     enabled: bool = False
-    bot_token: str = ""
-    chat_id: str = ""
-    # 事件开关
     on_download_added: bool = False
     on_download_complete: bool = True
     on_scrape_complete: bool = True
     on_error: bool = True
     on_cleanup_candidates: bool = True
+    assistant_chat: bool = True
+
+
+class TelegramNotifyConfig(NotifyChannelEvents):
+    bot_token: str = ""
+    chat_id: str = ""
+
+
+class WeComNotifyConfig(NotifyChannelEvents):
+    corp_id: str = ""
+    agent_id: str = ""
+    app_secret: str = ""
+    to_user: str = "@all"
+    proxy: str = "https://qyapi.weixin.qq.com"
+
+
+class QQBotNotifyConfig(NotifyChannelEvents):
+    app_id: str = ""
+    app_secret: str = ""
+    user_openid: str = ""
+    group_openid: str = ""
+
+
+class WeChatBotNotifyConfig(NotifyChannelEvents):
+    webhook_url: str = ""
+    token: str = ""
 
 
 class NotifyConfig(BaseModel):
+    webhook_token: str = ""
     telegram: TelegramNotifyConfig = TelegramNotifyConfig()
+    wecom: WeComNotifyConfig = WeComNotifyConfig()
+    qqbot: QQBotNotifyConfig = QQBotNotifyConfig()
+    wechatbot: WeChatBotNotifyConfig = WeChatBotNotifyConfig()
 
 
 class AuthConfig(BaseModel):

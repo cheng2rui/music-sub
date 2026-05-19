@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.db import init_db
 from app.scheduler import start_scheduler, stop_scheduler
 from app.auth import verify_token
-from app.api import subscriptions, search, tasks, library, settings, discover, online, assistant
+from app.api import subscriptions, search, tasks, library, settings, discover, online, assistant, notify
 from app.api import auth as auth_api
 from app.api import logs as logs_api
 from app.version import APP_VERSION
@@ -65,8 +65,8 @@ async def auth_middleware(request: Request, call_next):
     # Allow cover image endpoints (used as CSS background-image, no auth header)
     if path.startswith("/api/library/album-cover") or path.startswith("/api/library/cover/") or path.startswith("/api/library/stream/"):
         return await call_next(request)
-    # Allow health check
-    if path == "/api/health":
+    # Allow health check and signed notification webhooks
+    if path == "/api/health" or path.startswith("/api/notify/incoming") or path.startswith("/api/notify/webhook/"):
         return await call_next(request)
 
     # Check Authorization header
@@ -92,6 +92,7 @@ app.include_router(discover.router, prefix="/api/discover", tags=["discover"])
 app.include_router(logs_api.router, prefix="/api/logs", tags=["logs"])
 app.include_router(online.router, prefix="/api/online", tags=["online"])
 app.include_router(assistant.router, prefix="/api/assistant", tags=["assistant"])
+app.include_router(notify.router, prefix="/api/notify", tags=["notify"])
 
 
 @app.get("/api/health")
