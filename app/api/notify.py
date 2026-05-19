@@ -55,6 +55,31 @@ def test_channel(channel: str):
     return result.__dict__
 
 
+@router.get("/wechatclaw/status")
+def wechatclaw_state(refresh: bool = False, auto_qrcode: bool = False):
+    from app.services.wechatclaw import get_status
+    return get_status(refresh=refresh, auto_qrcode=auto_qrcode)
+
+
+@router.post("/wechatclaw/qrcode")
+def wechatclaw_qrcode():
+    from app.services.wechatclaw import get_qrcode
+    return get_qrcode()
+
+
+@router.post("/wechatclaw/restart")
+def wechatclaw_restart():
+    from app.services.wechatclaw import restart_wechatclaw_polling, get_status
+    restart_wechatclaw_polling()
+    return get_status()
+
+
+@router.post("/wechatclaw/logout")
+def wechatclaw_logout():
+    from app.services.wechatclaw import logout
+    return logout()
+
+
 @router.get("/qqbot/gateway/status")
 def qqbot_gateway_state():
     from app.services.qqbot_gateway import qqbot_gateway_status

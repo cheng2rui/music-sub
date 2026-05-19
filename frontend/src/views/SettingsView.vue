@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getQqbotGatewayStatus, restartQqbotGateway, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -20,7 +20,7 @@ const settings = ref({
     telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', enable_gateway: false, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
-    wechatbot: { enabled: false, webhook_url: '', token: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true }
+    wechatbot: { enabled: false, webhook_url: '', token: '', enable_claw: false, claw_base_url: 'https://ilinkai.weixin.qq.com', claw_default_target: '', claw_poll_timeout: 25, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true }
   },
   assistant: {
     enabled: false,
@@ -42,6 +42,8 @@ const testingTg = ref(false)
 const testingNotify = ref('')
 const restartingQqGateway = ref(false)
 const qqGatewayStatus = ref(null)
+const wechatClawStatus = ref(null)
+const wechatClawBusy = ref('')
 const testingSite = ref('')
 const scheduler = ref([])
 const assistantProviders = ref([])
@@ -81,6 +83,7 @@ async function loadAll() {
     const toolData = await getAssistantTools()
     assistantTools.value = toolData.tools || []
     await loadQqGatewayStatus()
+    await loadWechatClawStatus(false, false)
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
@@ -139,9 +142,41 @@ async function loadQqGatewayStatus() {
 
 async function handleRestartQqGateway() {
   restartingQqGateway.value = true
-  try { qqGatewayStatus.value = await restartQqbotGateway() }
+  try { qqGatewayStatus.value = await restartQqGateway() }
   catch (e) { alert('重启 Gateway 失败: ' + e.message) }
   finally { restartingQqGateway.value = false }
+}
+
+async function loadWechatClawStatus(refresh = false, autoQrcode = false) {
+  try { wechatClawStatus.value = await getWechatClawStatus(refresh, autoQrcode) }
+  catch (e) { console.warn('load wechat claw failed', e) }
+}
+
+async function handleWechatClawQrcode() {
+  wechatClawBusy.value = 'qrcode'
+  try { wechatClawStatus.value = await refreshWechatClawQrcode() }
+  catch (e) { alert('获取二维码失败: ' + e.message) }
+  finally { wechatClawBusy.value = '' }
+}
+
+async function handleWechatClawRefresh() {
+  wechatClawBusy.value = 'refresh'
+  try { await loadWechatClawStatus(true, false) }
+  finally { wechatClawBusy.value = '' }
+}
+
+async function handleWechatClawRestart() {
+  wechatClawBusy.value = 'restart'
+  try { wechatClawStatus.value = await restartWechatClaw() }
+  catch (e) { alert('重启轮询失败: ' + e.message) }
+  finally { wechatClawBusy.value = '' }
+}
+
+async function handleWechatClawLogout() {
+  if (!confirm('确认退出微信 Claw 登录？')) return
+  wechatClawBusy.value = 'logout'
+  try { wechatClawStatus.value = await logoutWechatClaw() }
+  finally { wechatClawBusy.value = '' }
 }
 
 const notifyEvents = [
@@ -483,8 +518,24 @@ onMounted(loadAll)
             <AppButton variant="ghost" size="sm" :loading="testingNotify === 'wechatbot'" @click="handleTestNotify('wechatbot')">测试发送</AppButton>
           </div>
           <div class="fields-row" v-if="settings.notify.wechatbot.enabled">
-            <div class="field flex-1"><label>Webhook URL</label><input v-model="settings.notify.wechatbot.webhook_url" placeholder="http://.../send" /></div>
+            <div class="field flex-1"><label>Webhook URL（兼容旧模式）</label><input v-model="settings.notify.wechatbot.webhook_url" placeholder="http://.../send" /></div>
             <div class="field flex-1"><label>Token</label><input v-model="settings.notify.wechatbot.token" type="password" /></div>
+            <div class="field flex-1"><label>Claw Base URL</label><input v-model="settings.notify.wechatbot.claw_base_url" placeholder="https://ilinkai.weixin.qq.com" /></div>
+            <div class="field flex-1"><label>默认目标</label><input v-model="settings.notify.wechatbot.claw_default_target" placeholder="wxid / user_id，可空" /></div>
+            <div class="field flex-1"><label>轮询超时</label><input v-model.number="settings.notify.wechatbot.claw_poll_timeout" type="number" min="10" max="120" /></div>
+          </div>
+          <div class="gateway-row">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.wechatbot.enable_claw" /><span>启用微信 Claw/iLink 登录与轮询</span></label>
+            <AppBadge :color="wechatClawStatus?.connected ? 'green' : (wechatClawStatus?.enabled ? 'orange' : 'dim')">{{ wechatClawStatus?.connected ? '已登录' : (wechatClawStatus?.enabled ? '待登录' : '未启用') }}</AppBadge>
+            <AppButton variant="ghost" size="sm" :loading="wechatClawBusy === 'qrcode'" @click="handleWechatClawQrcode">获取二维码</AppButton>
+            <AppButton variant="ghost" size="sm" :loading="wechatClawBusy === 'refresh'" @click="handleWechatClawRefresh">刷新状态</AppButton>
+            <AppButton variant="ghost" size="sm" :loading="wechatClawBusy === 'restart'" @click="handleWechatClawRestart">重启轮询</AppButton>
+            <AppButton variant="ghost" size="sm" :loading="wechatClawBusy === 'logout'" @click="handleWechatClawLogout">退出登录</AppButton>
+          </div>
+          <div v-if="wechatClawStatus?.qrcode_url" class="wechat-qrcode-box">
+            <img v-if="wechatClawStatus.qrcode_url.startsWith('data:image') || wechatClawStatus.qrcode_url.startsWith('http')" :src="wechatClawStatus.qrcode_url" />
+            <code>{{ wechatClawStatus.qrcode_url }}</code>
+            <small>状态：{{ wechatClawStatus.qrcode_status || '-' }} · Account：{{ wechatClawStatus.account_id || '-' }}</small>
           </div>
           <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'wb-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.wechatbot[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
         </div>
@@ -623,6 +674,10 @@ onMounted(loadAll)
 .notify-channel-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 14px; margin-top: 12px; }
 .notify-channel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .gateway-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.wechat-qrcode-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border-radius: var(--radius-md); background: var(--surface-soft); }
+.wechat-qrcode-box img { width: 132px; height: 132px; object-fit: contain; border-radius: var(--radius-sm); background: #fff; }
+.wechat-qrcode-box code { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.wechat-qrcode-box small { color: var(--text-muted); }
 .toggle-item input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--accent); }
 .toggle-item span { min-width: 0; }
 .scheduler-list { display: flex; flex-direction: column; gap: 8px; }

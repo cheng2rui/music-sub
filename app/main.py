@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.db import init_db
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.qqbot_gateway import start_qqbot_gateway, stop_qqbot_gateway
+from app.services.wechatclaw import start_wechatclaw_polling, stop_wechatclaw_polling
 from app.auth import verify_token
 from app.api import subscriptions, search, tasks, library, settings, discover, online, assistant, notify
 from app.api import auth as auth_api
@@ -45,7 +46,9 @@ async def lifespan(app: FastAPI):
     init_db()
     start_scheduler()
     start_qqbot_gateway()
+    start_wechatclaw_polling()
     yield
+    stop_wechatclaw_polling()
     stop_qqbot_gateway()
     stop_scheduler()
 

@@ -91,6 +91,10 @@ class QQBotNotifyConfig(NotifyChannelEvents):
 class WeChatBotNotifyConfig(NotifyChannelEvents):
     webhook_url: str = ""
     token: str = ""
+    enable_claw: bool = False
+    claw_base_url: str = "https://ilinkai.weixin.qq.com"
+    claw_default_target: str = ""
+    claw_poll_timeout: int = 25
 
 
 class NotifyConfig(BaseModel):

@@ -156,8 +156,25 @@ def _send_qqbot(text: str, target: str | None = None, group: bool | None = None,
 
 def _send_wechatbot(text: str, target: str | None = None) -> SendResult:
     wb = cfg_module.config.notify.wechatbot
-    if not wb.enabled or not wb.webhook_url:
-        return SendResult("wechatbot", False, "wechatbot not configured")
+    if not wb.enabled:
+        return SendResult("wechatbot", False, "wechatbot not enabled")
+    if wb.enable_claw:
+        try:
+            from app.services.wechatclaw import send_text, load_state
+            target_id = target or wb.claw_default_target or ""
+            if not target_id:
+                targets = load_state().get("known_targets") or {}
+                if targets:
+                    target_id = sorted(targets.values(), key=lambda x: x.get("last_active") or 0, reverse=True)[0].get("userid") or ""
+            if not target_id:
+                return SendResult("wechatbot", False, "wechat claw target missing")
+            ok = send_text(target_id, _plain_text(text))
+            return SendResult("wechatbot", ok, "ok" if ok else "wechat claw send failed")
+        except Exception as e:
+            logger.error("WeChat Claw send error: %s", e)
+            return SendResult("wechatbot", False, str(e))
+    if not wb.webhook_url:
+        return SendResult("wechatbot", False, "wechatbot webhook_url not configured")
     try:
         payload: dict[str, Any] = {"text": _plain_text(text)}
         if target:
