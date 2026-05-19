@@ -1,13 +1,17 @@
-"""Discover API - fetch recommendations from QQ Music / NetEase."""
+"""Discover API - local library recommendations and playlist import helpers."""
 import logging
 import random
 import re
 from collections import Counter
+from pathlib import Path
+from urllib.parse import urlencode
+
 import requests
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+
 from app.db import get_db
-from app.models import DownloadTask, MusicFile, Subscription
+from app.models import MusicFile
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -19,14 +23,6 @@ _session.headers.update({
 })
 
 
-def _song_actions(source: str = "") -> list[str]:
-    return ["download", "search_pt", "subscribe_song", "subscribe_artist"]
-
-
-def _qq_song_id(song: dict) -> str:
-    return str(song.get("mid") or song.get("songmid") or song.get("songMid") or "")
-
-
 def _norm_text(value: str | None) -> str:
     return re.sub(r"\s+", "", (value or "").strip().lower())
 
@@ -35,406 +31,84 @@ def _song_fingerprint(title: str | None, artist: str | None = "") -> str:
     return f"{_norm_text(title)}::{_norm_text((artist or '').split('/')[0])}"
 
 
-def _song_item(*, source: str, title: str, artist: str = "", album: str = "", cover: str = "", song_id: str = "", rank: int | None = None, reason: str = "", in_library: bool = False) -> dict:
-    item = {
-        "source": source,
-        "song_id": str(song_id or ""),
-        "title": title or "",
-        "artist": artist or "",
-        "album": album or "",
-        "cover": cover or "",
-        "reason": reason or "",
-        "in_library": bool(in_library),
-        "actions": _song_actions(source),
+def _local_cover_url(artist: str, album: str) -> str:
+    if not artist or not album:
+        return ""
+    return "/api/library/album-cover?" + urlencode({"artist": artist, "album": album})
+
+
+def _local_song_item(row: MusicFile, reason: str) -> dict:
+    artist = row.album_artist or row.artist or "未知艺人"
+    album = row.album or "单曲/未知专辑"
+    title = row.title or (Path(row.file_path).stem if row.file_path else "未知歌曲")
+    return {
+        "source": "local",
+        "song_id": str(row.id),
+        "file_id": row.id,
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "cover": _local_cover_url(artist, album),
+        "reason": reason,
+        "in_library": True,
+        "actions": [],
+        "format": row.format or "",
+        "duration": row.duration or 0,
+        "bitrate": row.bitrate or 0,
     }
-    if rank is not None:
-        item["rank"] = rank
-    return item
-
-
-def _library_fingerprints(db: Session) -> set[str]:
-    rows = db.query(MusicFile.title, MusicFile.artist, MusicFile.album_artist).all()
-    fps: set[str] = set()
-    for title, artist, album_artist in rows:
-        if title:
-            fps.add(_song_fingerprint(title, artist or album_artist or ""))
-    return fps
-
-
-def _mark_library(items: list[dict], fingerprints: set[str]) -> list[dict]:
-    for item in items:
-        item["in_library"] = _song_fingerprint(item.get("title"), item.get("artist")) in fingerprints
-    return items
-
-
-def _qq_search_songs(keyword: str, limit: int = 8, reason: str = "") -> list[dict]:
-    try:
-        resp = _session.get(
-            "https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp",
-            params={"w": keyword, "format": "json", "p": 1, "n": limit, "new_json": 1},
-            headers={"Referer": "https://y.qq.com/"},
-            timeout=8,
-        )
-        rows = resp.json().get("data", {}).get("song", {}).get("list", []) or []
-    except Exception as e:
-        logger.warning(f"QQ personalized search failed for {keyword}: {e}")
-        return []
-    items = []
-    for row in rows[:limit]:
-        singers = row.get("singer") or []
-        artist = "/".join(s.get("name", "") for s in singers if s.get("name"))
-        album_data = row.get("album") if isinstance(row.get("album"), dict) else {}
-        album_mid = row.get("albummid") or album_data.get("mid", "")
-        album_name = row.get("albumname") or album_data.get("name", "")
-        items.append(_song_item(
-            source="qq",
-            song_id=_qq_song_id(row),
-            title=row.get("songname") or row.get("name") or row.get("title") or "",
-            artist=artist,
-            album=album_name,
-            cover=f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg" if album_mid else "",
-            reason=reason or f"基于 {keyword} 推荐",
-        ))
-    return items
 
 
 @router.get("/personalized")
 def get_personalized(limit: int = Query(16, ge=4, le=40), db: Session = Depends(get_db)):
-    """Personalized discovery mixed from local library, subscriptions and recent downloads."""
-    fingerprints = _library_fingerprints(db)
-    seeds: list[tuple[str, str]] = []
+    """Pure local discovery recommendations from the user's own library only.
 
-    artist_counts = Counter()
-    for artist, album_artist in db.query(MusicFile.artist, MusicFile.album_artist).all():
-        name = (album_artist or artist or "").strip()
-        if name and name.lower() not in {"unknown artist", "未知艺人"}:
-            artist_counts[name] += 1
-    for artist, count in artist_counts.most_common(5):
-        seeds.append((artist, f"因为你的库里有 {count} 首/项 {artist}"))
-
-    for sub in db.query(Subscription).filter(Subscription.enabled == True).order_by(Subscription.created_at.desc()).limit(5).all():
-        if sub.keyword:
-            seeds.append((sub.keyword, f"来自你的订阅：{sub.keyword}"))
-
-    for task in db.query(DownloadTask).order_by(DownloadTask.created_at.desc()).limit(8).all():
-        title = (task.torrent_name or "").strip()
-        if title:
-            seeds.append((title[:40], "基于最近下载任务"))
-
-    if not seeds:
-        base = get_recommendations().get("items", []) + get_toplist().get("items", [])
-        return {"source": "cold_start", "items": _mark_library(base[:limit], fingerprints)}
+    This endpoint intentionally does not call external music recommendation APIs.
+    It mixes recently imported tracks, high-frequency local artists, and a small
+    random local sample so the Discover page stays local-first.
+    """
+    limit = max(4, min(int(limit or 16), 40))
+    rows = db.query(MusicFile).order_by(MusicFile.created_at.desc()).all()
+    if not rows:
+        return {"source": "local", "items": [], "message": "本地音乐库为空，暂无本地推荐"}
 
     results: list[dict] = []
     seen: set[str] = set()
-    for keyword, reason in seeds[:8]:
-        for item in _qq_search_songs(keyword, limit=4, reason=reason):
-            fp = _song_fingerprint(item.get("title"), item.get("artist"))
-            if not fp or fp in seen:
-                continue
-            seen.add(fp)
-            item["in_library"] = fp in fingerprints
-            results.append(item)
-            if len(results) >= limit:
-                return {"source": "personalized", "seeds": [{"keyword": k, "reason": r} for k, r in seeds[:8]], "items": results}
 
-    if len(results) < limit:
-        for item in get_toplist().get("items", []):
-            fp = _song_fingerprint(item.get("title"), item.get("artist"))
-            if fp not in seen:
-                seen.add(fp)
-                item["reason"] = item.get("reason") or "热榜兜底推荐"
-                item["in_library"] = fp in fingerprints
-                results.append(item)
-            if len(results) >= limit:
-                break
-    return {"source": "personalized", "seeds": [{"keyword": k, "reason": r} for k, r in seeds[:8]], "items": results[:limit]}
+    def add_row(row: MusicFile, reason: str) -> None:
+        if len(results) >= limit:
+            return
+        title = row.title or (Path(row.file_path).stem if row.file_path else "未知歌曲")
+        fp = _song_fingerprint(title, row.artist or row.album_artist or "")
+        if fp in seen:
+            return
+        seen.add(fp)
+        results.append(_local_song_item(row, reason))
 
+    # 1) 最近入库：最符合“今日推荐”的本地语义。
+    for row in rows[: max(6, limit // 3)]:
+        add_row(row, "最近入库")
 
-@router.get("/recommend")
-def get_recommendations():
-    """Get personalized/hot song recommendations."""
-    # QQ Music new songs API (type=0 for all regions, updates more frequently)
-    try:
-        resp = _session.get(
-            "https://u.y.qq.com/cgi-bin/musicu.fcg",
-            params={
-                "data": '{"new_song":{"module":"newsong.NewSongServer","method":"get_new_song_info","param":{"type":0}}}'
-            },
-            timeout=10,
-        )
-        data = resp.json()
-        songs = data.get("new_song", {}).get("data", {}).get("songlist", [])
-        # Shuffle and pick 12 random songs so each refresh feels different
-        if len(songs) > 12:
-            songs = random.sample(songs, 12)
-        else:
-            songs = songs[:12]
-        results = []
-        for s in songs:
-            singers = s.get("singer", [])
-            artist = "/".join(x.get("name", "") for x in singers) if singers else ""
-            album = s.get("album", {})
-            mid = album.get("mid", "")
-            results.append(_song_item(
-                source="qq",
-                song_id=_qq_song_id(s),
-                title=s.get("name", ""),
-                artist=artist,
-                album=album.get("name", ""),
-                cover=f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg" if mid else "",
-                reason="QQ音乐新歌推荐",
-            ))
-        return {"source": "qqmusic", "items": results}
-    except Exception as e:
-        logger.warning(f"QQ Music recommend failed: {e}")
-
-    # Fallback: NetEase top songs
-    try:
-        resp = _session.get(
-            "https://music.163.com/api/discovery/newSong",
-            params={"areaId": 0, "limit": 12},
-            headers={"Referer": "https://music.163.com/"},
-            timeout=10,
-        )
-        data = resp.json()
-        songs = data.get("data", [])
-        results = []
-        for s in songs[:12]:
-            artists = s.get("artists", [])
-            artist = "/".join(a.get("name", "") for a in artists) if artists else ""
-            album = s.get("album", {})
-            results.append(_song_item(
-                source="netease",
-                song_id=s.get("id", ""),
-                title=s.get("name", ""),
-                artist=artist,
-                album=album.get("name", ""),
-                cover=album.get("picUrl", ""),
-                reason="网易云新歌推荐",
-            ))
-        return {"source": "netease", "items": results}
-    except Exception as e:
-        logger.warning(f"NetEase recommend failed: {e}")
-        return {"source": "none", "items": []}
-
-
-@router.get("/playlists")
-def get_playlists():
-    """Get recommended playlists."""
-    # QQ Music playlist recommendations
-    try:
-        resp = _session.get(
-            "https://u.y.qq.com/cgi-bin/musicu.fcg",
-            params={
-                "data": '{"recomPlaylist":{"module":"playlist.HotRecommendServer","method":"get_hot_recommend","param":{"async":1,"cmd":2}}}'
-            },
-            timeout=10,
-        )
-        data = resp.json()
-        playlists = data.get("recomPlaylist", {}).get("data", {}).get("v_hot", [])
-        results = []
-        for p in playlists[:8]:
-            results.append({
-                "id": str(p.get("content_id", "")),
-                "title": p.get("title", ""),
-                "cover": p.get("cover", ""),
-                "play_count": p.get("listen_num", 0),
-            })
-        return {"source": "qqmusic", "items": results}
-    except Exception as e:
-        logger.warning(f"QQ Music playlists failed: {e}")
-
-    # Fallback NetEase
-    try:
-        resp = _session.get(
-            "https://music.163.com/api/personalized/playlist",
-            params={"limit": 8},
-            headers={"Referer": "https://music.163.com/"},
-            timeout=10,
-        )
-        data = resp.json()
-        results = []
-        for p in data.get("result", [])[:8]:
-            results.append({
-                "id": str(p.get("id", "")),
-                "title": p.get("name", ""),
-                "cover": p.get("picUrl", ""),
-                "play_count": p.get("playCount", 0),
-            })
-        return {"source": "netease", "items": results}
-    except Exception as e:
-        logger.warning(f"NetEase playlists failed: {e}")
-        return {"source": "none", "items": []}
-
-
-@router.get("/playlist/{playlist_id}")
-def get_playlist_detail(playlist_id: str, limit: int = Query(30, ge=1, le=200)):
-    """Get playlist detail with song list."""
-    # QQ Music playlist detail
-    try:
-        import json as _json
-        resp = _session.get(
-            "https://u.y.qq.com/cgi-bin/musicu.fcg",
-            params={
-                "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(playlist_id), "onlysonglist": 0, "song_num": limit, "song_begin": 0}}})
-            },
-            timeout=10,
-        )
-        data = resp.json()
-        detail = data.get("detail", {}).get("data", {})
-        dirinfo = detail.get("dirinfo", {})
-        songs = detail.get("songlist", [])
-        results = []
-        for s in songs:
-            singers = s.get("singer", [])
-            artist = "/".join(x.get("name", "") for x in singers) if singers else ""
-            album = s.get("album", {})
-            mid = album.get("mid", "") if isinstance(album, dict) else ""
-            results.append(_song_item(
-                source="qq",
-                song_id=_qq_song_id(s),
-                title=s.get("name", ""),
-                artist=artist,
-                album=album.get("name", "") if isinstance(album, dict) else "",
-                cover=f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
-                reason="来自推荐歌单",
-            ))
-        return {
-            "source": "qqmusic",
-            "title": dirinfo.get("title", ""),
-            "cover": dirinfo.get("picurl", ""),
-            "desc": dirinfo.get("desc", ""),
-            "songs": results,
-        }
-    except Exception as e:
-        logger.warning(f"QQ Music playlist detail failed: {e}")
-
-    # Fallback NetEase
-    try:
-        resp = _session.get(
-            "https://music.163.com/api/playlist/detail",
-            params={"id": playlist_id},
-            headers={"Referer": "https://music.163.com/"},
-            timeout=10,
-        )
-        data = resp.json()
-        result = data.get("result", {})
-        tracks = result.get("tracks", [])
-        results = []
-        for t in tracks[:limit]:
-            artists = t.get("artists", [])
-            artist = "/".join(a.get("name", "") for a in artists) if artists else ""
-            album = t.get("album", {})
-            results.append(_song_item(
-                source="netease",
-                song_id=t.get("id", ""),
-                title=t.get("name", ""),
-                artist=artist,
-                album=album.get("name", ""),
-                cover=album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
-                reason="来自推荐歌单",
-            ))
-        return {
-            "source": "netease",
-            "title": result.get("name", ""),
-            "cover": result.get("coverImgUrl", ""),
-            "desc": result.get("description", ""),
-            "songs": results,
-        }
-    except Exception as e:
-        logger.warning(f"NetEase playlist detail failed: {e}")
-        return {"source": "none", "title": "", "songs": []}
-
-
-@router.get("/toplist")
-def get_toplist():
-    """Get music chart/ranking (daily updated)."""
-    # QQ Music 飙升榜 (topid=62, daily update) with fallback to 热歌榜 (topid=26)
-    for topid in (62, 26):
-        try:
-            resp = _session.get(
-                "https://u.y.qq.com/cgi-bin/musicu.fcg",
-                params={
-                    "data": '{"toplist":{"module":"musicToplist.ToplistInfoServer","method":"GetDetail","param":{"topid":' + str(topid) + ',"num":50,"period":""}}}'
-                },
-                timeout=10,
-            )
-            data = resp.json()
-            tl_data = data.get("toplist", {}).get("data", {})
-            # Prefer data.data.song (richer, has cover) over songInfoList
-            songs_rich = tl_data.get("data", {}).get("song", []) if isinstance(tl_data.get("data"), dict) else tl_data.get("song", [])
-            if not songs_rich:
-                songs_rich = tl_data.get("song", [])
-            if songs_rich:
-                results = []
-                for s in songs_rich[:20]:
-                    rank = s.get("rank", 0)
-                    results.append(_song_item(
-                        source="qq",
-                        song_id=_qq_song_id(s),
-                        rank=rank,
-                        title=s.get("title", ""),
-                        artist=s.get("singerName", ""),
-                        album="",
-                        cover=s.get("cover", ""),
-                        reason=f"QQ音乐{'飙升榜' if topid == 62 else '热歌榜'} #{rank or len(results) + 1}",
-                    ))
-                return {"source": "qqmusic", "topid": topid, "period": tl_data.get("data", {}).get("period", "") if isinstance(tl_data.get("data"), dict) else tl_data.get("period", ""), "items": results}
-
-            # Fallback: songInfoList (old format)
-            songs = tl_data.get("songInfoList", [])
-            if songs:
-                results = []
-                for i, s in enumerate(songs[:20], 1):
-                    singers = s.get("singer", [])
-                    artist = "/".join(x.get("name", "") for x in singers) if singers else ""
-                    album = s.get("album", {})
-                    mid = album.get("mid", "")
-                    results.append(_song_item(
-                        source="qq",
-                        song_id=_qq_song_id(s),
-                        rank=i,
-                        title=s.get("name", ""),
-                        artist=artist,
-                        album=album.get("name", ""),
-                        cover=f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
-                        reason=f"QQ音乐{'飙升榜' if topid == 62 else '热歌榜'} #{i}",
-                    ))
-                return {"source": "qqmusic", "topid": topid, "period": tl_data.get("period", ""), "items": results}
-        except Exception as e:
-            logger.warning(f"QQ Music toplist (topid={topid}) failed: {e}")
+    # 2) 高频艺人：从你的库里最常出现的艺人中抽代表曲目。
+    artist_counts = Counter((r.album_artist or r.artist or "").strip() for r in rows)
+    for artist, count in artist_counts.most_common(8):
+        if not artist or artist.lower() in {"unknown artist", "未知艺人"}:
             continue
+        for row in rows:
+            if (row.album_artist or row.artist or "").strip() == artist:
+                add_row(row, f"本地库高频艺人：{artist}（{count} 首）")
+                break
+        if len(results) >= limit:
+            break
 
-    # Fallback NetEase (飙升榜 id=19723756)
-    try:
-        resp = _session.get(
-            "https://music.163.com/api/playlist/detail",
-            params={"id": 19723756},
-            headers={"Referer": "https://music.163.com/"},
-            timeout=10,
-        )
-        data = resp.json()
-        tracks = data.get("result", {}).get("tracks", [])
-        results = []
-        for i, t in enumerate(tracks[:20], 1):
-            artists = t.get("artists", [])
-            artist = "/".join(a.get("name", "") for a in artists) if artists else ""
-            album = t.get("album", {})
-            results.append(_song_item(
-                source="netease",
-                song_id=t.get("id", ""),
-                rank=i,
-                title=t.get("name", ""),
-                artist=artist,
-                album=album.get("name", ""),
-                cover=album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
-                reason=f"网易云飙升榜 #{i}",
-            ))
-        return {"source": "netease", "items": results}
-    except Exception as e:
-        logger.warning(f"NetEase toplist failed: {e}")
-        return {"source": "none", "items": []}
+    # 3) 本地随机补足，避免每天列表太死。
+    remaining = rows[:]
+    random.shuffle(remaining)
+    for row in remaining:
+        add_row(row, "本地随机发现")
+        if len(results) >= limit:
+            break
+
+    return {"source": "local", "items": results[:limit]}
 
 
 def _resolve_qq_short_url(url: str) -> str:
