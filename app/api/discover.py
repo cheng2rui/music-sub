@@ -1,8 +1,13 @@
 """Discover API - fetch recommendations from QQ Music / NetEase."""
 import logging
 import random
+import re
+from collections import Counter
 import requests
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+from app.db import get_db
+from app.models import DownloadTask, MusicFile, Subscription
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -22,7 +27,15 @@ def _qq_song_id(song: dict) -> str:
     return str(song.get("mid") or song.get("songmid") or song.get("songMid") or "")
 
 
-def _song_item(*, source: str, title: str, artist: str = "", album: str = "", cover: str = "", song_id: str = "", rank: int | None = None, reason: str = "") -> dict:
+def _norm_text(value: str | None) -> str:
+    return re.sub(r"\s+", "", (value or "").strip().lower())
+
+
+def _song_fingerprint(title: str | None, artist: str | None = "") -> str:
+    return f"{_norm_text(title)}::{_norm_text((artist or '').split('/')[0])}"
+
+
+def _song_item(*, source: str, title: str, artist: str = "", album: str = "", cover: str = "", song_id: str = "", rank: int | None = None, reason: str = "", in_library: bool = False) -> dict:
     item = {
         "source": source,
         "song_id": str(song_id or ""),
@@ -31,11 +44,111 @@ def _song_item(*, source: str, title: str, artist: str = "", album: str = "", co
         "album": album or "",
         "cover": cover or "",
         "reason": reason or "",
+        "in_library": bool(in_library),
         "actions": _song_actions(source),
     }
     if rank is not None:
         item["rank"] = rank
     return item
+
+
+def _library_fingerprints(db: Session) -> set[str]:
+    rows = db.query(MusicFile.title, MusicFile.artist, MusicFile.album_artist).all()
+    fps: set[str] = set()
+    for title, artist, album_artist in rows:
+        if title:
+            fps.add(_song_fingerprint(title, artist or album_artist or ""))
+    return fps
+
+
+def _mark_library(items: list[dict], fingerprints: set[str]) -> list[dict]:
+    for item in items:
+        item["in_library"] = _song_fingerprint(item.get("title"), item.get("artist")) in fingerprints
+    return items
+
+
+def _qq_search_songs(keyword: str, limit: int = 8, reason: str = "") -> list[dict]:
+    try:
+        resp = _session.get(
+            "https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp",
+            params={"w": keyword, "format": "json", "p": 1, "n": limit, "new_json": 1},
+            headers={"Referer": "https://y.qq.com/"},
+            timeout=8,
+        )
+        rows = resp.json().get("data", {}).get("song", {}).get("list", []) or []
+    except Exception as e:
+        logger.warning(f"QQ personalized search failed for {keyword}: {e}")
+        return []
+    items = []
+    for row in rows[:limit]:
+        singers = row.get("singer") or []
+        artist = "/".join(s.get("name", "") for s in singers if s.get("name"))
+        album_data = row.get("album") if isinstance(row.get("album"), dict) else {}
+        album_mid = row.get("albummid") or album_data.get("mid", "")
+        album_name = row.get("albumname") or album_data.get("name", "")
+        items.append(_song_item(
+            source="qq",
+            song_id=_qq_song_id(row),
+            title=row.get("songname") or row.get("name") or row.get("title") or "",
+            artist=artist,
+            album=album_name,
+            cover=f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg" if album_mid else "",
+            reason=reason or f"基于 {keyword} 推荐",
+        ))
+    return items
+
+
+@router.get("/personalized")
+def get_personalized(limit: int = Query(16, ge=4, le=40), db: Session = Depends(get_db)):
+    """Personalized discovery mixed from local library, subscriptions and recent downloads."""
+    fingerprints = _library_fingerprints(db)
+    seeds: list[tuple[str, str]] = []
+
+    artist_counts = Counter()
+    for artist, album_artist in db.query(MusicFile.artist, MusicFile.album_artist).all():
+        name = (album_artist or artist or "").strip()
+        if name and name.lower() not in {"unknown artist", "未知艺人"}:
+            artist_counts[name] += 1
+    for artist, count in artist_counts.most_common(5):
+        seeds.append((artist, f"因为你的库里有 {count} 首/项 {artist}"))
+
+    for sub in db.query(Subscription).filter(Subscription.enabled == True).order_by(Subscription.created_at.desc()).limit(5).all():
+        if sub.keyword:
+            seeds.append((sub.keyword, f"来自你的订阅：{sub.keyword}"))
+
+    for task in db.query(DownloadTask).order_by(DownloadTask.created_at.desc()).limit(8).all():
+        title = (task.torrent_name or "").strip()
+        if title:
+            seeds.append((title[:40], "基于最近下载任务"))
+
+    if not seeds:
+        base = get_recommendations().get("items", []) + get_toplist().get("items", [])
+        return {"source": "cold_start", "items": _mark_library(base[:limit], fingerprints)}
+
+    results: list[dict] = []
+    seen: set[str] = set()
+    for keyword, reason in seeds[:8]:
+        for item in _qq_search_songs(keyword, limit=4, reason=reason):
+            fp = _song_fingerprint(item.get("title"), item.get("artist"))
+            if not fp or fp in seen:
+                continue
+            seen.add(fp)
+            item["in_library"] = fp in fingerprints
+            results.append(item)
+            if len(results) >= limit:
+                return {"source": "personalized", "seeds": [{"keyword": k, "reason": r} for k, r in seeds[:8]], "items": results}
+
+    if len(results) < limit:
+        for item in get_toplist().get("items", []):
+            fp = _song_fingerprint(item.get("title"), item.get("artist"))
+            if fp not in seen:
+                seen.add(fp)
+                item["reason"] = item.get("reason") or "热榜兜底推荐"
+                item["in_library"] = fp in fingerprints
+                results.append(item)
+            if len(results) >= limit:
+                break
+    return {"source": "personalized", "seeds": [{"keyword": k, "reason": r} for k, r in seeds[:8]], "items": results[:limit]}
 
 
 @router.get("/recommend")

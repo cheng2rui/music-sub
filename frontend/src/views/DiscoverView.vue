@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getRecommend, getPlaylists, getToplist, getPlaylist, addSub, getLibraryStats, getTasks, searchOnlineMusic, downloadOnlineSong } from '@/api/index.js'
+import { getRecommend, getPersonalized, getPlaylists, getToplist, getPlaylist, addSub, getLibraryStats, getTasks, searchOnlineMusic, downloadOnlineSong } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -59,7 +59,7 @@ async function loadAll() {
   loading.value = true
   try {
     const [rec, pls, top, stats, taskList] = await Promise.allSettled([
-      getRecommend(),
+      getPersonalized().catch(() => getRecommend()),
       getPlaylists(),
       getToplist(),
       getLibraryStats(),
@@ -296,7 +296,7 @@ onMounted(loadAll)
         <div class="section-header">
           <div>
             <h2>今日推荐</h2>
-            <p>新歌随机推荐，适合一键订阅追踪。</p>
+            <p>结合本地曲库、订阅和最近下载生成，已入库会自动标记。</p>
           </div>
           <AppButton variant="ghost" size="sm" @click="loadAll">换一批</AppButton>
         </div>
@@ -308,7 +308,7 @@ onMounted(loadAll)
               <div class="song-card-title">{{ item.title }}</div>
               <div class="song-card-sub">{{ item.artist }}</div>
               <div v-if="item.album" class="song-card-album">{{ item.album }}</div>
-              <div v-if="item.reason" class="song-reason">{{ item.reason }}</div>
+              <div v-if="item.reason" class="song-reason">{{ item.in_library ? '已在库 · ' : '' }}{{ item.reason }}</div>
             </div>
             <div class="song-card-actions">
               <AppButton variant="primary" size="sm" :loading="actionLoading === `download-${item.source || ''}-${item.song_id || item.title}`" @click="quickDownload(item)">下</AppButton>

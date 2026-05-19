@@ -74,6 +74,7 @@ export const changePasswordApi = (oldPassword, newUsername, newPassword) =>
 
 // ============ Discover ============
 export const getRecommend = () => authFetch('/api/discover/recommend').then(r => r.json())
+export const getPersonalized = () => authFetch('/api/discover/personalized').then(r => r.json())
 export const getPlaylists = () => authFetch('/api/discover/playlists').then(r => r.json())
 export const getToplist = (topid) => authFetch(`/api/discover/toplist${topid ? `?topid=${topid}` : ''}`).then(r => r.json())
 export const getPlaylist = (id) => authFetch(`/api/discover/playlist/${id}`).then(r => r.json())
