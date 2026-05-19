@@ -105,7 +105,8 @@ function pushLocal(role, content, extra = {}) {
 }
 
 async function sendMessage(textOverride = '') {
-  const text = (textOverride || input.value).trim()
+  const override = typeof textOverride === 'string' ? textOverride : ''
+  const text = (override || input.value).trim()
   if (!text || loading.value) return
   retryDraft.value = text
   input.value = ''
@@ -343,7 +344,7 @@ onMounted(async () => {
 
       <div class="composer">
         <textarea v-model="input" placeholder="输入你的音乐管理需求..." :disabled="loading || !enabled" @keydown.enter.exact.prevent="sendMessage" />
-        <AppButton variant="primary" :loading="loading" :disabled="loading || !enabled || !input.trim()" @click="sendMessage">发送</AppButton>
+        <AppButton variant="primary" :loading="loading" :disabled="loading || !enabled || !input.trim()" @click="sendMessage()">发送</AppButton>
       </div>
     </section>
   </div>
