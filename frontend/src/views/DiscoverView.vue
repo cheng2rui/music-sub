@@ -2,12 +2,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getPersonalized, getLibraryStats, getTasks } from '@/api/index.js'
+import { usePlayerStore } from '@/stores/player.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
 
 const router = useRouter()
+const player = usePlayerStore()
 
 const recommend = ref([])
 const libraryStats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
@@ -116,12 +118,24 @@ function go(path) {
   router.push(path)
 }
 
-function openLocalSong(item) {
-  if (item?.album && item?.artist) {
-    router.push(`/album?artist=${encodeURIComponent(item.artist)}&album=${encodeURIComponent(item.album)}`)
-  } else {
-    router.push('/library')
+function normalizePlayable(item) {
+  return {
+    id: item.file_id || item.id || item.song_id,
+    title: item.title,
+    artist: item.artist,
+    album: item.album,
+    duration: item.duration || 0,
   }
+}
+
+function playLocalSong(item) {
+  if (!item?.file_id && !item?.id) return
+  const queue = recommendedSongs.value
+    .filter(song => song?.file_id || song?.id)
+    .map(normalizePlayable)
+  const idx = queue.findIndex(song => String(song.id) === String(item.file_id || item.id || item.song_id))
+  if (queue.length) player.playQueue(queue, idx >= 0 ? idx : 0)
+  else player.playTrack(normalizePlayable(item))
 }
 
 onMounted(loadAll)
@@ -140,7 +154,7 @@ onMounted(loadAll)
           <AppButton variant="ghost" size="sm" @click="showHomeSettings = true">编辑首页</AppButton>
         </div>
       </div>
-      <div v-if="featuredSong" class="hero-feature" @click="openLocalSong(featuredSong)">
+      <div v-if="featuredSong" class="hero-feature" @click="playLocalSong(featuredSong)">
         <MusicCover :src="featuredSong.cover" class="hero-cover" show-play />
         <div class="hero-track">
           <span>本地今日主打</span>
@@ -191,7 +205,7 @@ onMounted(loadAll)
         <div v-if="loading" class="loading-text">加载中...</div>
         <div v-else-if="recommendedSongs.length === 0" class="empty-state">本地音乐库为空，暂无推荐</div>
         <div v-else class="song-card-grid">
-          <article v-for="item in recommendedSongs" :key="item.file_id || item.title + item.artist" class="song-card" @click="openLocalSong(item)">
+          <article v-for="item in recommendedSongs" :key="item.file_id || item.title + item.artist" class="song-card" @click="playLocalSong(item)">
             <MusicCover :src="item.cover" class="song-cover" show-play />
             <div class="song-card-info">
               <div class="song-card-title">{{ item.title }}</div>
@@ -276,8 +290,8 @@ onMounted(loadAll)
 .quick-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-md); background: var(--accent-soft); font-size: 20px; }
 .quick-card h3 { margin: 0 0 4px; font-size: 14px; }
 .quick-card p { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.35; }
-.dashboard-grid { column-count: 2; column-gap: 16px; }
-.panel { display: inline-block; width: 100%; margin: 0 0 16px; padding: 16px; min-width: 0; break-inside: avoid; page-break-inside: avoid; }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 16px; align-items: start; }
+.panel { width: 100%; padding: 16px; min-width: 0; }
 .panel-wide { min-width: 0; }
 .section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .section-header h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
@@ -312,7 +326,7 @@ onMounted(loadAll)
 .home-settings-actions { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 1180px) {
   .hero-card { grid-template-columns: 1fr; }
-  .dashboard-grid { column-count: 1; }
+  .dashboard-grid { grid-template-columns: 1fr; }
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {

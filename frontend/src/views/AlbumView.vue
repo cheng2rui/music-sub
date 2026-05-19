@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile } from '@/api/index.js'
+import { getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, completeAlbum } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -43,6 +43,8 @@ const selectedTrack = ref(null)
 const showTrackModal = ref(false)
 const trackEdit = ref({})
 const savingTrack = ref(false)
+const completingAlbum = ref(false)
+const completeResult = ref(null)
 
 const scrapedCount = computed(() => tracks.value.filter(t => t.scraped).length)
 const totalDuration = computed(() => tracks.value.reduce((sum, t) => sum + (Number(t.duration) || 0), 0))
@@ -124,6 +126,31 @@ async function playTrack(track) {
   player.playQueue(queueTracks, idx >= 0 ? idx : 0)
 }
 
+async function completeMissingAlbum() {
+  if (!artist.value || !album.value) return
+  if (!confirm(`自动搜索并补齐「${artist.value} - ${album.value}」缺失曲目？会优先选择无损资源。`)) return
+  completingAlbum.value = true
+  completeResult.value = null
+  try {
+    const preview = await completeAlbum({ artist: artist.value, album: album.value, dry_run: true, limit: 40 })
+    const count = preview.candidates?.length || 0
+    if (!count) {
+      completeResult.value = { message: '没有发现可补齐的新曲目' }
+      return
+    }
+    if (!confirm(`找到 ${count} 首疑似缺失曲目，是否开始下载并自动入库？`)) {
+      completeResult.value = { message: `已预览 ${count} 首，未下载`, candidates: preview.candidates }
+      return
+    }
+    completeResult.value = await completeAlbum({ artist: artist.value, album: album.value, dry_run: false, limit: 40 })
+    await loadTracks()
+  } catch (e) {
+    completeResult.value = { message: e.message || '补齐失败' }
+  } finally {
+    completingAlbum.value = false
+  }
+}
+
 async function rescrapeAlbum() {
   scraping.value = true
   try {
@@ -192,9 +219,14 @@ onMounted(loadTracks)
         </div>
         <div class="hero-actions">
           <AppButton variant="primary" size="sm" :disabled="!trackTotal && !displayTracks.length" @click="playAll(0)">播放整张</AppButton>
+          <AppButton variant="ghost" size="sm" :loading="completingAlbum" @click="completeMissingAlbum">补齐缺失</AppButton>
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
         </div>
       </div>
+    </div>
+
+    <div v-if="completeResult" class="complete-result">
+      {{ completeResult.message || `已下载 ${completeResult.downloaded?.length || 0} 首，失败 ${completeResult.errors?.length || 0} 首` }}
     </div>
 
     <div v-if="loading" class="loading-text">加载曲目中...</div>
@@ -268,6 +300,7 @@ h2 { font-size: clamp(28px, 5vw, 56px); line-height: 1; margin: 0; word-break: b
 .meta-line span:not(:last-child)::after { content: '·'; margin-left: 8px; color: var(--text-muted); }
 .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .loading-text { color: var(--text-dim); }
+.complete-result { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-dim); font-size: 13px; }
 .pager { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
 .pager button { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-dim); cursor: pointer; }
 .pager button:hover:not(:disabled), .pager button.active { border-color: var(--accent); color: var(--text); background: var(--surface-hover); }

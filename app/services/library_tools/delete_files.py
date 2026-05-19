@@ -61,6 +61,7 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
     library_root = options.get("library_root", "/music")
     delete_files = options.get("delete_files", False)
     delete_empty_dirs = options.get("delete_empty_dirs", True)
+    delete_missing_db_rows = options.get("delete_missing_db_rows", True)
 
     # Collect all files that would be deleted.
     file_items: list[PreviewItem] = []
@@ -69,7 +70,20 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
 
     if delete_files and paths:
         for f in files:
-            if not f.file_path or not Path(f.file_path).is_file():
+            if not f.file_path:
+                continue
+            fp = Path(f.file_path)
+            if not fp.is_file():
+                if delete_missing_db_rows:
+                    file_items.append(PreviewItem(
+                        file_id=f.id,
+                        file_path=f.file_path,
+                        label=fp.name,
+                        before={"file_path": f.file_path, "exists": False},
+                        after={"db_row_deleted": True},
+                        would_change=True,
+                        reason="文件不存在，移除库记录",
+                    ))
                 continue
             size = 0
             try:
@@ -79,9 +93,9 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
             file_items.append(PreviewItem(
                 file_id=f.id,
                 file_path=f.file_path,
-                label=Path(f.file_path).name,
-                before={"file_path": f.file_path},
-                after={"deleted": True},
+                label=fp.name,
+                before={"file_path": f.file_path, "exists": True},
+                after={"deleted": True, "db_row_deleted": True},
                 would_change=True,
                 reason=f"删除文件 ({(size // 1024)}KB)",
             ))
@@ -116,6 +130,7 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
     library_root = options.get("library_root", "/music")
     delete_files = options.get("delete_files", False)
     delete_empty_dirs = options.get("delete_empty_dirs", True)
+    delete_missing_db_rows = options.get("delete_missing_db_rows", True)
 
     deleted_files = 0
     deleted_dirs = 0
@@ -132,6 +147,9 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
             # Use is_file() instead of exists() to handle hardlinks that may be missing.
             # is_file() returns True for symlinks/hardlinks pointing to regular files.
             if not fp.is_file():
+                if delete_missing_db_rows:
+                    file_ids_to_delete.add(f.id)
+                    on_progress(idx + 1, f"文件不存在，已移除库记录: {fp.name}")
                 continue
             try:
                 fp.unlink()

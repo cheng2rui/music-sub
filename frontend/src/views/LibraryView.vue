@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -57,6 +57,8 @@ const savingTrack = ref(false)
 const player = usePlayerStore()
 
 const scraping = ref(false)
+const completingAlbum = ref(false)
+const completeAlbumMessage = ref('')
 const scanning = ref(false)
 const scanJob = ref(null)
 let scanPollTimer = null
@@ -323,6 +325,34 @@ async function playFirstAlbumTrack() {
   player.playQueue(queueTracks, 0)
 }
 
+async function completeSelectedAlbum() {
+  if (!selectedAlbum.value) return
+  const { artist, album } = selectedAlbum.value
+  if (!confirm(`自动搜索并补齐「${artist} - ${album}」缺失曲目？会优先选择无损资源。`)) return
+  completingAlbum.value = true
+  completeAlbumMessage.value = ''
+  try {
+    const preview = await completeAlbum({ artist, album, dry_run: true, limit: 40 })
+    const count = preview.candidates?.length || 0
+    if (!count) {
+      completeAlbumMessage.value = '没有发现可补齐的新曲目'
+      return
+    }
+    if (!confirm(`找到 ${count} 首疑似缺失曲目，是否开始下载并自动入库？`)) {
+      completeAlbumMessage.value = `已预览 ${count} 首，未下载`
+      return
+    }
+    const res = await completeAlbum({ artist, album, dry_run: false, limit: 40 })
+    completeAlbumMessage.value = `已下载 ${res.downloaded?.length || 0} 首，失败 ${res.errors?.length || 0} 首`
+    await openAlbumModal(artist, album)
+    await loadStats()
+  } catch (e) {
+    completeAlbumMessage.value = e.message || '补齐失败'
+  } finally {
+    completingAlbum.value = false
+  }
+}
+
 async function rescrapeAlbum() {
   if (!selectedAlbum.value) return
   scraping.value = true
@@ -371,7 +401,8 @@ async function deleteTrack_RB2(track) {
   try {
     await applyLibraryTool('delete_files', {
       file_ids: [track.id],
-      options: { delete_files: true, delete_empty_dirs: true, library_root: '/music' }
+      options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, library_root: '/music' },
+      async: false
     })
     showTrackModal.value = false
     await loadAlbums(0)
@@ -562,9 +593,11 @@ onMounted(() => { loadStats(); loadAlbums(0) })
         <div class="modal-meta">{{ selectedAlbum?.artist }} · {{ selectedAlbum?.album }}</div>
         <div class="modal-actions">
           <AppButton variant="primary" size="sm" :disabled="!albumVisibleTracks.length" @click="playFirstAlbumTrack">播放全部</AppButton>
+          <AppButton variant="ghost" size="sm" :loading="completingAlbum" @click="completeSelectedAlbum">补齐缺失</AppButton>
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
           <AppButton variant="ghost" size="sm" @click="openToolbox({ album_artist: selectedAlbum?.artist, album_name: selectedAlbum?.album })">工具箱</AppButton>
         </div>
+        <div v-if="completeAlbumMessage" class="album-complete-message">{{ completeAlbumMessage }}</div>
         <div v-if="albumPagedMode" class="album-page-info">第 {{ albumPage + 1 }} / {{ albumPageCount }} 页 · 共 {{ albumTotal }} 首</div>
         <div v-if="albumLoading && !albumVisibleTracks.length" class="loading-text">加载曲目中...</div>
         <div v-else class="track-list">
@@ -768,6 +801,7 @@ button.scan-health-chip { cursor: pointer; }
 .modal-meta { font-size: 14px; color: var(--text-dim); }
 .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .album-page-info { color: var(--text-dim); font-size: 12px; }
+.album-complete-message { padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-dim); font-size: 12px; }
 .track-list { display: flex; flex-direction: column; gap: 4px; max-height: 350px; overflow-y: auto; }
 .track-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
 .track-row:hover { background: var(--surface-hover); }

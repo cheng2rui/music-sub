@@ -1029,6 +1029,112 @@ def get_job(job_id: str):
     return job.to_dict()
 
 
+def _norm_song_key(title: str | None, artist: str | None = "") -> str:
+    import re
+    return f"{re.sub(r'\\s+', '', (title or '').lower())}::{re.sub(r'\\s+', '', (artist or '').split('/')[0].lower())}"
+
+
+def _quality_score(song: dict) -> tuple[int, int, int]:
+    fmt = (song.get("format") or "").lower()
+    url = (song.get("url") or "").lower()
+    lossless = 1 if fmt in {"flac", "wav", "ape"} or any(x in url for x in (".flac", ".wav", ".ape")) else 0
+    bitrate = int(song.get("bitrate") or 0)
+    size = int(song.get("size") or 0)
+    return (lossless, bitrate, size)
+
+
+@router.post("/album-complete")
+def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_db)):
+    """Find and optionally download missing local album tracks from online sources.
+
+    This is a pragmatic first pass: search by album artist + album, prefer lossless
+    candidates, skip songs already present in the local album, and download the
+    best unique candidates when dry_run=false.
+    """
+    artist = (payload.get("artist") or payload.get("album_artist") or "").strip()
+    album = (payload.get("album") or payload.get("album_name") or "").strip()
+    dry_run = bool(payload.get("dry_run", True))
+    limit = max(5, min(int(payload.get("limit") or 30), 80))
+    sources = payload.get("sources") or ["qq", "migu", "kugou", "netease", "kuwo"]
+    if not artist or not album:
+        raise HTTPException(status_code=400, detail="artist and album are required")
+
+    existing = db.query(MusicFile).filter(
+        _album_artist_group() == artist,
+        func.coalesce(MusicFile.album, UNKNOWN_ALBUM) == album,
+    ).all()
+    existing_keys = {_norm_song_key(f.title or Path(f.file_path or "").stem, f.artist or f.album_artist or artist) for f in existing}
+    existing_titles = {((f.title or Path(f.file_path or "").stem or "").strip().lower()) for f in existing}
+
+    from app.services.online_music import search_online, download_online_song
+    from app.services.pipeline import _process_completed_torrent
+    from app.models import DownloadTask
+    import uuid
+
+    rows = search_online(f"{artist} {album}", sources=sources, limit=limit)
+    raw = [r.to_dict() if hasattr(r, "to_dict") else dict(r) for r in rows]
+    candidates: dict[str, dict] = {}
+    for song in raw:
+        title = (song.get("title") or "").strip()
+        if not title or song.get("disabled"):
+            continue
+        song_album = (song.get("album") or "").strip()
+        song_artist = (song.get("artist") or "").strip()
+        # Prefer same album, but keep artist matches because some sources omit album.
+        album_match = song_album and (song_album.lower() == album.lower() or album.lower() in song_album.lower() or song_album.lower() in album.lower())
+        artist_match = not song_artist or artist.lower() in song_artist.lower() or song_artist.lower() in artist.lower()
+        if song_album and not album_match and not artist_match:
+            continue
+        key = _norm_song_key(title, song_artist or artist)
+        if key in existing_keys or title.lower() in existing_titles:
+            continue
+        song["album"] = song_album or album
+        song["artist"] = song_artist or artist
+        song["title"] = title
+        current = candidates.get(title.lower())
+        if not current or _quality_score(song) > _quality_score(current):
+            candidates[title.lower()] = song
+
+    items = sorted(candidates.values(), key=_quality_score, reverse=True)
+    if dry_run:
+        return {"ok": True, "dry_run": True, "existing": len(existing), "candidates": items, "downloaded": []}
+
+    downloaded = []
+    errors = []
+    for song in items[:limit]:
+        try:
+            file_path = download_online_song(song)
+            synthetic_hash = f"online:{uuid.uuid4().hex}"
+            task = DownloadTask(
+                torrent_name=song.get("title") or song.get("filename") or "online-music",
+                torrent_hash=synthetic_hash,
+                site=song.get("source") or "online",
+                size=float(song.get("size") or 0),
+                status="downloaded",
+                save_path=file_path,
+            )
+            db.add(task)
+            db.commit()
+            _process_completed_torrent({
+                "hash": synthetic_hash,
+                "name": task.torrent_name,
+                "content_path": file_path,
+                "metadata": {
+                    "source": song.get("source") or "online",
+                    "song_id": song.get("song_id") or "",
+                    "title": song.get("title") or task.torrent_name,
+                    "artist": song.get("artist") or artist,
+                    "album": song.get("album") or album,
+                    "duration": song.get("duration") or 0,
+                },
+            })
+            downloaded.append({"title": song.get("title"), "artist": song.get("artist"), "format": song.get("format"), "source": song.get("source"), "file_path": file_path})
+        except Exception as exc:
+            db.rollback()
+            errors.append({"title": song.get("title"), "error": str(exc)[:300]})
+    return {"ok": True, "dry_run": False, "existing": len(existing), "candidates": items, "downloaded": downloaded, "errors": errors}
+
+
 @router.get("/tools")
 def list_library_tools():
     """Available library tools (id/label/description)."""

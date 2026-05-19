@@ -217,6 +217,10 @@ export const rescrapeLibrary = (params = {}) => {
   return authFetch(`/api/library/rescrape${qs ? '?' + qs : ''}`, { method: 'POST' }).then(r => r.json())
 }
 export const updateFile = (id, data) => authFetch(`/api/library/file/${id}?${new URLSearchParams(data).toString()}`, { method: 'PUT' }).then(r => r.json())
+export const completeAlbum = (payload = {}) => authFetch('/api/library/album-complete', {
+  method: 'POST',
+  body: JSON.stringify(payload)
+}).then(r => r.json())
 
 export const listLibraryTools = () => authFetch('/api/library/tools').then(r => r.json())
 export const previewLibraryTool = (toolId, payload) => authFetch(`/api/library/tools/${toolId}/preview`, {
