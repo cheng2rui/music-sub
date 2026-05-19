@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getQqbotGatewayStatus, restartQqbotGateway, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -19,7 +19,7 @@ const settings = ref({
     webhook_token: '',
     telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
-    qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
+    qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', enable_gateway: false, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wechatbot: { enabled: false, webhook_url: '', token: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true }
   },
   assistant: {
@@ -40,6 +40,8 @@ const saving = ref(false)
 const testingQb = ref(false)
 const testingTg = ref(false)
 const testingNotify = ref('')
+const restartingQqGateway = ref(false)
+const qqGatewayStatus = ref(null)
 const testingSite = ref('')
 const scheduler = ref([])
 const assistantProviders = ref([])
@@ -78,6 +80,7 @@ async function loadAll() {
     assistantProviders.value = providerData.providers || []
     const toolData = await getAssistantTools()
     assistantTools.value = toolData.tools || []
+    await loadQqGatewayStatus()
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
@@ -127,6 +130,18 @@ async function handleTestNotify(channel) {
     alert(res.ok ? `${channel} 消息发送成功` : `发送失败: ${res.message || res.error || ''}`)
   } catch (e) { alert('发送失败: ' + e.message) }
   finally { testingNotify.value = '' }
+}
+
+async function loadQqGatewayStatus() {
+  try { qqGatewayStatus.value = await getQqbotGatewayStatus() }
+  catch (e) { console.warn('load qq gateway failed', e) }
+}
+
+async function handleRestartQqGateway() {
+  restartingQqGateway.value = true
+  try { qqGatewayStatus.value = await restartQqbotGateway() }
+  catch (e) { alert('重启 Gateway 失败: ' + e.message) }
+  finally { restartingQqGateway.value = false }
 }
 
 const notifyEvents = [
@@ -454,6 +469,11 @@ onMounted(loadAll)
             <div class="field flex-1"><label>User OpenID</label><input v-model="settings.notify.qqbot.user_openid" /></div>
             <div class="field flex-1"><label>Group OpenID</label><input v-model="settings.notify.qqbot.group_openid" /></div>
           </div>
+          <div class="gateway-row">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.qqbot.enable_gateway" /><span>启用 QQBot Gateway 长连接收消息</span></label>
+            <AppBadge :color="qqGatewayStatus?.running ? 'green' : (qqGatewayStatus?.enabled ? 'orange' : 'dim')">{{ qqGatewayStatus?.running ? '运行中' : (qqGatewayStatus?.enabled ? '未运行' : '未启用') }}</AppBadge>
+            <AppButton variant="ghost" size="sm" :loading="restartingQqGateway" @click="handleRestartQqGateway">重启 Gateway</AppButton>
+          </div>
           <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'qq-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.qqbot[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
         </div>
 
@@ -602,6 +622,7 @@ onMounted(loadAll)
 .toggle-item { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 14px; line-height: 1.35; }
 .notify-channel-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 14px; margin-top: 12px; }
 .notify-channel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.gateway-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .toggle-item input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--accent); }
 .toggle-item span { min-width: 0; }
 .scheduler-list { display: flex; flex-direction: column; gap: 8px; }

@@ -100,6 +100,7 @@ class QQBotNotifyInput(NotifyEventInput):
     app_secret: str = ""
     user_openid: str = ""
     group_openid: str = ""
+    enable_gateway: bool = False
 
 
 class WeChatBotNotifyInput(NotifyEventInput):

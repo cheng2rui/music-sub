@@ -8,6 +8,7 @@ music-tag==0.4.3
 mutagen==1.47.0
 musicbrainzngs==0.7.1
 requests==2.32.0
+websocket-client==1.8.0
 pycryptodome==3.20.0
 aiohttp==3.10.0
 pyyaml==6.0.2

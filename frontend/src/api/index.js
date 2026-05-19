@@ -241,6 +241,8 @@ export const updateSettings = (data) => authFetch('/api/settings/', {
 export const testQb = () => authFetch('/api/settings/test_qb', { method: 'POST' }).then(r => r.json())
 export const testTelegram = () => authFetch('/api/settings/test_telegram', { method: 'POST' }).then(r => r.json())
 export const testNotifyChannel = (channel) => authFetch(`/api/notify/test/${channel}`, { method: 'POST' }).then(r => r.json())
+export const getQqbotGatewayStatus = () => authFetch('/api/notify/qqbot/gateway/status').then(r => r.json())
+export const restartQqbotGateway = () => authFetch('/api/notify/qqbot/gateway/restart', { method: 'POST' }).then(r => r.json())
 export const testSite = (name) => authFetch(`/api/settings/test_site/${name}`, { method: 'POST' }).then(r => r.json())
 export const getScheduler = () => authFetch('/api/settings/scheduler').then(r => r.json())
 export const runScheduler = (id) => authFetch(`/api/settings/scheduler/${id}/run`, { method: 'POST' }).then(r => r.json())

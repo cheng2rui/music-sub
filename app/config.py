@@ -85,6 +85,7 @@ class QQBotNotifyConfig(NotifyChannelEvents):
     app_secret: str = ""
     user_openid: str = ""
     group_openid: str = ""
+    enable_gateway: bool = False
 
 
 class WeChatBotNotifyConfig(NotifyChannelEvents):

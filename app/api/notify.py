@@ -55,6 +55,19 @@ def test_channel(channel: str):
     return result.__dict__
 
 
+@router.get("/qqbot/gateway/status")
+def qqbot_gateway_state():
+    from app.services.qqbot_gateway import qqbot_gateway_status
+    return qqbot_gateway_status()
+
+
+@router.post("/qqbot/gateway/restart")
+def qqbot_gateway_restart():
+    from app.services.qqbot_gateway import restart_qqbot_gateway, qqbot_gateway_status
+    restart_qqbot_gateway()
+    return qqbot_gateway_status()
+
+
 @router.post("/incoming")
 def incoming(req: IncomingRequest, token: str = Query(default=""), db: Session = Depends(get_db)):
     _check_webhook_token(token)
