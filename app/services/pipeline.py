@@ -294,11 +294,23 @@ def _meta_from_hint(hint: dict) -> MusicMeta | None:
 
 
 def _enrich_from_local_assets(file_path: str, meta: MusicMeta) -> MusicMeta:
-    """Prefer local sidecar/embedded assets before online assets when missing."""
+    """Apply local asset priority without changing textual metadata.
+
+    Cover priority follows the library convention used by mtw and common media
+    servers: same-directory cover.* first, then embedded artwork, then scraper
+    cover data that may already be attached to ``meta``. Lyrics are filled from
+    sidecar .lrc only when the scraper did not provide lyrics.
+    """
     if not meta.lyrics:
         meta.lyrics = read_sidecar_lyrics(file_path)
-    if not meta.cover_data:
-        meta.cover_data = find_local_cover_data(Path(file_path).parent) or read_embedded_cover(file_path)
+
+    local_cover = find_local_cover_data(Path(file_path).parent)
+    if local_cover:
+        meta.cover_data = local_cover
+    elif not meta.cover_data:
+        embedded_cover = read_embedded_cover(file_path)
+        if embedded_cover:
+            meta.cover_data = embedded_cover
     return meta
 
 

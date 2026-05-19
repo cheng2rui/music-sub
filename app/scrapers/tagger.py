@@ -232,6 +232,25 @@ def repair_garble_hint(text: str) -> str:
     return best
 
 
+def _tag_write_mode() -> str:
+    """Resolve tag write policy with backward-compatible overwrite_tag support."""
+    cfg = config.scraper
+    if bool(getattr(cfg, "overwrite_tag", False)):
+        return "overwrite"
+    mode = str(getattr(cfg, "tag_write_mode", "") or "").strip().lower()
+    if mode in {"skip_existing", "fill_missing", "overwrite"}:
+        return mode
+    return "fill_missing"
+
+
+def _should_write_field(file_tags, key: str, mode: str) -> bool:
+    if mode == "overwrite":
+        return True
+    if mode == "skip_existing":
+        return False
+    return not _clean_str(_tag_value(file_tags, key))
+
+
 def read_sidecar_lyrics(file_path: str) -> str:
     """Read .lrc sidecar lyrics if present."""
     lrc_path = Path(file_path).with_suffix(".lrc")
@@ -293,11 +312,11 @@ def _break_hardlink_before_write(path: str | Path) -> bool:
 
 
 def tag_file(file_path: str, meta: MusicMeta) -> str | bool:
-    """Write metadata to an audio file.
+    """Write metadata to an audio file and return the final path.
 
     Respects config settings:
-    - overwrite_tag=True: overwrite fields
-    - overwrite_tag=False: fill missing fields only
+    - tag_write_mode=skip_existing|fill_missing|overwrite
+    - overwrite_tag=True remains a backward-compatible alias for overwrite
     - embed_cover + cover_max_size
     - save_lyrics_to_tag
     - rename_file + rename_template
@@ -313,44 +332,44 @@ def tag_file(file_path: str, meta: MusicMeta) -> str | bool:
         return False
 
     try:
-        def should_write(key: str) -> bool:
-            return bool(cfg.overwrite_tag) or not _clean_str(_tag_value(f, key))
+        mode = _tag_write_mode()
+        if mode == "skip_existing" and _clean_str(_tag_value(f, "title")) and _clean_str(_tag_value(f, "artist")):
+            logger.info(f"Skip existing tags: {file_path}")
+        else:
+            def should_write(key: str) -> bool:
+                return _should_write_field(f, key, mode)
 
-        # Write tags. overwrite_tag=False now means fill-missing instead of skip-whole-file.
-        if meta.title and should_write("title"):
-            f["title"] = meta.title
-        if meta.artist and should_write("artist"):
-            f["artist"] = meta.artist
-        if meta.album and should_write("album"):
-            f["album"] = meta.album
-        if meta.album_artist and should_write("albumartist"):
-            f["albumartist"] = meta.album_artist
-        if meta.year and should_write("year"):
-            f["year"] = meta.year
-        if meta.genre and should_write("genre"):
-            f["genre"] = meta.genre
-        if meta.track_number and should_write("tracknumber"):
-            f["tracknumber"] = meta.track_number
-        if meta.disc_number and should_write("discnumber"):
-            f["discnumber"] = meta.disc_number
+            if meta.title and should_write("title"):
+                f["title"] = meta.title
+            if meta.artist and should_write("artist"):
+                f["artist"] = meta.artist
+            if meta.album and should_write("album"):
+                f["album"] = meta.album
+            if meta.album_artist and should_write("albumartist"):
+                f["albumartist"] = meta.album_artist
+            if meta.year and should_write("year"):
+                f["year"] = meta.year
+            if meta.genre and should_write("genre"):
+                f["genre"] = meta.genre
+            if meta.track_number and should_write("tracknumber"):
+                f["tracknumber"] = meta.track_number
+            if meta.disc_number and should_write("discnumber"):
+                f["discnumber"] = meta.disc_number
 
-        # Embed cover art — mp4/m4a 只接受 jpeg/png，避免“mp4 artwork should be either jpeg or png”报错
-        if cfg.embed_cover and meta.cover_data and (cfg.overwrite_tag or not _has_artwork(f)):
-            cover = meta.cover_data
-            if cfg.cover_max_size > 0:
-                cover = _resize_cover(cover, cfg.cover_max_size)
-            cover = _ensure_cover_compatible(cover, file_path)
-            if cover:
-                f["artwork"] = cover
+            if cfg.embed_cover and meta.cover_data and (mode == "overwrite" or not _has_artwork(f)):
+                cover = meta.cover_data
+                if cfg.cover_max_size > 0:
+                    cover = _resize_cover(cover, cfg.cover_max_size)
+                cover = _ensure_cover_compatible(cover, file_path)
+                if cover:
+                    f["artwork"] = cover
 
-        # Write lyrics to tag
-        if cfg.save_lyrics_to_tag and meta.lyrics and should_write("lyrics"):
-            f["lyrics"] = meta.lyrics
+            if cfg.save_lyrics_to_tag and meta.lyrics and should_write("lyrics"):
+                f["lyrics"] = meta.lyrics
 
-        f.save()
-        logger.info(f"Tagged: {file_path} -> {meta.artist} - {meta.title}")
+            f.save()
+            logger.info(f"Tagged ({mode}): {file_path} -> {meta.artist} - {meta.title}")
 
-        # Rename file if configured
         if cfg.rename_file and cfg.rename_template:
             return _rename_file(file_path, meta) or file_path
 
@@ -358,7 +377,6 @@ def tag_file(file_path: str, meta: MusicMeta) -> str | bool:
     except Exception as e:
         logger.error(f"Failed to tag {file_path}: {e}")
         return False
-
 
 def _rename_file(file_path: str, meta: MusicMeta) -> str | None:
     """Rename file using template variables and move sidecar files with it."""
@@ -442,7 +460,7 @@ def save_lyrics(file_path: str, lyrics: str) -> bool:
     if not lyrics or not cfg.save_lyrics_file:
         return False
     lrc_path = Path(file_path).with_suffix(".lrc")
-    if lrc_path.exists() and not cfg.overwrite_tag:
+    if lrc_path.exists() and _tag_write_mode() != "overwrite":
         return True
     try:
         if lrc_path.exists() and not _break_hardlink_before_write(lrc_path):
@@ -461,7 +479,7 @@ def save_cover(directory: str, cover_data: bytes) -> bool:
     if not cover_data or not cfg.save_cover_file:
         return False
     cover_path = os.path.join(directory, "cover.jpg")
-    if os.path.exists(cover_path) and not cfg.overwrite_tag:
+    if os.path.exists(cover_path) and _tag_write_mode() != "overwrite":
         return True
     # Resize if configured
     if cfg.cover_max_size > 0:
@@ -501,7 +519,7 @@ def save_album_nfo(directory: str, meta: MusicMeta, tracks: list = None) -> bool
     if not cfg.save_nfo:
         return False
     nfo_path = os.path.join(directory, "album.nfo")
-    if os.path.exists(nfo_path) and not cfg.overwrite_tag:
+    if os.path.exists(nfo_path) and _tag_write_mode() != "overwrite":
         return True
     try:
         if os.path.exists(nfo_path) and not _break_hardlink_before_write(nfo_path):

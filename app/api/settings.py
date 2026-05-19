@@ -58,6 +58,7 @@ class ScraperSettingInput(BaseModel):
     save_nfo: bool = False
     rename_file: bool = False
     rename_template: str = "${track} - ${title}"
+    tag_write_mode: str = "fill_missing"
     overwrite_tag: bool = False
     break_hardlink_before_tag: bool = True
 

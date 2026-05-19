@@ -43,7 +43,8 @@ class ScraperConfig(BaseModel):
     save_nfo: bool = False
     rename_file: bool = False  # 是否重命名文件
     rename_template: str = "${track} - ${title}"  # 重命名模板
-    overwrite_tag: bool = False  # 是否覆盖已有标签
+    tag_write_mode: str = "fill_missing"  # skip_existing | fill_missing | overwrite
+    overwrite_tag: bool = False  # 兼容旧配置；True 等价于 tag_write_mode=overwrite
     break_hardlink_before_tag: bool = True  # 写标签/sidecar 前断开硬链接，避免破坏 PT 做种文件
 
 

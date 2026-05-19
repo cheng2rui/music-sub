@@ -823,14 +823,10 @@ def rescrape_files(payload: Any = Body(default=None), file_ids: list[int] | None
         if not f.file_path or not os.path.exists(f.file_path):
             continue
         local_tags = read_existing_tags(f.file_path)
-        title_hint = (f.title or local_tags.get("title") or "").strip()
-        artist_hint = (f.artist or local_tags.get("artist") or local_tags.get("album_artist") or "").strip() or locked_artist
-        album_hint = (f.album or local_tags.get("album") or "").strip() or locked_album
-        # DB 字段缺失时，从 library 路径 (artist/album/track) 中补，比文件名推断准
-        if not artist_hint or not album_hint:
-            path_artist, path_album = _infer_hints_from_library_path(f.file_path)
-            artist_hint = artist_hint or path_artist
-            album_hint = album_hint or path_album
+        path_artist, path_album = _infer_hints_from_library_path(f.file_path)
+        title_hint = (f.title or local_tags.get("title") or Path(f.file_path).stem or "").strip()
+        artist_hint = locked_artist or (f.artist or local_tags.get("artist") or local_tags.get("album_artist") or path_artist or "").strip()
+        album_hint = locked_album or (f.album or local_tags.get("album") or path_album or "").strip()
         audio_meta_hint = read_audio_metadata(f.file_path)
         meta = _scrape_file(
             f.file_path,

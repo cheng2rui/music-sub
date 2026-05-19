@@ -14,7 +14,19 @@ try:
     from opencc import OpenCC
     _T2S = OpenCC("t2s").convert
 except Exception:  # pragma: no cover - optional dependency fallback
-    _T2S = lambda text: text
+    # Tiny fallback for common Traditional/Simplified chars so scoring still
+    # benefits even when the optional OpenCC package is missing in dev shells.
+    _COMMON_T2S = str.maketrans({
+        "後": "后", "來": "来", "臺": "台", "台": "台", "灣": "湾", "國": "国",
+        "愛": "爱", "夢": "梦", "風": "风", "雲": "云", "與": "与", "為": "为",
+        "無": "无", "萬": "万", "裏": "里", "裡": "里", "說": "说", "聽": "听",
+        "樂": "乐", "發": "发", "髮": "发", "過": "过", "還": "还", "這": "这",
+        "那": "那", "時": "时", "開": "开", "關": "关", "長": "长", "會": "会",
+        "個": "个", "們": "们", "妳": "你", "祢": "你", "歲": "岁", "聲": "声",
+        "葉": "叶", "島": "岛", "馬": "马", "龍": "龙", "劉": "刘", "張": "张",
+        "陳": "陈", "楊": "杨", "黃": "黄", "鄧": "邓", "蕭": "萧", "謝": "谢",
+    })
+    _T2S = lambda text: str(text or "").translate(_COMMON_T2S)
 _EXTRA_MARKERS = re.compile(
     r"\b(live|remix|cover|伴奏|demo|karaoke|instrumental|mv|版|现场|演唱会|巡回|remastered?)\b",
     re.IGNORECASE,

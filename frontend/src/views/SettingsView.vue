@@ -13,7 +13,7 @@ const settings = ref({
   },
   qbittorrent: { host: '', username: '', password: '', category: 'music', save_path: '/downloads/music', tag: 'music-sub' },
   paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
-  scraper: { sources: ['qqmusic', 'netease', 'kugou', 'migu', 'kuwo', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false, break_hardlink_before_tag: true },
+  scraper: { sources: ['qqmusic', 'netease', 'kugou', 'migu', 'kuwo', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false, tag_write_mode: 'fill_missing', break_hardlink_before_tag: true },
   scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
   notify: { telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true } },
   assistant: {
@@ -339,7 +339,14 @@ onMounted(loadAll)
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.save_lyrics" /><span>保存歌词</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.save_nfo" /><span>生成 album.nfo (Kodi/Jellyfin)</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.rename_file" /><span>按模板重命名文件</span></label>
-          <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.overwrite_tag" /><span>覆盖已有标签</span></label>
+          <div class="field">
+            <label>写标签策略</label>
+            <select v-model="settings.scraper.tag_write_mode">
+              <option value="fill_missing">补全缺失字段（推荐）</option>
+              <option value="skip_existing">已有标题和艺人则跳过</option>
+              <option value="overwrite">覆盖全部字段</option>
+            </select>
+          </div>
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.break_hardlink_before_tag" /><span>写标签前断开硬链接（保护 PT 做种文件）</span></label>
         </div>
       </div>
