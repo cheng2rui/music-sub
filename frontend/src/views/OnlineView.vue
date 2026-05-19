@@ -1,9 +1,12 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { searchOnlineMusic, downloadOnlineSong } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
+import { useThemeStore } from '@/stores/theme.js'
 
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
 const keyword = ref('')
 const results = ref([])
 const loading = ref(false)
@@ -57,7 +60,7 @@ async function handleDownload(song) {
 <template>
   <div class="online-view">
     <div class="online-card">
-      <h3>🎧 在线音乐下载</h3>
+      <h3 class="animal-page-title"><img v-if="isIsland" src="/animal-island/nook-phone/Property-Shopping.svg" alt="" /><span v-else>🎧</span><span>在线音乐下载</span></h3>
       <p class="hint">从 QQ音乐 / 咪咕 / 酷狗 / 网易云 / 酷我搜索直链，下载后自动进入整理刮削流程。</p>
       <div class="source-row">
         <label v-for="s in allSources" :key="s" class="source-item">

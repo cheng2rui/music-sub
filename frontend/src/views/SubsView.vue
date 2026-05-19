@@ -1,10 +1,14 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { getSubs, addSub, updateSub, deleteSub, toggleSub, parsePlaylistUrl } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
+import { useThemeStore } from '@/stores/theme.js'
 
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
+const parseModalTitle = computed(() => `${isIsland.value ? '' : '🎵 '}${parsedResult.value?.title || '歌单解析结果'}`)
 const subs = ref([])
 const loading = ref(false)
 
@@ -175,7 +179,7 @@ onMounted(loadSubs)
 
     <!-- 歌单链接解析 -->
     <div class="add-form">
-      <h3>🔗 歌单链接解析</h3>
+      <h3 class="animal-page-title"><img v-if="isIsland" src="/animal-island/nook-phone/Property-Chat.svg" alt="" /><span v-else>🔗</span><span>歌单链接解析</span></h3>
       <p class="form-hint">粘贴 QQ音乐 或 网易云 歌单链接，自动解析歌曲列表并批量订阅</p>
       <div class="form-row">
         <input
@@ -189,7 +193,7 @@ onMounted(loadSubs)
     </div>
 
     <!-- 解析结果弹窗 -->
-    <AppModal v-if="showParseModal" :title="'🎵 ' + (parsedResult?.title || '歌单解析结果')" @close="showParseModal = false">
+    <AppModal v-if="showParseModal" :title="parseModalTitle" @close="showParseModal = false">
       <div class="parse-result">
         <p class="parse-meta">来源: {{ parsedResult?.source }} | 共 {{ parsedResult?.count }} 首</p>
         <div class="parse-songs">
