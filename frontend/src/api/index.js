@@ -236,6 +236,10 @@ export const restoreLibraryTrash = (trashPath, overwrite = false) => authFetch('
   method: 'POST',
   body: JSON.stringify({ trash_path: trashPath, overwrite })
 }).then(r => r.json())
+export const restoreManyLibraryTrash = (trashPaths = [], overwrite = false) => authFetch('/api/library/trash/restore_many', {
+  method: 'POST',
+  body: JSON.stringify({ trash_paths: trashPaths, overwrite })
+}).then(r => r.json())
 
 // ============ Settings ============
 export const getSettings = () => authFetch('/api/settings/').then(r => r.json())

@@ -1221,12 +1221,8 @@ def list_library_trash(limit: int = 200):
     return {"items": items[:limit], "total": len(items), "trash_root": str(trash_root)}
 
 
-@router.post("/trash/restore")
-def restore_library_trash(payload: dict = Body(default={})):
-    """Restore one file from .trash to its original library-relative path."""
-    root = Path(config.paths.library).resolve()
-    trash_root = root / ".trash"
-    trash_path = Path(str(payload.get("trash_path") or "")).resolve()
+def _restore_one_trash_file(root: Path, trash_root: Path, trash_path_value: str, overwrite: bool = False) -> dict:
+    trash_path = Path(str(trash_path_value or "")).resolve()
     try:
         rel = trash_path.relative_to(trash_root.resolve())
     except Exception:
@@ -1240,11 +1236,10 @@ def restore_library_trash(payload: dict = Body(default={})):
         restore_path.relative_to(root)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid restore target")
-    if restore_path.exists() and not payload.get("overwrite"):
+    if restore_path.exists() and not overwrite:
         raise HTTPException(status_code=409, detail="restore target already exists")
     restore_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(trash_path), str(restore_path))
-    # Cleanup empty trash date/original dirs best-effort.
     for parent in list(trash_path.parents):
         if parent == trash_root or parent == root or trash_root not in parent.parents:
             break
@@ -1253,7 +1248,36 @@ def restore_library_trash(payload: dict = Body(default={})):
                 parent.rmdir()
         except Exception:
             break
-    return {"ok": True, "restored_path": str(restore_path)}
+    return {"trash_path": str(trash_path), "restored_path": str(restore_path)}
+
+
+@router.post("/trash/restore")
+def restore_library_trash(payload: dict = Body(default={})):
+    """Restore one file from .trash to its original library-relative path."""
+    root = Path(config.paths.library).resolve()
+    trash_root = root / ".trash"
+    result = _restore_one_trash_file(root, trash_root, str(payload.get("trash_path") or ""), bool(payload.get("overwrite")))
+    return {"ok": True, **result}
+
+
+@router.post("/trash/restore_many")
+def restore_many_library_trash(payload: dict = Body(default={})):
+    """Restore multiple files from .trash. Each file is moved back to its original path."""
+    root = Path(config.paths.library).resolve()
+    trash_root = root / ".trash"
+    paths = [str(x) for x in (payload.get("trash_paths") or []) if x]
+    if not paths:
+        raise HTTPException(status_code=400, detail="trash_paths is required")
+    restored = []
+    errors = []
+    for p in paths[:200]:
+        try:
+            restored.append(_restore_one_trash_file(root, trash_root, p, bool(payload.get("overwrite"))))
+        except HTTPException as exc:
+            errors.append({"trash_path": p, "error": exc.detail})
+        except Exception as exc:
+            errors.append({"trash_path": p, "error": str(exc)[:300]})
+    return {"ok": not errors, "restored": restored, "errors": errors, "total": len(paths)}
 
 
 @router.get("/tools")

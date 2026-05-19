@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, getLibraryTrash, restoreLibraryTrash } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, getLibraryTrash, restoreLibraryTrash, restoreManyLibraryTrash } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -34,6 +34,12 @@ const albumLoading = ref(false)
 const albumPageCount = computed(() => Math.max(1, Math.ceil((albumTotal.value || 0) / albumPageSize)))
 const albumPagedMode = computed(() => albumTotal.value > 200)
 const albumVisibleTracks = computed(() => albumPagedMode.value ? albumTrackFiles.value : albumTracks.value)
+const filteredTrashItems = computed(() => {
+  const q = trashQuery.value.trim().toLowerCase()
+  if (!q) return trashItems.value
+  return trashItems.value.filter(item => [item.filename, item.relative_path, item.restore_path].some(v => String(v || '').toLowerCase().includes(q)))
+})
+const allFilteredTrashSelected = computed(() => filteredTrashItems.value.length > 0 && filteredTrashItems.value.every(item => selectedTrashPaths.value.includes(item.trash_path)))
 const albumPageNumbers = computed(() => {
   const total = albumPageCount.value
   const current = albumPage.value + 1
@@ -69,6 +75,8 @@ const showHealthModal = ref(false)
 const showTrashModal = ref(false)
 const trashLoading = ref(false)
 const trashItems = ref([])
+const trashQuery = ref('')
+const selectedTrashPaths = ref([])
 const trashRestoring = ref('')
 const showToolsModal = ref(false)
 const toolsContext = ref({})
@@ -235,6 +243,7 @@ async function loadTrash() {
   try {
     const data = await getLibraryTrash(300)
     trashItems.value = data.items || []
+    selectedTrashPaths.value = selectedTrashPaths.value.filter(p => trashItems.value.some(item => item.trash_path === p))
   } catch (e) { console.error(e) }
   finally { trashLoading.value = false }
 }
@@ -247,6 +256,25 @@ async function restoreTrashItem(item) {
     await loadTrash()
     await runLibraryScan()
   } catch (e) { alert('恢复失败：' + (e.message || e)) }
+  finally { trashRestoring.value = '' }
+}
+
+function toggleAllTrashSelection() {
+  const paths = filteredTrashItems.value.map(item => item.trash_path)
+  if (allFilteredTrashSelected.value) selectedTrashPaths.value = selectedTrashPaths.value.filter(p => !paths.includes(p))
+  else selectedTrashPaths.value = [...new Set([...selectedTrashPaths.value, ...paths])]
+}
+
+async function restoreSelectedTrashItems() {
+  if (!selectedTrashPaths.value.length || !confirm(`恢复选中的 ${selectedTrashPaths.value.length} 个文件？`)) return
+  trashRestoring.value = '__batch__'
+  try {
+    const res = await restoreManyLibraryTrash(selectedTrashPaths.value, false)
+    if (res.errors?.length) alert(`部分恢复失败：${res.errors.length} 个`)
+    selectedTrashPaths.value = []
+    await loadTrash()
+    await runLibraryScan()
+  } catch (e) { alert('批量恢复失败：' + (e.message || e)) }
   finally { trashRestoring.value = '' }
 }
 
@@ -835,10 +863,17 @@ onMounted(() => { loadStats(); loadAlbums(0) })
           <span>默认删除会移动到 <code>.trash/YYYYMMDD</code>，可从这里恢复。</span>
           <AppButton variant="ghost" size="sm" :loading="trashLoading" @click="loadTrash">刷新</AppButton>
         </div>
+        <div class="trash-toolbar">
+          <input v-model="trashQuery" placeholder="搜索文件名 / 路径..." />
+          <AppButton variant="ghost" size="sm" :disabled="!filteredTrashItems.length" @click="toggleAllTrashSelection">{{ allFilteredTrashSelected ? '取消全选' : '全选当前' }}</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="!selectedTrashPaths.length" :loading="trashRestoring === '__batch__'" @click="restoreSelectedTrashItems">恢复选中 {{ selectedTrashPaths.length }}</AppButton>
+        </div>
         <div v-if="trashLoading" class="loading-text">读取回收站中...</div>
         <div v-else-if="!trashItems.length" class="loading-text">回收站是空的。</div>
+        <div v-else-if="!filteredTrashItems.length" class="loading-text">没有匹配的回收站文件。</div>
         <div v-else class="trash-list">
-          <div v-for="item in trashItems" :key="item.trash_path" class="trash-row">
+          <div v-for="item in filteredTrashItems" :key="item.trash_path" class="trash-row">
+            <input type="checkbox" :value="item.trash_path" v-model="selectedTrashPaths" />
             <div class="trash-info">
               <strong>{{ item.filename }}</strong>
               <small>{{ item.relative_path }}</small>
@@ -965,6 +1000,16 @@ button.scan-health-chip { cursor: pointer; }
 .job-step.running .job-step-status { color: var(--accent); }
 .job-step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .job-step-msg { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trash-modal { display: flex; flex-direction: column; gap: 12px; min-width: 560px; }
+.trash-head, .trash-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.trash-head code { padding: 2px 6px; border-radius: 999px; background: var(--surface-soft); color: var(--text); }
+.trash-toolbar input { flex: 1; min-width: 220px; }
+.trash-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.trash-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.trash-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.trash-info strong, .trash-info small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trash-info small { color: var(--text-dim); font-size: 12px; }
+.trash-meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -980,7 +1025,11 @@ button.scan-health-chip { cursor: pointer; }
   .album-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
   .album-row { padding: 8px; }
   .row-count { display: none; }
-  .album-modal, .track-modal, .health-modal { min-width: unset; width: 100%; }
+  .album-modal, .track-modal, .health-modal, .trash-modal { min-width: unset; width: 100%; }
+  .trash-head, .trash-toolbar { align-items: stretch; flex-direction: column; }
+  .trash-toolbar input { width: 100%; min-width: 0; }
+  .trash-row { grid-template-columns: auto minmax(0, 1fr); }
+  .trash-meta { grid-column: 2; }
   .modal-cover { width: 132px; height: 132px; }
   .health-row { align-items: flex-start; flex-direction: column; }
   .health-actions { width: 100%; flex-wrap: wrap; }
