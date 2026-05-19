@@ -210,8 +210,12 @@ def download_torrent(db: Session, site: str, torrent_id: str, title: str = "", *
 
 def download_online_song(db: Session, song: dict, organize: bool = True, **kwargs) -> dict:
     import uuid
-    if not song or not song.get("url"):
+    if not song:
         raise ToolError("缺少可下载歌曲信息")
+    # QQ search results intentionally omit URL so search stays fast; the lower
+    # level downloader resolves NKI/QQ vkey candidates on click/tool execution.
+    if not song.get("url") and song.get("source") != "qq":
+        raise ToolError("缺少可下载歌曲链接")
     title = song.get("title") or song.get("filename") or "online-music"
     source = song.get("source") or "online"
     file_path = _download_online_song(song)
