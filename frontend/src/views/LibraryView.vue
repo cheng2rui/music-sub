@@ -255,7 +255,19 @@ async function restoreTrashItem(item) {
     await restoreLibraryTrash(item.trash_path, false)
     await loadTrash()
     await runLibraryScan()
-  } catch (e) { alert('恢复失败：' + (e.message || e)) }
+  } catch (e) {
+    if (String(e.message || e).includes('restore target already exists') && confirm('目标路径已存在，是否覆盖恢复？\n' + item.restore_path)) {
+      try {
+        await restoreLibraryTrash(item.trash_path, true)
+        await loadTrash()
+        await runLibraryScan()
+      } catch (inner) {
+        alert('覆盖恢复失败：' + (inner.message || inner))
+      }
+    } else {
+      alert('恢复失败：' + (e.message || e))
+    }
+  }
   finally { trashRestoring.value = '' }
 }
 
@@ -881,6 +893,7 @@ onMounted(() => { loadStats(); loadAlbums(0) })
               <strong>{{ item.filename }}</strong>
               <small>{{ item.relative_path }}</small>
               <small>恢复到：{{ item.restore_path }}</small>
+              <small v-if="item.restore_exists" class="trash-conflict">目标已存在，恢复时可选择覆盖</small>
             </div>
             <div class="trash-meta">{{ formatBytes(item.size) }}</div>
             <AppButton variant="primary" size="sm" :loading="trashRestoring === item.trash_path" @click="restoreTrashItem(item)">恢复</AppButton>
@@ -1013,6 +1026,7 @@ button.scan-health-chip { cursor: pointer; }
 .trash-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .trash-info strong, .trash-info small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trash-info small { color: var(--text-dim); font-size: 12px; }
+.trash-info .trash-conflict { color: var(--warning); }
 .trash-meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 
 @media (max-width: 768px) {

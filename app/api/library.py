@@ -1257,6 +1257,7 @@ def list_library_trash(limit: int = 200):
                     "trash_path": str(p),
                     "relative_path": str(rel),
                     "restore_path": str(root / restore_rel),
+                    "restore_exists": (root / restore_rel).exists(),
                     "filename": p.name,
                     "size": stat.st_size,
                     "mtime": stat.st_mtime,
