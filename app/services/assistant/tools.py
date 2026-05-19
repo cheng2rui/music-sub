@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -278,6 +279,33 @@ def rescrape_album(db: Session, artist: str, album: str, **kwargs) -> dict:
     return rescrape_albums({"albums": [{"artist": artist, "album": album}], "async": True}, db=db)
 
 
+def query_library_health(db: Session, kind: str = "", limit: int = 20, **kwargs) -> dict:
+    """Query library hygiene issues for assistant diagnosis."""
+    from app.api.library import library_health
+    allowed = {"", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts"}
+    kind = (kind or "").strip()
+    if kind not in allowed:
+        raise ToolError("未知治理类别")
+    return library_health(kind=kind, limit=max(1, min(int(limit or 20), 100)), db=db)
+
+
+def read_recent_logs(db: Session, lines: int = 120, level: str = "", **kwargs) -> dict:
+    """Read recent application logs, optionally filtered by level."""
+    level = (level or "").strip().upper()
+    lines = max(1, min(int(lines or 120), 500))
+    log_file = Path(__file__).resolve().parents[3] / "logs" / "music_sub.log"
+    if not log_file.exists():
+        return {"lines": [], "total": 0, "level": level, "message": "日志文件不存在"}
+    try:
+        all_lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as e:
+        raise ToolError(f"读取日志失败：{e}")
+    if level:
+        all_lines = [line for line in all_lines if f"[{level}]" in line or level in line]
+    recent = all_lines[-lines:]
+    return {"lines": recent, "total": len(all_lines), "level": level}
+
+
 TOOL_SPECS: dict[str, dict[str, Any]] = {
     "get_system_status": {"risk": "low", "function": get_system_status, "description": "获取 Music Sub 系统状态。", "parameters": {"type": "object", "properties": {}}},
     "get_library_stats": {"risk": "low", "function": get_library_stats, "description": "获取音乐库统计。", "parameters": {"type": "object", "properties": {}}},
@@ -293,6 +321,8 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
     "download_online_song": {"risk": "high", "function": download_online_song, "description": "下载一个在线音乐搜索结果并可选整理入库。必须使用 search_online 返回的完整 song 对象。", "parameters": {"type": "object", "properties": {"song": {"type": "object"}, "organize": {"type": "boolean"}}, "required": ["song"]}},
     "organize_task": {"risk": "medium", "function": organize_task, "description": "对已下载完成的任务执行整理和刮削入库。", "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
     "rescrape_album": {"risk": "medium", "function": rescrape_album, "description": "重新刮削指定专辑的元数据。", "parameters": {"type": "object", "properties": {"artist": {"type": "string"}, "album": {"type": "string"}}, "required": ["artist", "album"]}},
+    "query_library_health": {"risk": "low", "function": query_library_health, "description": "查询音乐库治理问题，例如缺封面、缺歌词、未刮削、CUE 候选、专辑艺人冲突。", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts"]}, "limit": {"type": "integer"}}}},
+    "read_recent_logs": {"risk": "low", "function": read_recent_logs, "description": "读取最近应用日志，用于诊断下载、刮削、助手、站点连接等错误。", "parameters": {"type": "object", "properties": {"lines": {"type": "integer"}, "level": {"type": "string", "enum": ["", "INFO", "WARNING", "ERROR", "DEBUG"]}}}},
 }
 
 
@@ -341,6 +371,8 @@ def tool_catalog(enabled_names: set[str] | list[str] | None = None) -> list[dict
         "download_online_song": "下载动作",
         "organize_task": "音乐库动作",
         "rescrape_album": "音乐库动作",
+        "query_library_health": "音乐库",
+        "read_recent_logs": "诊断",
     }
     return [
         {

@@ -217,6 +217,48 @@ function cardMeta(item) {
   return parts.join(' · ')
 }
 
+function itemActions(message, item) {
+  if (message.tool_name === 'search_online') {
+    return [
+      { key: 'download-online', label: item.url ? '下载' : '解析下载', variant: 'primary' },
+      { key: 'subscribe-song', label: '订阅歌曲', variant: 'ghost' },
+      { key: 'search-pt', label: '搜 PT', variant: 'ghost' }
+    ]
+  }
+  if (message.tool_name === 'search_pt') {
+    return [
+      { key: 'download-pt', label: '下载', variant: 'primary' },
+      { key: 'subscribe-keyword', label: '订阅关键词', variant: 'ghost' }
+    ]
+  }
+  if (message.tool_name === 'search_library') {
+    return [
+      { key: 'rescrape-album', label: '重刮专辑', variant: 'ghost' }
+    ]
+  }
+  if (message.tool_name === 'query_library_health') {
+    return [
+      { key: 'rescrape-album', label: '重刮专辑', variant: 'ghost' }
+    ]
+  }
+  return []
+}
+
+function sendItemAction(message, item, idx, action) {
+  const title = cardTitle(item)
+  const artist = item.artist || item.album_artist || ''
+  const payload = JSON.stringify(item.download_args || item, null, 2)
+  const prompts = {
+    'download-online': `下载这个在线音乐结果（来自 ${message.tool_name} 第 ${idx + 1} 个）：\n${payload}`,
+    'download-pt': `下载这个 PT 搜索结果（来自 ${message.tool_name} 第 ${idx + 1} 个）：\n${payload}`,
+    'subscribe-song': `创建歌曲订阅：${[title, artist].filter(Boolean).join(' ')}，质量优先 FLAC。`,
+    'subscribe-keyword': `创建关键词订阅：${title}，质量优先 FLAC。`,
+    'search-pt': `搜索 PT 资源：${[title, artist].filter(Boolean).join(' ')}，质量优先 FLAC。`,
+    'rescrape-album': `重新刮削专辑：${item.artist || item.album_artist || item.suggested_album_artist || ''} - ${item.album || ''}`
+  }
+  sendMessage(prompts[action.key] || `${action.label}：${payload}`)
+}
+
 function previewDetails(call) { return call.preview?.details || [] }
 function riskColor(risk) { return risk === 'high' ? 'red' : risk === 'medium' ? 'orange' : 'green' }
 function activityTime(item) { return item.updated_at || item.created_at ? new Date(item.updated_at || item.created_at).toLocaleString() : '-' }
@@ -306,6 +348,16 @@ onMounted(async () => {
                     <div v-if="cardSubtitle(item)" class="result-subtitle">{{ cardSubtitle(item) }}</div>
                     <div v-if="cardMeta(item)" class="result-meta">{{ cardMeta(item) }}</div>
                     <div v-if="item.reasons?.length" class="result-reasons">{{ item.reasons.join('、') }}</div>
+                    <div v-if="itemActions(msg, item).length" class="result-actions">
+                      <AppButton
+                        v-for="action in itemActions(msg, item)"
+                        :key="action.key"
+                        size="sm"
+                        :variant="action.variant"
+                        :disabled="loading"
+                        @click="sendItemAction(msg, item, idx, action)"
+                      >{{ action.label }}</AppButton>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -395,6 +447,7 @@ onMounted(async () => {
 .result-rank { color: var(--accent); font-weight: 700; }
 .result-title { color: var(--text); font-weight: 650; }
 .result-subtitle, .result-meta, .result-reasons { margin-top: 3px; color: var(--text-dim); font-size: 12px; }
+.result-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .raw-json { margin-top: 8px; color: var(--text-dim); }
 .raw-json summary { cursor: pointer; }
 pre { margin: 6px 0 0; white-space: pre-wrap; }

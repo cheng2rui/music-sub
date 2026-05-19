@@ -56,6 +56,12 @@ def _compact_tool_result(tool_name: str, result: Any) -> Any:
         return {"items": (result.get("items") or [])[:6]}
     if tool_name in {"list_tasks", "list_subscriptions", "search_library"}:
         return {"items": (result.get("items") or [])[:15]}
+    if tool_name == "query_library_health":
+        if "totals" in result:
+            return {"totals": result.get("totals") or {}, "samples": result.get("samples") or {}}
+        return {"kind": result.get("kind"), "total": result.get("total"), "items": (result.get("items") or [])[:12]}
+    if tool_name == "read_recent_logs":
+        return {"level": result.get("level") or "", "total": result.get("total") or 0, "lines": (result.get("lines") or [])[-80:]}
     return result
 
 
@@ -360,6 +366,10 @@ class AssistantService:
             return f"整理任务 #{args.get('task_id')} 并入库"
         if name == "rescrape_album":
             return f"重新刮削专辑：{args.get('artist')} - {args.get('album')}"
+        if name == "query_library_health":
+            return f"查询音乐库治理问题：{args.get('kind') or '全部'}"
+        if name == "read_recent_logs":
+            return f"读取最近日志：{args.get('level') or 'ALL'} / {args.get('lines') or 120} 行"
         if name in {"pause_task", "resume_task"}:
             return f"{name}：任务 #{args.get('task_id')}"
         return f"{name}（风险级别：{risk}）"
