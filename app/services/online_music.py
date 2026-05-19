@@ -657,15 +657,13 @@ def _unique_target(target_dir: Path, filename: str) -> Path:
 def _qq_download_candidates(song: dict) -> list[tuple[str, str]]:
     """Return QQ download candidates as (url, ext), including fresh fallback URLs.
 
-    QQ CDN vkeys expire and NKI-returned isure6 links can start returning 418.
-    Keep the originally searched URL first for quality, then refresh through both
-    built-in musicu.fcg and NKI as fallback.
+    QQ CDN vkeys expire and cached/search-time URLs can start returning 418.
+    User-configured NKI is the first priority, then built-in musicu.fcg, then
+    any original URL carried by older search results as a last-resort fallback.
     """
     candidates: list[tuple[str, str]] = []
     original_url = song.get("url") or ""
     original_ext = song.get("format") or "mp3"
-    if original_url:
-        candidates.append((original_url, original_ext))
 
     song_mid = song.get("song_id") or ""
     if song_mid:
@@ -683,6 +681,9 @@ def _qq_download_candidates(song: dict) -> list[tuple[str, str]]:
                 candidates.append((url, ext or "mp3"))
         except Exception as e:
             logger.debug(f"[online:qq] builtin fallback resolve failed: {e}")
+
+    if original_url and all(original_url != u for u, _ in candidates):
+        candidates.append((original_url, original_ext))
     return candidates
 
 
