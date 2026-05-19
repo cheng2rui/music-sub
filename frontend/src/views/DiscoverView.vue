@@ -15,6 +15,19 @@ const toplist = ref([])
 const libraryStats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
 const tasks = ref([])
 const loading = ref(false)
+const showHomeSettings = ref(false)
+
+const HOME_MODULE_STORAGE_KEY = 'music_sub_discover_modules'
+const defaultHomeModules = [
+  { key: 'hero', label: '顶部主打', desc: '今日主打歌曲和快速搜索入口', enabled: true },
+  { key: 'stats', label: '数据概览', desc: '本地曲目、刮削完成率、下载任务', enabled: true },
+  { key: 'quick', label: '快捷入口', desc: '搜索、订阅、曲库、任务入口', enabled: true },
+  { key: 'recommend', label: '今日推荐', desc: '新歌随机推荐和订阅入口', enabled: true },
+  { key: 'charts', label: '热歌排行榜', desc: '热榜歌曲速览', enabled: true },
+  { key: 'playlists', label: '推荐歌单', desc: '在线歌单和逐首订阅', enabled: true },
+  { key: 'tasks', label: '最近任务', desc: '下载与入库进度速览', enabled: true }
+]
+const homeModules = ref(loadHomeModules())
 
 const selectedPlaylist = ref(null)
 const playlistSongs = ref([])
@@ -26,6 +39,7 @@ const featuredPlaylists = computed(() => playlists.value.slice(0, 6))
 const chartSongs = computed(() => toplist.value.slice(0, 10))
 const recentTasks = computed(() => tasks.value.slice(0, 4))
 const activeTaskCount = computed(() => tasks.value.filter(t => ['downloading', 'organized', 'downloaded'].includes(t.status)).length)
+const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && ['recommend', 'charts', 'playlists', 'tasks'].includes(m.key)))
 const libraryTotal = computed(() => libraryStats.value.total_files || libraryStats.value.tracks || 0)
 const scrapedRate = computed(() => {
   const total = libraryTotal.value
@@ -67,6 +81,33 @@ async function openPlaylist(id) {
   selectedPlaylist.value = { id, title: data.title, cover: data.cover, desc: data.desc }
   playlistSongs.value = data.songs || []
   showPlaylistModal.value = true
+}
+
+
+function loadHomeModules() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(HOME_MODULE_STORAGE_KEY) || '[]')
+    if (Array.isArray(stored)) {
+      const storedMap = new Map(stored.map(item => [item.key, item.enabled]))
+      return defaultHomeModules.map(item => ({ ...item, enabled: storedMap.has(item.key) ? !!storedMap.get(item.key) : item.enabled }))
+    }
+  } catch (e) {
+    console.warn('Failed to load discover module settings', e)
+  }
+  return defaultHomeModules.map(item => ({ ...item }))
+}
+
+function saveHomeModules() {
+  localStorage.setItem(HOME_MODULE_STORAGE_KEY, JSON.stringify(homeModules.value.map(({ key, enabled }) => ({ key, enabled }))))
+  showHomeSettings.value = false
+}
+
+function resetHomeModules() {
+  homeModules.value = defaultHomeModules.map(item => ({ ...item }))
+}
+
+function isHomeModuleEnabled(key) {
+  return homeModules.value.find(item => item.key === key)?.enabled !== false
 }
 
 function formatPlayCount(n) {
@@ -113,7 +154,7 @@ onMounted(loadAll)
 
 <template>
   <div class="discover">
-    <section class="hero-card">
+    <section v-if="isHomeModuleEnabled('hero')" class="hero-card">
       <div class="hero-copy">
         <AppBadge color="green">Discover</AppBadge>
         <h1>今天想听点什么？</h1>
@@ -121,6 +162,7 @@ onMounted(loadAll)
         <div class="hero-actions">
           <AppButton size="sm" @click="go('/search')">搜索音乐</AppButton>
           <AppButton variant="ghost" size="sm" :loading="loading" @click="loadAll">刷新发现</AppButton>
+          <AppButton variant="ghost" size="sm" @click="showHomeSettings = true">编辑首页</AppButton>
         </div>
       </div>
       <div v-if="featuredSong" class="hero-feature">
@@ -137,7 +179,7 @@ onMounted(loadAll)
       </div>
     </section>
 
-    <section class="overview-grid">
+    <section v-if="isHomeModuleEnabled('stats')" class="overview-grid">
       <article class="stat-card">
         <span class="stat-label">本地曲目</span>
         <strong>{{ libraryTotal }}</strong>
@@ -155,7 +197,7 @@ onMounted(loadAll)
       </article>
     </section>
 
-    <section class="quick-grid">
+    <section v-if="isHomeModuleEnabled('quick')" class="quick-grid">
       <article v-for="link in quickLinks" :key="link.path" class="quick-card" @click="go(link.path)">
         <div class="quick-icon">{{ link.icon }}</div>
         <div>
@@ -165,8 +207,8 @@ onMounted(loadAll)
       </article>
     </section>
 
-    <div class="dashboard-grid">
-      <section class="panel panel-wide">
+    <div v-if="visibleMasonryModules.length" class="dashboard-grid">
+      <section v-if="isHomeModuleEnabled('recommend')" class="panel panel-wide">
         <div class="section-header">
           <div>
             <h2>今日推荐</h2>
@@ -191,7 +233,7 @@ onMounted(loadAll)
         </div>
       </section>
 
-      <section class="panel">
+      <section v-if="isHomeModuleEnabled('charts')" class="panel">
         <div class="section-header compact">
           <div>
             <h2>热歌排行榜</h2>
@@ -212,7 +254,7 @@ onMounted(loadAll)
         </div>
       </section>
 
-      <section class="panel panel-wide">
+      <section v-if="isHomeModuleEnabled('playlists')" class="panel panel-wide">
         <div class="section-header">
           <div>
             <h2>推荐歌单</h2>
@@ -231,7 +273,7 @@ onMounted(loadAll)
         </div>
       </section>
 
-      <section class="panel">
+      <section v-if="isHomeModuleEnabled('tasks')" class="panel">
         <div class="section-header compact">
           <div>
             <h2>最近任务</h2>
@@ -251,6 +293,26 @@ onMounted(loadAll)
         </div>
       </section>
     </div>
+
+
+    <AppModal v-if="showHomeSettings" title="编辑首页" @close="showHomeSettings = false">
+      <div class="home-settings">
+        <p class="home-settings-hint">选择首页要显示的内容。关闭的模块不会占位，下方卡片会自动向上吸附。</p>
+        <div class="home-module-grid">
+          <label v-for="module in homeModules" :key="module.key" class="home-module-item" :class="{ enabled: module.enabled }">
+            <input type="checkbox" v-model="module.enabled" />
+            <span>
+              <strong>{{ module.label }}</strong>
+              <small>{{ module.desc }}</small>
+            </span>
+          </label>
+        </div>
+        <div class="home-settings-actions">
+          <AppButton variant="ghost" size="sm" @click="resetHomeModules">恢复默认</AppButton>
+          <AppButton size="sm" @click="saveHomeModules">保存</AppButton>
+        </div>
+      </div>
+    </AppModal>
 
     <AppModal v-if="showPlaylistModal" :title="selectedPlaylist?.title" @close="showPlaylistModal = false">
       <div class="playlist-detail">
@@ -298,8 +360,8 @@ onMounted(loadAll)
 .quick-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-md); background: var(--accent-soft); font-size: 20px; }
 .quick-card h3 { margin: 0 0 4px; font-size: 14px; }
 .quick-card p { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.35; }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr); gap: 16px; align-items: start; }
-.panel { padding: 16px; min-width: 0; }
+.dashboard-grid { column-count: 2; column-gap: 16px; }
+.panel { display: inline-block; width: 100%; margin: 0 0 16px; padding: 16px; min-width: 0; break-inside: avoid; page-break-inside: avoid; }
 .panel-wide { min-width: 0; }
 .section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .section-header h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
@@ -333,6 +395,16 @@ onMounted(loadAll)
 .mini-task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
 .mini-task strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .mini-task small { display: block; margin-top: 6px; color: var(--text-muted); }
+.home-settings { display: flex; flex-direction: column; gap: 14px; min-width: min(520px, 80vw); }
+.home-settings-hint { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.home-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.home-module-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); cursor: pointer; transition: border-color .15s, background .15s; }
+.home-module-item.enabled { border-color: var(--accent); background: var(--accent-soft); }
+.home-module-item input { margin-top: 2px; accent-color: var(--accent); }
+.home-module-item span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.home-module-item strong { font-size: 14px; }
+.home-module-item small { color: var(--text-dim); line-height: 1.35; }
+.home-settings-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .playlist-detail { display: flex; flex-direction: column; gap: 16px; min-width: 400px; }
 .detail-cover { width: 200px; height: 200px; border-radius: var(--radius-lg); object-fit: cover; }
 .detail-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
@@ -345,7 +417,7 @@ onMounted(loadAll)
 
 @media (max-width: 1180px) {
   .hero-card { grid-template-columns: 1fr; }
-  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-grid { column-count: 1; }
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -371,6 +443,10 @@ onMounted(loadAll)
   .song-cover { width: 54px; height: 54px; }
   .song-card-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .playlist-grid { grid-template-columns: 1fr; }
+  .home-settings { min-width: 0; }
+  .home-module-grid { grid-template-columns: 1fr; }
+  .home-settings-actions { flex-direction: column-reverse; }
+  .home-settings-actions :deep(.btn) { width: 100%; justify-content: center; }
   .playlist-cover { width: 58px; height: 58px; }
   .chart-row { padding: 7px 2px; gap: 8px; }
   .rank-cover { width: 38px; height: 38px; }
