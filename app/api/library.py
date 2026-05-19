@@ -1,5 +1,6 @@
 """Library API routes."""
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1181,6 +1182,70 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
             db.rollback()
             errors.append({"title": song.get("title"), "error": str(exc)[:300]})
     return {"ok": True, "dry_run": False, "existing": len(existing), "candidates": items, "downloaded": downloaded, "errors": errors}
+
+
+@router.get("/trash")
+def list_library_trash(limit: int = 200):
+    """List files in the library .trash folder, newest first."""
+    root = Path(config.paths.library).resolve()
+    trash_root = root / ".trash"
+    items = []
+    if trash_root.exists():
+        for p in trash_root.rglob("*"):
+            if not p.is_file():
+                continue
+            try:
+                rel = p.relative_to(trash_root)
+                parts = rel.parts
+                restore_rel = Path(*parts[1:]) if len(parts) >= 2 and parts[0].isdigit() else rel
+                stat = p.stat()
+                items.append({
+                    "trash_path": str(p),
+                    "relative_path": str(rel),
+                    "restore_path": str(root / restore_rel),
+                    "filename": p.name,
+                    "size": stat.st_size,
+                    "mtime": stat.st_mtime,
+                })
+            except Exception:
+                continue
+    items.sort(key=lambda x: x.get("mtime") or 0, reverse=True)
+    return {"items": items[:limit], "total": len(items), "trash_root": str(trash_root)}
+
+
+@router.post("/trash/restore")
+def restore_library_trash(payload: dict = Body(default={})):
+    """Restore one file from .trash to its original library-relative path."""
+    root = Path(config.paths.library).resolve()
+    trash_root = root / ".trash"
+    trash_path = Path(str(payload.get("trash_path") or "")).resolve()
+    try:
+        rel = trash_path.relative_to(trash_root.resolve())
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid trash_path")
+    if not trash_path.is_file():
+        raise HTTPException(status_code=404, detail="trash file not found")
+    parts = rel.parts
+    restore_rel = Path(*parts[1:]) if len(parts) >= 2 and parts[0].isdigit() else rel
+    restore_path = (root / restore_rel).resolve()
+    try:
+        restore_path.relative_to(root)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid restore target")
+    if restore_path.exists() and not payload.get("overwrite"):
+        raise HTTPException(status_code=409, detail="restore target already exists")
+    restore_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(trash_path), str(restore_path))
+    # Cleanup empty trash date/original dirs best-effort.
+    for parent in list(trash_path.parents):
+        if parent == trash_root or parent == root or trash_root not in parent.parents:
+            break
+        try:
+            if parent.exists() and not any(parent.iterdir()):
+                parent.rmdir()
+        except Exception:
+            break
+    return {"ok": True, "restored_path": str(restore_path)}
 
 
 @router.get("/tools")

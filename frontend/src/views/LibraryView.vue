@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, getLibraryTrash, restoreLibraryTrash } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -64,6 +64,10 @@ const scanJob = ref(null)
 let scanPollTimer = null
 
 const showHealthModal = ref(false)
+const showTrashModal = ref(false)
+const trashLoading = ref(false)
+const trashItems = ref([])
+const trashRestoring = ref('')
 const showToolsModal = ref(false)
 const toolsContext = ref({})
 function openToolbox(ctx = {}) {
@@ -217,6 +221,39 @@ function hasScanHealthReport() {
 
 function openScanHealth(kind) {
   openHealthModal(kind)
+}
+
+async function openTrashModal() {
+  showTrashModal.value = true
+  await loadTrash()
+}
+
+async function loadTrash() {
+  trashLoading.value = true
+  try {
+    const data = await getLibraryTrash(300)
+    trashItems.value = data.items || []
+  } catch (e) { console.error(e) }
+  finally { trashLoading.value = false }
+}
+
+async function restoreTrashItem(item) {
+  if (!item || !confirm(`恢复「${item.filename}」到原路径？\n${item.restore_path}`)) return
+  trashRestoring.value = item.trash_path
+  try {
+    await restoreLibraryTrash(item.trash_path, false)
+    await loadTrash()
+    await runLibraryScan()
+  } catch (e) { alert('恢复失败：' + (e.message || e)) }
+  finally { trashRestoring.value = '' }
+}
+
+function formatBytes(n) {
+  const v = Number(n) || 0
+  if (v >= 1024 * 1024 * 1024) return `${(v / 1024 / 1024 / 1024).toFixed(1)} GB`
+  if (v >= 1024 * 1024) return `${(v / 1024 / 1024).toFixed(1)} MB`
+  if (v >= 1024) return `${Math.round(v / 1024)} KB`
+  return `${v} B`
 }
 
 async function loadStats() {
@@ -506,6 +543,9 @@ onMounted(() => { loadStats(); loadAlbums(0) })
       <AppButton variant="primary" size="sm" :loading="scanning" @click="runLibraryScan">
         扫描资料库
       </AppButton>
+      <AppButton variant="ghost" size="sm" @click="openTrashModal">
+        回收站
+      </AppButton>
       <AppButton variant="ghost" size="sm" @click="openToolbox()">
         工具箱
       </AppButton>
@@ -753,6 +793,28 @@ onMounted(() => { loadStats(); loadAlbums(0) })
                 @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : healthKind === 'album_artist_conflicts' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'album_artist', options: { album_artist: item.suggested_album_artist || item.artist } }) : rescrapeHealthAlbum(item)"
               >{{ healthKind === 'cue_candidates' ? '拆分' : healthKind === 'album_artist_conflicts' ? '修复' : '重刮削' }}</AppButton>
             </div>
+          </div>
+        </div>
+      </div>
+    </AppModal>
+
+    <AppModal v-if="showTrashModal" title="音乐库回收站" @close="showTrashModal = false">
+      <div class="trash-modal">
+        <div class="trash-head">
+          <span>默认删除会移动到 <code>.trash/YYYYMMDD</code>，可从这里恢复。</span>
+          <AppButton variant="ghost" size="sm" :loading="trashLoading" @click="loadTrash">刷新</AppButton>
+        </div>
+        <div v-if="trashLoading" class="loading-text">读取回收站中...</div>
+        <div v-else-if="!trashItems.length" class="loading-text">回收站是空的。</div>
+        <div v-else class="trash-list">
+          <div v-for="item in trashItems" :key="item.trash_path" class="trash-row">
+            <div class="trash-info">
+              <strong>{{ item.filename }}</strong>
+              <small>{{ item.relative_path }}</small>
+              <small>恢复到：{{ item.restore_path }}</small>
+            </div>
+            <div class="trash-meta">{{ formatBytes(item.size) }}</div>
+            <AppButton variant="primary" size="sm" :loading="trashRestoring === item.trash_path" @click="restoreTrashItem(item)">恢复</AppButton>
           </div>
         </div>
       </div>

@@ -169,6 +169,156 @@
   --radius-xl: 22px;
 }
 
+/* ===== Animal Island inspired warm theme ===== */
+[data-theme="island"] {
+  color-scheme: light;
+  --bg: #f8f8f0;
+  --bg-elevated: #fffdf2;
+  --surface: rgb(247, 243, 223);
+  --surface-hover: #f0e8d8;
+  --surface-soft: rgba(114, 93, 66, 0.075);
+  --card-bg: rgb(247, 243, 223);
+  --table-header-bg: #fffaf0;
+  --border: #d4c9b4;
+  --border-strong: #9f927d;
+  --text: #794f27;
+  --text-dim: #725d42;
+  --text-muted: #9f927d;
+  --accent: #19c8b9;
+  --accent-hover: #3dd4c6;
+  --accent-soft: rgba(25, 200, 185, 0.16);
+  --success: #6fba2c;
+  --info: #327a93;
+  --warning: #f5c31c;
+  --danger: #e05a5a;
+  --overlay-bg: rgba(61, 52, 40, 0.34);
+  --scrollbar-thumb: rgba(114, 93, 66, 0.35);
+  --shadow-soft: 0 5px 0 #bdaea0, 0 14px 24px rgba(107, 92, 67, 0.12);
+  --shadow-card: 0 4px 10px rgba(107, 92, 67, 0.22);
+  --blur-strength: 0px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+  --radius-xl: 34px;
+}
+
+[data-theme="island"] body,
+[data-theme="island"] input,
+[data-theme="island"] textarea,
+[data-theme="island"] select,
+[data-theme="island"] button {
+  font-family: Nunito, 'Noto Sans SC', 'Zen Maru Gothic', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  letter-spacing: 0.01em;
+}
+
+[data-theme="island"] input,
+[data-theme="island"] textarea,
+[data-theme="island"] select {
+  border: 2.5px solid #c4b89e;
+  border-radius: 50px;
+  box-shadow: 0 3px 0 #d4c9b4;
+  background: rgb(247, 243, 223);
+  color: #725d42;
+  font-weight: 500;
+}
+[data-theme="island"] textarea { border-radius: 22px; }
+[data-theme="island"] input:focus,
+[data-theme="island"] textarea:focus,
+[data-theme="island"] select:focus {
+  border-color: #ffcc00;
+  box-shadow: 0 3px 0 #e0b800, 0 0 0 3px rgba(255, 204, 0, 0.15);
+}
+
+[data-theme="island"] .app-btn,
+[data-theme="island"] button.play-btn,
+[data-theme="island"] .view-btn,
+[data-theme="island"] .settings-tab,
+[data-theme="island"] .health-tab,
+[data-theme="island"] .scan-health-chip,
+[data-theme="island"] .theme-select,
+[data-theme="island"] .btn-logout {
+  border-radius: 999px;
+  border-width: 2px;
+  box-shadow: 0 4px 0 #bdaea0;
+  transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s cubic-bezier(.4,0,.2,1), background-color .2s, border-color .2s, color .2s;
+}
+[data-theme="island"] .app-btn:hover:not(:disabled),
+[data-theme="island"] button.play-btn:hover,
+[data-theme="island"] .view-btn:hover,
+[data-theme="island"] .settings-tab:hover,
+[data-theme="island"] .health-tab:hover,
+[data-theme="island"] .scan-health-chip:hover,
+[data-theme="island"] .theme-select:hover,
+[data-theme="island"] .btn-logout:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 #bdaea0;
+}
+[data-theme="island"] .app-btn:active:not(:disabled),
+[data-theme="island"] button.play-btn:active,
+[data-theme="island"] .view-btn:active,
+[data-theme="island"] .settings-tab:active,
+[data-theme="island"] .health-tab:active,
+[data-theme="island"] .scan-health-chip:active,
+[data-theme="island"] .btn-logout:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #bdaea0;
+}
+
+[data-theme="island"] .btn-primary,
+[data-theme="island"] .view-btn.active,
+[data-theme="island"] .health-tab.active {
+  background: #f8f8f0 !important;
+  color: #794f27 !important;
+  border-color: #f8f8f0 !important;
+}
+[data-theme="island"] .btn-danger { box-shadow: 0 4px 0 #c94444; }
+[data-theme="island"] .btn-ghost { background: #fffdf2; color: #725d42; border-color: #c4b89e; }
+
+[data-theme="island"] .stat-card,
+[data-theme="island"] .settings-section,
+[data-theme="island"] .notify-channel-card,
+[data-theme="island"] .notify-runtime-panel,
+[data-theme="island"] .site-card,
+[data-theme="island"] .assistant-tools-box,
+[data-theme="island"] .task-card,
+[data-theme="island"] .sub-card,
+[data-theme="island"] .result-card,
+[data-theme="island"] .album-card,
+[data-theme="island"] .more-card,
+[data-theme="island"] .hero-card,
+[data-theme="island"] .global-player,
+[data-theme="island"] .modal-box {
+  border: 2px solid #d4c9b4;
+  border-radius: 24px;
+  background: rgb(247, 243, 223);
+  box-shadow: 0 4px 10px rgba(107, 92, 67, 0.18);
+}
+
+[data-theme="island"] .sidebar {
+  background: linear-gradient(180deg, #f8f8f0 0%, #f0e8d8 100%);
+  border-right: 2px solid #d4c9b4;
+}
+[data-theme="island"] .topbar,
+[data-theme="island"] .bottom-tabs {
+  background: #fffdf2;
+  border-color: #d4c9b4;
+}
+[data-theme="island"] .nav-link.router-link-active,
+[data-theme="island"] .bottom-tab.is-active {
+  background: #b7c6e5;
+  color: #fff;
+}
+[data-theme="island"] .nav-link:hover,
+[data-theme="island"] .bottom-tab:hover {
+  background: #d6dff0;
+  color: #725d42;
+}
+[data-theme="island"] .nav-icon,
+[data-theme="island"] .tab-icon {
+  background: #fffdf2;
+  border: 2px solid #d4c9b4;
+}
+
 /* Glass themes: consistent blur surface like MoviePilot transparent theme */
 [data-theme="dark-glass"] .sidebar,
 [data-theme="dark-glass"] .topbar,
