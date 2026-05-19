@@ -313,19 +313,32 @@ def parse_playlist_url(url: str = ""):
     if qq_match:
         pid = qq_match.group(1)
         try:
+            # First fetch: get title + total song count from dirinfo
             resp = _session.get(
                 "https://u.y.qq.com/cgi-bin/musicu.fcg",
                 params={
-                    "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(pid), "onlysonglist": 0, "song_num": 100, "song_begin": 0}}})
+                    "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(pid), "onlysonglist": 0, "song_num": 1, "song_begin": 0}}})
                 },
                 timeout=15,
             )
             data = resp.json()
             detail = data.get("detail", {}).get("data", {})
             dirinfo = detail.get("dirinfo", {})
-            title = dirinfo.get("title", "")
+            title = dirinfo.get("title", "") or ""
+            total = dirinfo.get("songnum", 100) or 100
             source = "qqmusic"
-            for s in detail.get("songlist", []):
+
+            # Fetch all songs in one request (QQ Music API supports song_num up to total)
+            resp2 = _session.get(
+                "https://u.y.qq.com/cgi-bin/musicu.fcg",
+                params={
+                    "data": _json.dumps({"detail": {"module": "music.srfDissInfo.DissInfo", "method": "CgiGetDiss", "param": {"disstid": int(pid), "onlysonglist": 0, "song_num": min(total, 2000), "song_begin": 0}}})
+                },
+                timeout=30,
+            )
+            data2 = resp2.json()
+            detail2 = data2.get("detail", {}).get("data", {})
+            for s in detail2.get("songlist", []):
                 singers = s.get("singer", [])
                 artist = "/".join(x.get("name", "") for x in singers) if singers else ""
                 songs.append({"title": s.get("name", ""), "artist": artist})
@@ -334,26 +347,51 @@ def parse_playlist_url(url: str = ""):
 
     # NetEase playlist: music.163.com/playlist?id=XXXXXXX or #/playlist?id=
     if not songs:
+        import json as _json
         ne_match = re.search(r"(?:playlist[?/].*id=|playlist/)(\d+)", url)
         if ne_match or "163.com" in url:
             pid = ne_match.group(1) if ne_match else re.search(r"(\d{6,})", url)
             if pid:
                 pid_str = pid if isinstance(pid, str) else pid.group(1)
                 try:
+                    # Use v6 endpoint to get all trackIds (old /api/playlist/detail only returns first page)
                     resp = _session.get(
-                        "https://music.163.com/api/playlist/detail",
+                        "https://music.163.com/api/v6/playlist/detail",
                         params={"id": pid_str},
                         headers={"Referer": "https://music.163.com/"},
                         timeout=15,
                     )
                     data = resp.json()
-                    result = data.get("result", {})
-                    title = result.get("name", "")
+                    playlist = data.get("playlist", {})
+                    title = playlist.get("name", "")
                     source = "netease"
-                    for t in result.get("tracks", [])[:50]:
-                        artists = t.get("artists", [])
-                        artist = "/".join(a.get("name", "") for a in artists) if artists else ""
-                        songs.append({"title": t.get("name", ""), "artist": artist})
+
+                    # Get full track list from /api/song/detail (batched 20 at a time)
+                    track_ids = [t["id"] for t in playlist.get("trackIds", [])]
+                    if not track_ids:
+                        # Fallback: use tracks embedded in v6 response (usually first 10)
+                        track_ids = [t["id"] for t in playlist.get("tracks", [])]
+
+                    BATCH = 20
+                    for i in range(0, len(track_ids), BATCH):
+                        batch_ids = track_ids[i:i+BATCH]
+                        try:
+                            song_resp = _session.post(
+                                "https://music.163.com/api/song/detail",
+                                data={"ids": _json.dumps(batch_ids)},
+                                headers={
+                                    "Referer": "https://music.163.com/",
+                                    "Content-Type": "application/x-www-form-urlencoded",
+                                },
+                                timeout=15,
+                            )
+                            song_data = song_resp.json()
+                            for t in song_data.get("songs", []):
+                                artists = t.get("artists", [])
+                                artist = "/".join(a.get("name", "") for a in artists) if artists else ""
+                                songs.append({"title": t.get("name", ""), "artist": artist})
+                        except Exception as e:
+                            logger.warning(f"NetEase song detail batch failed: {e}")
                 except Exception as e:
                     logger.warning(f"NetEase playlist parse failed: {e}")
 
