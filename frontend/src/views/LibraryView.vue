@@ -407,8 +407,9 @@ async function completeSelectedAlbum() {
       return
     }
     completeCandidates.value = candidates
-    selectedCompleteIds.value = candidates.map(c => c.candidate_id).filter(Boolean)
-    completeAlbumMessage.value = `找到 ${candidates.length} 首候选，请勾选后下载。`
+    const recommended = candidates.filter(c => c.recommended !== false).map(c => c.candidate_id).filter(Boolean)
+    selectedCompleteIds.value = recommended.length ? recommended : candidates.map(c => c.candidate_id).filter(Boolean)
+    completeAlbumMessage.value = `找到 ${candidates.length} 首候选，已默认勾选 ${selectedCompleteIds.value.length} 首高置信候选，请确认后下载。`
   } catch (e) {
     completeAlbumMessage.value = e.message || '补齐失败'
   } finally {
@@ -691,6 +692,7 @@ onMounted(() => { loadStats(); loadAlbums(0) })
             <span class="candidate-main">
               <strong>{{ c.title }}</strong>
               <small>{{ c.artist }} · {{ c.album }} · {{ c.source || '-' }} · {{ c.format || '-' }} {{ c.bitrate ? `· ${c.bitrate}kbps` : '' }}</small>
+              <small class="candidate-confidence">置信度 {{ c.confidence ?? '-' }} · {{ c.confidence_label || '-' }}<template v-if="c.confidence_reasons?.length"> · {{ c.confidence_reasons.join(' / ') }}</template></small>
             </span>
           </label>
           <div class="complete-candidate-actions">
@@ -946,6 +948,7 @@ button.scan-health-chip { cursor: pointer; }
 .candidate-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .candidate-main strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .candidate-main small { color: var(--text-dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.candidate-main .candidate-confidence { color: var(--accent); }
 .complete-candidate-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .track-list { display: flex; flex-direction: column; gap: 4px; max-height: 350px; overflow-y: auto; }
 .track-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }

@@ -1080,6 +1080,47 @@ def _quality_score(song: dict) -> tuple[int, int, int]:
     return (lossless, bitrate, size)
 
 
+def _completion_confidence(song: dict, artist: str, album: str) -> dict:
+    """Human-readable confidence for album completion candidates.
+
+    Filtering is already deliberately strict before this point. The score is used
+    for UI defaults/explanation rather than for allowing risky candidates.
+    """
+    reasons: list[str] = []
+    score = 45
+    if _norm_text(song.get("album")) == _norm_text(album):
+        score += 25
+        reasons.append("专辑名精确匹配")
+    song_artist = song.get("artist") or ""
+    if not song_artist:
+        score += 5
+        reasons.append("来源未给艺人，沿用专辑艺人")
+    elif _norm_text(artist) in _norm_text(song_artist) or _norm_text(song_artist) in _norm_text(artist):
+        score += 15
+        reasons.append("艺人匹配")
+    fmt = (song.get("format") or "").lower()
+    if fmt in {"flac", "wav", "ape"}:
+        score += 10
+        reasons.append("无损资源")
+    elif int(song.get("bitrate") or 0) >= 320:
+        score += 5
+        reasons.append("高码率")
+    source = song.get("source") or ""
+    if source in {"qq", "migu", "kugou", "netease", "kuwo"}:
+        score += 3
+        reasons.append(f"来源：{source}")
+    score = max(0, min(100, score))
+    if score >= 90:
+        label = "很高"
+    elif score >= 75:
+        label = "高"
+    elif score >= 60:
+        label = "中"
+    else:
+        label = "低"
+    return {"confidence": score, "confidence_label": label, "confidence_reasons": reasons, "recommended": score >= 75}
+
+
 @router.post("/album-complete")
 def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_db)):
     """Find and optionally download missing local album tracks from online sources.
@@ -1147,6 +1188,7 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
     items = sorted(candidates.values(), key=_quality_score, reverse=True)
     for idx, song in enumerate(items):
         song["candidate_id"] = f"{idx}:{_norm_title(song.get('title'))}:{song.get('source') or ''}:{song.get('song_id') or song.get('id') or ''}"
+        song.update(_completion_confidence(song, artist, album))
     if dry_run:
         return {"ok": True, "dry_run": True, "existing": len(existing), "candidates": items, "downloaded": []}
 
