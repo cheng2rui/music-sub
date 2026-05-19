@@ -241,6 +241,8 @@ export const updateSettings = (data) => authFetch('/api/settings/', {
 export const testQb = () => authFetch('/api/settings/test_qb', { method: 'POST' }).then(r => r.json())
 export const testTelegram = () => authFetch('/api/settings/test_telegram', { method: 'POST' }).then(r => r.json())
 export const testNotifyChannel = (channel) => authFetch(`/api/notify/test/${channel}`, { method: 'POST' }).then(r => r.json())
+export const getNotifyStatus = () => authFetch('/api/notify/status').then(r => r.json())
+export const getNotifyEvents = (limit = 30) => authFetch(`/api/notify/events?limit=${limit}`).then(r => r.json())
 export const getQqbotGatewayStatus = () => authFetch('/api/notify/qqbot/gateway/status').then(r => r.json())
 export const restartQqbotGateway = () => authFetch('/api/notify/qqbot/gateway/restart', { method: 'POST' }).then(r => r.json())
 export const getWechatClawStatus = (refresh = false, autoQrcode = false) => authFetch(`/api/notify/wechatclaw/status?refresh=${refresh ? 'true' : 'false'}&auto_qrcode=${autoQrcode ? 'true' : 'false'}`).then(r => r.json())

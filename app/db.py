@@ -46,6 +46,17 @@ def _backfill_album_artist():
         """))
 
 
+def _trim_notify_events(max_rows: int = 1000):
+    """Keep notification observability lightweight on SQLite installs."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            DELETE FROM notify_events
+            WHERE id NOT IN (
+                SELECT id FROM notify_events ORDER BY id DESC LIMIT :max_rows
+            )
+        """), {"max_rows": max_rows})
+
+
 def _run_lightweight_migrations():
     """Apply additive SQLite migrations for deployments without Alembic."""
     if engine.dialect.name != "sqlite":
@@ -62,6 +73,7 @@ def _run_lightweight_migrations():
         _ensure_column("music_files", column, ddl)
     _dedupe_music_files()
     _backfill_album_artist()
+    _trim_notify_events()
 
 
 def init_db():

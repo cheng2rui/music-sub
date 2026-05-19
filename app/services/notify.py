@@ -6,6 +6,7 @@ inbound path that can forward user messages to the built-in assistant.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -15,7 +16,8 @@ import requests
 from sqlalchemy.orm import Session
 
 import app.config as cfg_module
-from app.models import AssistantAction, AssistantConversation
+from app.db import SessionLocal
+from app.models import AssistantAction, AssistantConversation, NotifyEvent
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,57 @@ class SendResult:
 
 _wecom_token_cache: dict[str, Any] = {"key": "", "token": "", "expires_at": 0.0}
 _qq_token_cache: dict[str, Any] = {"app_id": "", "token": "", "expires_at": 0.0}
+
+
+def _preview(text: str, limit: int = 500) -> str:
+    text = _plain_text(text or "").strip()
+    return text[:limit]
+
+
+def log_notify_event(
+    *,
+    channel: str,
+    direction: str,
+    text: str = "",
+    user_id: str = "",
+    target: str = "",
+    status: str = "ok",
+    message: str = "",
+    event: str | None = None,
+    raw: Any = None,
+    db: Session | None = None,
+) -> None:
+    """Best-effort notification event log for status panels and debugging."""
+    owns_db = db is None
+    session = db or SessionLocal()
+    try:
+        raw_json = None
+        if raw is not None:
+            try:
+                raw_json = json.dumps(raw, ensure_ascii=False, default=str)[:4000]
+            except Exception:
+                raw_json = str(raw)[:4000]
+        session.add(NotifyEvent(
+            channel=(channel or "unknown")[:50],
+            direction=(direction or "system")[:20],
+            event=(event or "")[:100] or None,
+            user_id=(user_id or "")[:255] or None,
+            target=(target or "")[:255] or None,
+            status=(status or "ok")[:50],
+            message=(message or "")[:500] or None,
+            text_preview=_preview(text),
+            raw_json=raw_json,
+        ))
+        session.commit()
+    except Exception as exc:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        logger.debug("log notify event failed: %s", exc)
+    finally:
+        if owns_db:
+            session.close()
 
 
 def _plain_text(text: str) -> str:
@@ -197,14 +250,17 @@ def _send_wechatbot(text: str, target: str | None = None) -> SendResult:
 def send_channel(channel: str, text: str, *, target: str | None = None, group: bool | None = None, msg_id: str | None = None) -> SendResult:
     channel = (channel or "").lower()
     if channel == "telegram":
-        return _send_telegram(text)
-    if channel in {"wecom", "wechat", "wework"}:
-        return _send_wecom(text, userid=target)
-    if channel == "qqbot":
-        return _send_qqbot(text, target=target, group=group, msg_id=msg_id)
-    if channel in {"wechatbot", "weichatbot"}:
-        return _send_wechatbot(text, target=target)
-    return SendResult(channel, False, "unknown channel")
+        result = _send_telegram(text)
+    elif channel in {"wecom", "wechat", "wework"}:
+        result = _send_wecom(text, userid=target)
+    elif channel == "qqbot":
+        result = _send_qqbot(text, target=target, group=group, msg_id=msg_id)
+    elif channel in {"wechatbot", "weichatbot"}:
+        result = _send_wechatbot(text, target=target)
+    else:
+        result = SendResult(channel, False, "unknown channel")
+    log_notify_event(channel=channel or result.channel, direction="outbound", text=text, target=target or "", status="ok" if result.ok else "error", message=result.message, raw=result.response)
+    return result
 
 
 def send_all(event: str, text: str) -> list[SendResult]:
@@ -264,6 +320,7 @@ def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: 
     from app.services.assistant.service import AssistantService
 
     text = (text or "").strip()
+    log_notify_event(channel=channel, direction="inbound", text=text, user_id=user_id, target=target, status="ok" if text else "ignored", message="inbound message", raw={"group": group, "msg_id": msg_id}, db=db)
     if not text:
         return {"ok": False, "message": "empty text"}
     ch_cfg = getattr(cfg_module.config.notify, "wechatbot" if channel in {"wechatbot", "weichatbot"} else channel, None)

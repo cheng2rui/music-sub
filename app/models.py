@@ -72,6 +72,22 @@ class AssistantAction(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
+class NotifyEvent(Base):
+    __tablename__ = "notify_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    channel = Column(String(50), nullable=False, index=True)
+    direction = Column(String(20), nullable=False)  # inbound / outbound / system
+    event = Column(String(100), nullable=True)
+    user_id = Column(String(255), nullable=True)
+    target = Column(String(255), nullable=True)
+    status = Column(String(50), default="ok")
+    message = Column(String(500), nullable=True)
+    text_preview = Column(Text, nullable=True)
+    raw_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+
 class MusicFile(Base):
     __tablename__ = "music_files"
 

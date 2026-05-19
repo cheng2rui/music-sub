@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 import app.config as cfg_module
 from app.db import get_db
+from app.models import NotifyEvent
 from app.services.notify import send_channel, handle_incoming_assistant
 
 router = APIRouter()
@@ -53,6 +54,73 @@ def send(req: SendRequest):
 def test_channel(channel: str):
     result = send_channel(channel, "🎵 Music Sub 通知渠道测试成功")
     return result.__dict__
+
+
+@router.get("/events")
+def notify_events(limit: int = Query(default=50, ge=1, le=200), channel: str = Query(default=""), db: Session = Depends(get_db)):
+    q = db.query(NotifyEvent)
+    if channel:
+        q = q.filter(NotifyEvent.channel == channel.lower())
+    rows = q.order_by(NotifyEvent.id.desc()).limit(limit).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "channel": r.channel,
+                "direction": r.direction,
+                "event": r.event,
+                "user_id": r.user_id,
+                "target": r.target,
+                "status": r.status,
+                "message": r.message,
+                "text_preview": r.text_preview,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/status")
+def notify_status(db: Session = Depends(get_db)):
+    cfg = cfg_module.config.notify
+    latest = db.query(NotifyEvent).order_by(NotifyEvent.id.desc()).limit(50).all()
+    by_channel: dict[str, dict[str, Any]] = {}
+    for name in ("telegram", "wecom", "qqbot", "wechatbot"):
+        ch_cfg = getattr(cfg, name)
+        by_channel[name] = {
+            "enabled": bool(getattr(ch_cfg, "enabled", False)),
+            "assistant_chat": bool(getattr(ch_cfg, "assistant_chat", True)),
+            "last_inbound": None,
+            "last_outbound": None,
+            "last_error": None,
+        }
+    for row in latest:
+        bucket = by_channel.setdefault(row.channel, {"enabled": False, "assistant_chat": True, "last_inbound": None, "last_outbound": None, "last_error": None})
+        brief = {
+            "id": row.id,
+            "status": row.status,
+            "message": row.message,
+            "text_preview": row.text_preview,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        if row.status == "error" and not bucket.get("last_error"):
+            bucket["last_error"] = brief
+        if row.direction == "inbound" and not bucket.get("last_inbound"):
+            bucket["last_inbound"] = brief
+        if row.direction == "outbound" and not bucket.get("last_outbound"):
+            bucket["last_outbound"] = brief
+    try:
+        from app.services.qqbot_gateway import qqbot_gateway_status
+        by_channel["qqbot"]["gateway"] = qqbot_gateway_status()
+    except Exception as exc:
+        by_channel["qqbot"]["gateway"] = {"error": str(exc)}
+    try:
+        from app.services.wechatclaw import get_status
+        by_channel["wechatbot"]["claw"] = get_status()
+    except Exception as exc:
+        by_channel["wechatbot"]["claw"] = {"error": str(exc)}
+    return {"channels": by_channel}
 
 
 @router.get("/wechatclaw/status")

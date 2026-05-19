@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getNotifyStatus, getNotifyEvents, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
@@ -40,6 +40,9 @@ const saving = ref(false)
 const testingQb = ref(false)
 const testingTg = ref(false)
 const testingNotify = ref('')
+const notifyStatus = ref(null)
+const notifyRuntimeEvents = ref([])
+const refreshingNotifyRuntime = ref(false)
 const restartingQqGateway = ref(false)
 const qqGatewayStatus = ref(null)
 const wechatClawStatus = ref(null)
@@ -82,6 +85,7 @@ async function loadAll() {
     assistantProviders.value = providerData.providers || []
     const toolData = await getAssistantTools()
     assistantTools.value = toolData.tools || []
+    await loadNotifyRuntime()
     await loadQqGatewayStatus()
     await loadWechatClawStatus(false, false)
   } catch (e) { console.error(e) }
@@ -130,9 +134,20 @@ async function handleTestNotify(channel) {
   testingNotify.value = channel
   try {
     const res = await testNotifyChannel(channel)
+    await loadNotifyRuntime()
     alert(res.ok ? `${channel} 消息发送成功` : `发送失败: ${res.message || res.error || ''}`)
   } catch (e) { alert('发送失败: ' + e.message) }
   finally { testingNotify.value = '' }
+}
+
+async function loadNotifyRuntime() {
+  refreshingNotifyRuntime.value = true
+  try {
+    notifyStatus.value = await getNotifyStatus()
+    const events = await getNotifyEvents(30)
+    notifyRuntimeEvents.value = events.items || []
+  } catch (e) { console.warn('load notify runtime failed', e) }
+  finally { refreshingNotifyRuntime.value = false }
 }
 
 async function loadQqGatewayStatus() {
@@ -187,6 +202,26 @@ const notifyEvents = [
   ['on_cleanup_candidates', '清理候选提醒'],
   ['assistant_chat', '允许和智能助手对话']
 ]
+const notifyChannelLabels = { telegram: 'Telegram', wecom: '企业微信', qqbot: 'QQBot', wechatbot: '微信 Claw' }
+
+function notifyChannelColor(name, ch) {
+  if (ch?.last_error) return 'red'
+  if (name === 'qqbot' && ch?.gateway?.running) return 'green'
+  if (name === 'wechatbot' && ch?.claw?.connected) return 'green'
+  if (ch?.enabled) return 'orange'
+  return 'dim'
+}
+
+function notifyChannelLabel(name, ch) {
+  if (name === 'qqbot' && ch?.gateway?.running) return 'Gateway 运行中'
+  if (name === 'wechatbot' && ch?.claw?.connected) return 'Claw 已登录'
+  if (ch?.enabled) return '已启用'
+  return '未启用'
+}
+
+function formatTime(ts) {
+  return ts ? new Date(ts).toLocaleString() : '-'
+}
 
 async function handleRunScheduler(id) {
   try { await runScheduler(id) } catch (e) { console.error(e) }
@@ -465,6 +500,35 @@ onMounted(loadAll)
           <small class="text-dim">入站地址：/api/notify/webhook/wecom、/api/notify/webhook/qqbot、/api/notify/webhook/wechatbot。未配置 token 时拒绝入站。</small>
         </div>
 
+        <div class="notify-runtime-panel">
+          <div class="notify-runtime-head">
+            <div>
+              <strong>运行状态</strong>
+              <div class="text-dim">最近入站 / 出站 / 错误，方便调试 Gateway、企业微信回调和微信 Claw。</div>
+            </div>
+            <AppButton variant="ghost" size="sm" :loading="refreshingNotifyRuntime" @click="loadNotifyRuntime">刷新</AppButton>
+          </div>
+          <div class="notify-status-grid">
+            <div v-for="(ch, name) in notifyStatus?.channels || {}" :key="name" class="notify-status-card">
+              <div class="notify-status-title">
+                <span>{{ notifyChannelLabels[name] || name }}</span>
+                <AppBadge :color="notifyChannelColor(name, ch)">{{ notifyChannelLabel(name, ch) }}</AppBadge>
+              </div>
+              <small>入站：{{ ch.last_inbound?.text_preview || '-' }}</small>
+              <small>出站：{{ ch.last_outbound?.status || '-' }} · {{ ch.last_outbound?.message || ch.last_outbound?.text_preview || '-' }}</small>
+              <small v-if="ch.last_error" class="notify-error">错误：{{ ch.last_error.message || ch.last_error.text_preview }}</small>
+            </div>
+          </div>
+          <div class="notify-event-list">
+            <div v-for="ev in notifyRuntimeEvents" :key="ev.id" class="notify-event-row" :class="ev.status">
+              <span class="notify-event-meta">{{ formatTime(ev.created_at) }} · {{ ev.channel }} · {{ ev.direction }}</span>
+              <span class="notify-event-text">{{ ev.text_preview || ev.message || '-' }}</span>
+              <AppBadge :color="ev.status === 'error' ? 'red' : (ev.status === 'ignored' ? 'orange' : 'green')">{{ ev.status }}</AppBadge>
+            </div>
+            <div v-if="!notifyRuntimeEvents.length" class="text-dim">暂无通知事件。</div>
+          </div>
+        </div>
+
         <div class="notify-channel-card">
           <div class="notify-channel-head">
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.enabled" /><span>Telegram</span></label>
@@ -671,6 +735,18 @@ onMounted(loadAll)
 .toggle-list { display: flex; flex-direction: column; gap: 8px; }
 .toggle-list.compact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .toggle-item { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 14px; line-height: 1.35; }
+.notify-runtime-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.notify-runtime-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.notify-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.notify-status-card { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.notify-status-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 700; }
+.notify-status-card small { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notify-error { color: var(--danger, #ef4444) !important; }
+.notify-event-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto; }
+.notify-event-row { display: grid; grid-template-columns: 220px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); }
+.notify-event-row.error { border-color: color-mix(in srgb, #ef4444 35%, var(--border)); }
+.notify-event-meta { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.notify-event-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .notify-channel-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 14px; margin-top: 12px; }
 .notify-channel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .gateway-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
@@ -723,7 +799,7 @@ onMounted(loadAll)
   .settings-tab { min-height: 34px; padding: 7px 11px; font-size: 13px; }
   .settings-section { padding: 14px; border-radius: 16px; gap: 12px; }
   .settings-section h3 { font-size: 15px; }
-  .site-grid, .fields-grid, .assistant-tool-grid { grid-template-columns: 1fr; gap: 10px; }
+  .site-grid, .fields-grid, .assistant-tool-grid, .notify-status-grid { grid-template-columns: 1fr; gap: 10px; }
   .site-card { padding: 12px; gap: 10px; }
   .site-header { align-items: center; flex-direction: row; }
   .site-name { min-width: 0; font-size: 13px; line-height: 1.25; }
@@ -747,6 +823,10 @@ onMounted(loadAll)
   .pwd-form { flex-direction: column; align-items: stretch; }
   .pwd-form input { min-width: unset; width: 100%; }
   .scheduler-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .notify-runtime-head { flex-direction: column; align-items: stretch; }
+  .notify-event-row { grid-template-columns: 1fr auto; gap: 6px; }
+  .notify-event-meta { grid-column: 1 / -1; white-space: normal; }
+  .notify-event-text { white-space: normal; }
   .save-bar {
     position: static;
     margin: 0;
