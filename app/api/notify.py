@@ -74,6 +74,12 @@ def wechatclaw_restart():
     return get_status()
 
 
+@router.get("/wechatclaw/config")
+def wechatclaw_config():
+    from app.services.wechatclaw import get_config
+    return get_config()
+
+
 @router.post("/wechatclaw/logout")
 def wechatclaw_logout():
     from app.services.wechatclaw import logout

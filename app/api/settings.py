@@ -283,12 +283,13 @@ def save_settings(settings: AllSettings):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
 
-    # Reload config and apply runtime scheduler changes immediately.
+    warnings = _path_warnings(settings.paths)
+
+    # Reload config and apply runtime scheduler/runtime changes immediately.
     new_config = load_config(CONFIG_PATH)
     cfg_module.config = new_config
     from app.scheduler import apply_scheduler_config
     apply_scheduler_config()
-    # Apply notification runtime changes without requiring a container restart.
     try:
         from app.services.qqbot_gateway import restart_qqbot_gateway
         from app.services.wechatclaw import restart_wechatclaw_polling
@@ -296,8 +297,6 @@ def save_settings(settings: AllSettings):
         restart_wechatclaw_polling()
     except Exception as exc:
         warnings.append(f"通知运行时重启失败：{str(exc)[:120]}")
-
-    warnings = _path_warnings(settings.paths)
     message = "Settings saved and reloaded"
     if warnings:
         message += "；" + "；".join(warnings)

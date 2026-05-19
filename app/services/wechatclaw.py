@@ -206,6 +206,18 @@ def refresh_qrcode_status() -> dict[str, Any]:
     return get_status()
 
 
+def get_config() -> dict[str, Any]:
+    state = load_state()
+    if not state.get("bot_token"):
+        return {"success": False, "message": "not logged in"}
+    try:
+        resp = requests.get(f"{_base_url()}/ilink/bot/getconfig", headers=_headers(True), timeout=20)
+        payload = _json(resp)
+        return {"success": 200 <= resp.status_code < 300 and _ok(payload), "status_code": resp.status_code, "data": payload}
+    except Exception as exc:
+        return {"success": False, "message": str(exc)}
+
+
 def get_status(refresh: bool = False, auto_qrcode: bool = False) -> dict[str, Any]:
     state = load_state()
     qrcode = state.get("qrcode") or {}
@@ -280,7 +292,7 @@ def _parse_message(item: dict[str, Any]) -> dict[str, str] | None:
             break
     user = (
         _find_first(sender, ["user_id", "id", "wxid", "uid", "from_user_id", "sender_id"]) if sender else None
-    ) or _find_first(msg, ["user_id", "from_user_id", "sender_id", "from_user", "wxid", "uid"]) or _find_first(item, ["user_id", "from_user_id", "sender_id", "from_user", "wxid", "uid"])
+    ) or _find_first(msg, ["user_id", "from_user_id", "sender_id", "from", "from_user", "wxid", "uid"]) or _find_first(item, ["user_id", "from_user_id", "sender_id", "from", "from_user", "wxid", "uid"])
     text = _find_first(msg, ["content", "text", "message", "msg", "body", "msg_content", "msgContent"])
     if isinstance(text, dict):
         text = _find_first(text, ["content", "text", "value", "message"])
@@ -299,8 +311,13 @@ def _poll_once() -> tuple[list[dict[str, str]], str | None, dict[str, Any]]:
     state = load_state()
     if not state.get("bot_token"):
         return [], state.get("sync_buf"), {"success": False, "message": "not logged in"}
-    resp = requests.post(f"{_base_url()}/ilink/bot/getupdates", json=_with_base({"get_updates_buf": state.get("sync_buf") or ""}), headers=_headers(True), timeout=max(int(_cfg().claw_poll_timeout or 25), 10) + 10)
+    body = _with_base({"get_updates_buf": state.get("sync_buf") or ""})
+    timeout = max(int(_cfg().claw_poll_timeout or 25), 10) + 10
+    resp = requests.post(f"{_base_url()}/ilink/bot/getupdates", json=body, headers=_headers(True), timeout=timeout)
     payload = _json(resp)
+    if resp.status_code == 404 or not payload:
+        resp = requests.post(f"{_base_url()}/ilink/bot/get_updates", json=body, headers=_headers(True), timeout=timeout)
+        payload = _json(resp)
     if not payload:
         return [], state.get("sync_buf"), {"success": False, "message": "empty response"}
     items = _find_first_list(payload, ["msgs", "messages", "updates", "items", "list"]) or []
