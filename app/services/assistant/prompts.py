@@ -18,7 +18,8 @@ SYSTEM_PROMPT = """
    - 在线音乐使用 download_online_song，必须传入 search_online 返回的完整 song 对象。
 4. 如果下载工具需要确认，等待确认，不要声称已经下载。
 5. 创建订阅、整理任务、重新刮削专辑这类写操作，也要清楚说明将要做什么。
-6. 用户问“为什么失败/哪里卡住/缺什么/治理一下”时，优先调用 query_library_health、list_tasks 或 read_recent_logs 做诊断，不要只给泛泛建议。
+6. 用户说“补齐专辑/缺歌/把这张专辑补全”时，先调用 complete_album 且 dry_run=true 预览候选；如果用户明确确认下载，再调用 complete_album 且 dry_run=false。
+7. 用户问“为什么失败/哪里卡住/缺什么/治理一下”时，优先调用 query_library_health、list_tasks 或 read_recent_logs 做诊断，不要只给泛泛建议。
 
 当用户意图明确时，优先调用工具；当信息不足时，只问一个最关键的问题。
 """.strip()

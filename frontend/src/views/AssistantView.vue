@@ -233,7 +233,13 @@ function itemActions(message, item) {
   }
   if (message.tool_name === 'search_library') {
     return [
+      { key: 'complete-album-preview', label: '预览补齐', variant: 'ghost' },
       { key: 'rescrape-album', label: '重刮专辑', variant: 'ghost' }
+    ]
+  }
+  if (message.tool_name === 'complete_album') {
+    return [
+      { key: 'complete-album-download', label: '下载补齐', variant: 'primary' }
     ]
   }
   if (message.tool_name === 'query_library_health') {
@@ -254,7 +260,9 @@ function sendItemAction(message, item, idx, action) {
     'subscribe-song': `创建歌曲订阅：${[title, artist].filter(Boolean).join(' ')}，质量优先 FLAC。`,
     'subscribe-keyword': `创建关键词订阅：${title}，质量优先 FLAC。`,
     'search-pt': `搜索 PT 资源：${[title, artist].filter(Boolean).join(' ')}，质量优先 FLAC。`,
-    'rescrape-album': `重新刮削专辑：${item.artist || item.album_artist || item.suggested_album_artist || ''} - ${item.album || ''}`
+    'rescrape-album': `重新刮削专辑：${item.artist || item.album_artist || item.suggested_album_artist || ''} - ${item.album || ''}`,
+    'complete-album-preview': `预览补齐专辑：${item.artist || item.album_artist || item.suggested_album_artist || ''} - ${item.album || ''}`,
+    'complete-album-download': `确认下载并补齐专辑：${item.artist || item.album_artist || item.suggested_album_artist || ''} - ${item.album || ''}`
   }
   sendMessage(prompts[action.key] || `${action.label}：${payload}`)
 }

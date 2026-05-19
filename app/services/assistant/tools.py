@@ -279,6 +279,24 @@ def rescrape_album(db: Session, artist: str, album: str, **kwargs) -> dict:
     return rescrape_albums({"albums": [{"artist": artist, "album": album}], "async": True}, db=db)
 
 
+def complete_album(db: Session, artist: str, album: str, dry_run: bool = True, limit: int = 40, sources: list[str] | None = None, **kwargs) -> dict:
+    """Preview or download missing tracks for a local album."""
+    artist = (artist or "").strip()
+    album = (album or "").strip()
+    if not artist or not album:
+        raise ToolError("缺少 artist 或 album")
+    from app.api.library import complete_album as complete_album_api
+    payload = {
+        "artist": artist,
+        "album": album,
+        "dry_run": bool(dry_run),
+        "limit": max(5, min(int(limit or 40), 80)),
+    }
+    if sources:
+        payload["sources"] = sources
+    return complete_album_api(payload, db=db)
+
+
 def query_library_health(db: Session, kind: str = "", limit: int = 20, **kwargs) -> dict:
     """Query library hygiene issues for assistant diagnosis."""
     from app.api.library import library_health
@@ -321,6 +339,7 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
     "download_online_song": {"risk": "high", "function": download_online_song, "description": "下载一个在线音乐搜索结果并可选整理入库。必须使用 search_online 返回的完整 song 对象。", "parameters": {"type": "object", "properties": {"song": {"type": "object"}, "organize": {"type": "boolean"}}, "required": ["song"]}},
     "organize_task": {"risk": "medium", "function": organize_task, "description": "对已下载完成的任务执行整理和刮削入库。", "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
     "rescrape_album": {"risk": "medium", "function": rescrape_album, "description": "重新刮削指定专辑的元数据。", "parameters": {"type": "object", "properties": {"artist": {"type": "string"}, "album": {"type": "string"}}, "required": ["artist", "album"]}},
+    "complete_album": {"risk": "high", "function": complete_album, "description": "补齐本地专辑缺失曲目。dry_run=true 只预览候选；dry_run=false 会下载在线音源并整理入库，优先无损候选。", "parameters": {"type": "object", "properties": {"artist": {"type": "string"}, "album": {"type": "string"}, "dry_run": {"type": "boolean"}, "limit": {"type": "integer"}, "sources": {"type": "array", "items": {"type": "string"}}}, "required": ["artist", "album"]}},
     "query_library_health": {"risk": "low", "function": query_library_health, "description": "查询音乐库治理问题，例如缺封面、缺歌词、未刮削、CUE 候选、专辑艺人冲突。", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts"]}, "limit": {"type": "integer"}}}},
     "read_recent_logs": {"risk": "low", "function": read_recent_logs, "description": "读取最近应用日志，用于诊断下载、刮削、助手、站点连接等错误。", "parameters": {"type": "object", "properties": {"lines": {"type": "integer"}, "level": {"type": "string", "enum": ["", "INFO", "WARNING", "ERROR", "DEBUG"]}}}},
 }
@@ -371,6 +390,7 @@ def tool_catalog(enabled_names: set[str] | list[str] | None = None) -> list[dict
         "download_online_song": "下载动作",
         "organize_task": "音乐库动作",
         "rescrape_album": "音乐库动作",
+        "complete_album": "音乐库动作",
         "query_library_health": "音乐库",
         "read_recent_logs": "诊断",
     }

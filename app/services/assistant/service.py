@@ -62,6 +62,16 @@ def _compact_tool_result(tool_name: str, result: Any) -> Any:
         return {"kind": result.get("kind"), "total": result.get("total"), "items": (result.get("items") or [])[:12]}
     if tool_name == "read_recent_logs":
         return {"level": result.get("level") or "", "total": result.get("total") or 0, "lines": (result.get("lines") or [])[-80:]}
+    if tool_name == "complete_album":
+        return {
+            "ok": result.get("ok"),
+            "dry_run": result.get("dry_run"),
+            "existing": result.get("existing"),
+            "candidate_count": len(result.get("candidates") or []),
+            "candidates": (result.get("candidates") or [])[:10],
+            "downloaded": result.get("downloaded") or [],
+            "errors": (result.get("errors") or [])[:10],
+        }
     return result
 
 
@@ -292,7 +302,7 @@ class AssistantService:
             text = f"当前设置不允许执行：{name}。{reason}"
             self._save_message(conversation_id, "assistant", text, status="failed")
             return self._chat_response(conversation_id, text, ok=False, error_code="tool_not_allowed")
-        if self._requires_confirm(name, risk):
+        if self._requires_confirm(name, risk, args):
             action_id = self._create_action(conversation_id, name, args, risk)
             summary = self._action_summary(name, args, risk)
             preview = self._action_preview(name, args, risk, summary)
@@ -334,18 +344,22 @@ class AssistantService:
         enabled_tools = self._enabled_tool_names()
         if enabled_tools and name not in enabled_tools:
             return False, f"工具 {name} 已在设置中禁用。"
-        if name == "download_online_song" and not cfg.allow_online_download:
+        if name in {"download_online_song", "complete_album"} and not cfg.allow_online_download:
             return False, "请先在设置中打开“允许在线音乐下载工具”。"
-        if name in {"rescrape_album", "organize_task"} and not cfg.allow_library_write:
+        if name in {"rescrape_album", "organize_task", "complete_album"} and not cfg.allow_library_write:
             return False, "请先在设置中打开“允许音乐库写入工具”。"
         if name in {"delete_task", "delete_qb_task"} and not cfg.allow_task_delete:
             return False, "请先在设置中打开“允许任务删除工具”。"
         return True, ""
 
-    def _requires_confirm(self, name: str, risk: str) -> bool:
+    def _requires_confirm(self, name: str, risk: str, args: dict[str, Any] | None = None) -> bool:
         cfg = cfg_module.config.assistant
+        args = args or {}
         if name in {"download_torrent", "download_online_song"}:
             return cfg.require_confirm_for_download
+        if name == "complete_album":
+            # Preview is read-only; actual downloading must follow download confirmation.
+            return bool(args.get("dry_run") is False) and cfg.require_confirm_for_download
         if name in {"delete_task", "delete_qb_task"}:
             return cfg.require_confirm_for_delete
         if risk == "high":
@@ -366,6 +380,9 @@ class AssistantService:
             return f"整理任务 #{args.get('task_id')} 并入库"
         if name == "rescrape_album":
             return f"重新刮削专辑：{args.get('artist')} - {args.get('album')}"
+        if name == "complete_album":
+            mode = "下载补齐" if args.get("dry_run") is False else "预览补齐"
+            return f"{mode}专辑：{args.get('artist')} - {args.get('album')}"
         if name == "query_library_health":
             return f"查询音乐库治理问题：{args.get('kind') or '全部'}"
         if name == "read_recent_logs":
@@ -410,6 +427,14 @@ class AssistantService:
                 {"label": "专辑", "value": str(args.get("album") or "-")},
             ]
             effect = "确认后会启动专辑重新刮削后台任务。"
+        elif name == "complete_album":
+            details = [
+                {"label": "艺人", "value": str(args.get("artist") or "-")},
+                {"label": "专辑", "value": str(args.get("album") or "-")},
+                {"label": "模式", "value": "下载并入库" if args.get("dry_run") is False else "只预览候选"},
+                {"label": "上限", "value": str(args.get("limit") or 40)},
+            ]
+            effect = "dry_run=true 只搜索候选；dry_run=false 会在线下载缺失曲目并自动整理入库。"
         elif name in {"pause_task", "resume_task"}:
             details = [{"label": "任务 ID", "value": str(args.get("task_id") or "-")}]
             effect = "确认后会修改 qBittorrent 下载状态。"
@@ -485,6 +510,10 @@ class AssistantService:
             if result.get("job_id"):
                 return f"已提交重新刮削后台任务：{result.get('job_id')}，共 {result.get('total', 1)} 张专辑。"
             return "已执行专辑重新刮削。"
+        if name == "complete_album":
+            if result.get("dry_run"):
+                return f"已预览专辑补齐：本地已有 {result.get('existing', 0)} 首，找到 {len(result.get('candidates') or [])} 首疑似缺失候选。"
+            return f"已执行专辑补齐：下载 {len(result.get('downloaded') or [])} 首，失败 {len(result.get('errors') or [])} 首。"
         if name == "pause_task":
             return f"已暂停任务：#{result.get('task_id')}。"
         if name == "resume_task":
