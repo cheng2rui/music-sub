@@ -14,6 +14,30 @@ _session.headers.update({
 })
 
 
+def _song_actions(source: str = "") -> list[str]:
+    return ["download", "search_pt", "subscribe_song", "subscribe_artist"]
+
+
+def _qq_song_id(song: dict) -> str:
+    return str(song.get("mid") or song.get("songmid") or song.get("songMid") or "")
+
+
+def _song_item(*, source: str, title: str, artist: str = "", album: str = "", cover: str = "", song_id: str = "", rank: int | None = None, reason: str = "") -> dict:
+    item = {
+        "source": source,
+        "song_id": str(song_id or ""),
+        "title": title or "",
+        "artist": artist or "",
+        "album": album or "",
+        "cover": cover or "",
+        "reason": reason or "",
+        "actions": _song_actions(source),
+    }
+    if rank is not None:
+        item["rank"] = rank
+    return item
+
+
 @router.get("/recommend")
 def get_recommendations():
     """Get personalized/hot song recommendations."""
@@ -39,12 +63,15 @@ def get_recommendations():
             artist = "/".join(x.get("name", "") for x in singers) if singers else ""
             album = s.get("album", {})
             mid = album.get("mid", "")
-            results.append({
-                "title": s.get("name", ""),
-                "artist": artist,
-                "album": album.get("name", ""),
-                "cover": f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg" if mid else "",
-            })
+            results.append(_song_item(
+                source="qq",
+                song_id=_qq_song_id(s),
+                title=s.get("name", ""),
+                artist=artist,
+                album=album.get("name", ""),
+                cover=f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg" if mid else "",
+                reason="QQ音乐新歌推荐",
+            ))
         return {"source": "qqmusic", "items": results}
     except Exception as e:
         logger.warning(f"QQ Music recommend failed: {e}")
@@ -64,12 +91,15 @@ def get_recommendations():
             artists = s.get("artists", [])
             artist = "/".join(a.get("name", "") for a in artists) if artists else ""
             album = s.get("album", {})
-            results.append({
-                "title": s.get("name", ""),
-                "artist": artist,
-                "album": album.get("name", ""),
-                "cover": album.get("picUrl", ""),
-            })
+            results.append(_song_item(
+                source="netease",
+                song_id=s.get("id", ""),
+                title=s.get("name", ""),
+                artist=artist,
+                album=album.get("name", ""),
+                cover=album.get("picUrl", ""),
+                reason="网易云新歌推荐",
+            ))
         return {"source": "netease", "items": results}
     except Exception as e:
         logger.warning(f"NetEase recommend failed: {e}")
@@ -148,12 +178,15 @@ def get_playlist_detail(playlist_id: str, limit: int = Query(30, ge=1, le=200)):
             artist = "/".join(x.get("name", "") for x in singers) if singers else ""
             album = s.get("album", {})
             mid = album.get("mid", "") if isinstance(album, dict) else ""
-            results.append({
-                "title": s.get("name", ""),
-                "artist": artist,
-                "album": album.get("name", "") if isinstance(album, dict) else "",
-                "cover": f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
-            })
+            results.append(_song_item(
+                source="qq",
+                song_id=_qq_song_id(s),
+                title=s.get("name", ""),
+                artist=artist,
+                album=album.get("name", "") if isinstance(album, dict) else "",
+                cover=f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
+                reason="来自推荐歌单",
+            ))
         return {
             "source": "qqmusic",
             "title": dirinfo.get("title", ""),
@@ -180,12 +213,15 @@ def get_playlist_detail(playlist_id: str, limit: int = Query(30, ge=1, le=200)):
             artists = t.get("artists", [])
             artist = "/".join(a.get("name", "") for a in artists) if artists else ""
             album = t.get("album", {})
-            results.append({
-                "title": t.get("name", ""),
-                "artist": artist,
-                "album": album.get("name", ""),
-                "cover": album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
-            })
+            results.append(_song_item(
+                source="netease",
+                song_id=t.get("id", ""),
+                title=t.get("name", ""),
+                artist=artist,
+                album=album.get("name", ""),
+                cover=album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
+                reason="来自推荐歌单",
+            ))
         return {
             "source": "netease",
             "title": result.get("name", ""),
@@ -220,13 +256,17 @@ def get_toplist():
             if songs_rich:
                 results = []
                 for s in songs_rich[:20]:
-                    results.append({
-                        "rank": s.get("rank", 0),
-                        "title": s.get("title", ""),
-                        "artist": s.get("singerName", ""),
-                        "album": "",
-                        "cover": s.get("cover", ""),
-                    })
+                    rank = s.get("rank", 0)
+                    results.append(_song_item(
+                        source="qq",
+                        song_id=_qq_song_id(s),
+                        rank=rank,
+                        title=s.get("title", ""),
+                        artist=s.get("singerName", ""),
+                        album="",
+                        cover=s.get("cover", ""),
+                        reason=f"QQ音乐{'飙升榜' if topid == 62 else '热歌榜'} #{rank or len(results) + 1}",
+                    ))
                 return {"source": "qqmusic", "topid": topid, "period": tl_data.get("data", {}).get("period", "") if isinstance(tl_data.get("data"), dict) else tl_data.get("period", ""), "items": results}
 
             # Fallback: songInfoList (old format)
@@ -238,13 +278,16 @@ def get_toplist():
                     artist = "/".join(x.get("name", "") for x in singers) if singers else ""
                     album = s.get("album", {})
                     mid = album.get("mid", "")
-                    results.append({
-                        "rank": i,
-                        "title": s.get("name", ""),
-                        "artist": artist,
-                        "album": album.get("name", ""),
-                        "cover": f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
-                    })
+                    results.append(_song_item(
+                        source="qq",
+                        song_id=_qq_song_id(s),
+                        rank=i,
+                        title=s.get("name", ""),
+                        artist=artist,
+                        album=album.get("name", ""),
+                        cover=f"https://y.gtimg.cn/music/photo_new/T002R150x150M000{mid}.jpg" if mid else "",
+                        reason=f"QQ音乐{'飙升榜' if topid == 62 else '热歌榜'} #{i}",
+                    ))
                 return {"source": "qqmusic", "topid": topid, "period": tl_data.get("period", ""), "items": results}
         except Exception as e:
             logger.warning(f"QQ Music toplist (topid={topid}) failed: {e}")
@@ -265,13 +308,16 @@ def get_toplist():
             artists = t.get("artists", [])
             artist = "/".join(a.get("name", "") for a in artists) if artists else ""
             album = t.get("album", {})
-            results.append({
-                "rank": i,
-                "title": t.get("name", ""),
-                "artist": artist,
-                "album": album.get("name", ""),
-                "cover": album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
-            })
+            results.append(_song_item(
+                source="netease",
+                song_id=t.get("id", ""),
+                rank=i,
+                title=t.get("name", ""),
+                artist=artist,
+                album=album.get("name", ""),
+                cover=album.get("picUrl", "") + "?param=150y150" if album.get("picUrl") else "",
+                reason=f"网易云飙升榜 #{i}",
+            ))
         return {"source": "netease", "items": results}
     except Exception as e:
         logger.warning(f"NetEase toplist failed: {e}")

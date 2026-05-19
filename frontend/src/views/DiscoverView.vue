@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getRecommend, getPlaylists, getToplist, getPlaylist, addSub, getLibraryStats, getTasks } from '@/api/index.js'
+import { getRecommend, getPlaylists, getToplist, getPlaylist, addSub, getLibraryStats, getTasks, searchOnlineMusic, downloadOnlineSong } from '@/api/index.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -15,6 +15,7 @@ const toplist = ref([])
 const libraryStats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
 const tasks = ref([])
 const loading = ref(false)
+const actionLoading = ref('')
 const showHomeSettings = ref(false)
 
 const HOME_MODULE_STORAGE_KEY = 'music_sub_discover_modules'
@@ -139,6 +140,36 @@ function go(path) {
   router.push(path)
 }
 
+function songKeyword(item) {
+  return [item?.title, item?.artist].filter(Boolean).join(' ').trim()
+}
+
+function onlineSource(item) {
+  const source = item?.source || ''
+  if (source === 'qqmusic') return 'qq'
+  if (source === 'netease') return 'netease'
+  if (source === 'kuwo') return 'kuwo'
+  if (source === 'kugou') return 'kugou'
+  if (source === 'migu') return 'migu'
+  return source || 'qq'
+}
+
+function songPayload(item) {
+  const source = onlineSource(item)
+  return {
+    source,
+    song_id: item?.song_id || '',
+    title: item?.title || '',
+    artist: item?.artist || '',
+    album: item?.album || '',
+    cover_url: item?.cover || '',
+    filename: `${item?.title || 'unknown'} - ${item?.artist || 'unknown'}.${source === 'qq' ? 'flac' : 'mp3'}`,
+    format: source === 'qq' ? 'flac' : 'mp3',
+    duration: item?.duration || 0,
+    url: item?.url || ''
+  }
+}
+
 async function quickSubscribe(keyword, type) {
   if (!keyword) return
   const labels = { artist: '艺人', song: '歌曲', album: '专辑' }
@@ -147,6 +178,56 @@ async function quickSubscribe(keyword, type) {
     await addSub({ keyword, type: type || 'artist', quality: 'any', sites: 'all' })
     alert(`✅ 已添加订阅: ${keyword}`)
   } catch (e) { alert('订阅失败: ' + e.message) }
+}
+
+async function quickDownload(item) {
+  if (!item?.title) return
+  const key = `download-${item.source || ''}-${item.song_id || item.title}`
+  actionLoading.value = key
+  try {
+    let song = songPayload(item)
+    if (song.source !== 'qq' || !song.song_id) {
+      const found = await searchOnlineMusic(songKeyword(item), [song.source], 5)
+      const candidate = (found || []).find(x => !x.disabled && (x.url || x.source === 'qq')) || (found || [])[0]
+      if (!candidate) throw new Error('没有找到可下载直链')
+      song = candidate
+    }
+    const res = await downloadOnlineSong(song, true)
+    alert(res.ok ? '✅ 已下载并整理入库' : '下载失败')
+  } catch (e) {
+    alert('下载失败: ' + (e.message || e))
+  } finally {
+    actionLoading.value = ''
+  }
+}
+
+function quickSearchPt(item) {
+  const keyword = songKeyword(item)
+  if (!keyword) return
+  localStorage.setItem('music_sub_pending_search_keyword', keyword)
+  go('/search')
+}
+
+async function subscribePlaylistSongs() {
+  if (!playlistSongs.value.length) return
+  if (!confirm(`批量订阅歌单「${selectedPlaylist.value?.title || ''}」前 ${playlistSongs.value.length} 首歌曲？`)) return
+  actionLoading.value = 'playlist-subscribe'
+  let ok = 0
+  try {
+    for (const song of playlistSongs.value.slice(0, 50)) {
+      const keyword = songKeyword(song)
+      if (!keyword) continue
+      try {
+        await addSub({ keyword, type: 'song', quality: 'any', sites: 'all' })
+        ok += 1
+      } catch (e) {
+        console.warn('subscribe song failed', keyword, e)
+      }
+    }
+    alert(`✅ 已添加 ${ok} 个歌曲订阅`)
+  } finally {
+    actionLoading.value = ''
+  }
 }
 
 onMounted(loadAll)
@@ -171,8 +252,11 @@ onMounted(loadAll)
           <span>今日主打</span>
           <strong>{{ featuredSong.title }}</strong>
           <small>{{ featuredSong.artist || featuredSong.album || '未知艺人' }}</small>
+          <small v-if="featuredSong.reason" class="song-reason">{{ featuredSong.reason }}</small>
         </div>
         <div class="hero-feature-actions">
+          <AppButton variant="primary" size="sm" :loading="actionLoading === `download-${featuredSong.source || ''}-${featuredSong.song_id || featuredSong.title}`" @click="quickDownload(featuredSong)">下载</AppButton>
+          <AppButton variant="ghost" size="sm" @click="quickSearchPt(featuredSong)">搜 PT</AppButton>
           <AppButton variant="ghost" size="sm" @click="quickSubscribe(featuredSong.title + ' ' + featuredSong.artist, 'song')">订歌</AppButton>
           <AppButton variant="ghost" size="sm" @click="quickSubscribe(featuredSong.artist, 'artist')">订艺人</AppButton>
         </div>
@@ -224,8 +308,11 @@ onMounted(loadAll)
               <div class="song-card-title">{{ item.title }}</div>
               <div class="song-card-sub">{{ item.artist }}</div>
               <div v-if="item.album" class="song-card-album">{{ item.album }}</div>
+              <div v-if="item.reason" class="song-reason">{{ item.reason }}</div>
             </div>
             <div class="song-card-actions">
+              <AppButton variant="primary" size="sm" :loading="actionLoading === `download-${item.source || ''}-${item.song_id || item.title}`" @click="quickDownload(item)">下</AppButton>
+              <AppButton variant="ghost" size="sm" @click="quickSearchPt(item)">PT</AppButton>
               <AppButton variant="ghost" size="sm" @click="quickSubscribe(item.title + ' ' + item.artist, 'song')">订歌</AppButton>
               <AppButton variant="ghost" size="sm" @click="quickSubscribe(item.artist, 'artist')">艺人</AppButton>
             </div>
@@ -248,7 +335,10 @@ onMounted(loadAll)
             <div class="rank-info">
               <div class="rank-title">{{ item.title }}</div>
               <div class="rank-sub">{{ item.artist }}</div>
+              <div v-if="item.reason" class="rank-reason">{{ item.reason }}</div>
             </div>
+            <button class="mini-action" title="下载" :disabled="!!actionLoading" @click="quickDownload(item)">↓</button>
+            <button class="mini-action" title="搜 PT" @click="quickSearchPt(item)">PT</button>
             <button class="mini-action" title="订阅歌曲" @click="quickSubscribe(item.title + ' ' + item.artist, 'song')">+</button>
           </div>
         </div>
@@ -318,13 +408,20 @@ onMounted(loadAll)
       <div class="playlist-detail">
         <img v-if="selectedPlaylist?.cover" :src="selectedPlaylist.cover" class="detail-cover" />
         <p v-if="selectedPlaylist?.desc" class="detail-desc">{{ selectedPlaylist.desc }}</p>
+        <div class="playlist-actions">
+          <AppButton size="sm" variant="primary" :loading="actionLoading === 'playlist-subscribe'" @click="subscribePlaylistSongs">批量订阅前50首</AppButton>
+        </div>
         <div class="song-list">
           <div v-for="song in playlistSongs" :key="song.title + song.artist" class="song-row">
             <div class="song-info">
               <span class="song-title">{{ song.title }}</span>
               <span class="song-sub">{{ song.artist }}</span>
             </div>
-            <AppButton variant="ghost" size="sm" @click="quickSubscribe(song.title + ' ' + song.artist, 'song')">订</AppButton>
+            <div class="song-row-actions">
+              <AppButton variant="primary" size="sm" :loading="actionLoading === `download-${song.source || ''}-${song.song_id || song.title}`" @click="quickDownload(song)">下</AppButton>
+              <AppButton variant="ghost" size="sm" @click="quickSearchPt(song)">PT</AppButton>
+              <AppButton variant="ghost" size="sm" @click="quickSubscribe(song.title + ' ' + song.artist, 'song')">订</AppButton>
+            </div>
           </div>
         </div>
       </div>
@@ -376,7 +473,8 @@ onMounted(loadAll)
 .song-card-title, .cover-title, .rank-title { font-size: 14px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song-card-sub, .cover-sub, .rank-sub { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song-card-album { margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.song-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.song-reason, .rank-reason { margin-top: 2px; font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song-card-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 .chart-list, .task-list { display: flex; flex-direction: column; gap: 4px; }
 .chart-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px; border-radius: var(--radius-md); transition: background 0.15s; }
 .chart-row:hover { background: var(--surface-hover); }
@@ -384,8 +482,9 @@ onMounted(loadAll)
 .rank-top { color: var(--accent); }
 .rank-cover { width: 42px; height: 42px; border-radius: var(--radius-sm); flex-shrink: 0; }
 .rank-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.mini-action { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-dim); cursor: pointer; flex: 0 0 auto; }
+.mini-action { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-dim); cursor: pointer; flex: 0 0 auto; font-size: 11px; }
 .mini-action:hover { color: var(--text); background: var(--surface); }
+.mini-action:disabled { opacity: .5; cursor: wait; }
 .playlist-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .playlist-card { display: flex; gap: 10px; align-items: center; min-width: 0; padding: 10px; border-radius: var(--radius-md); background: var(--surface-soft); cursor: pointer; }
 .playlist-card:hover { background: var(--surface-hover); }
@@ -408,12 +507,14 @@ onMounted(loadAll)
 .playlist-detail { display: flex; flex-direction: column; gap: 16px; min-width: 400px; }
 .detail-cover { width: 200px; height: 200px; border-radius: var(--radius-lg); object-fit: cover; }
 .detail-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+.playlist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .song-list { display: flex; flex-direction: column; gap: 4px; max-height: 400px; overflow-y: auto; }
 .song-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); }
 .song-row:hover { background: var(--surface-hover); }
 .song-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .song-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song-sub { font-size: 12px; color: var(--text-dim); }
+.song-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 @media (max-width: 1180px) {
   .hero-card { grid-template-columns: 1fr; }

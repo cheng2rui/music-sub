@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { searchMusicV2, downloadTorrent } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -83,6 +83,16 @@ function formatUploadTime(value) {
 function toggleSite(name) {
   siteFilter.value = siteFilter.value === name ? '' : name
 }
+
+onMounted(() => {
+  const pending = localStorage.getItem('music_sub_pending_search_keyword')
+  if (pending) {
+    localStorage.removeItem('music_sub_pending_search_keyword')
+    keyword.value = pending
+    quality.value = 'flac'
+    handleSearch()
+  }
+})
 </script>
 
 <template>
