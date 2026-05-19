@@ -1145,12 +1145,20 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
             candidates[title_key] = song
 
     items = sorted(candidates.values(), key=_quality_score, reverse=True)
+    for idx, song in enumerate(items):
+        song["candidate_id"] = f"{idx}:{_norm_title(song.get('title'))}:{song.get('source') or ''}:{song.get('song_id') or song.get('id') or ''}"
     if dry_run:
         return {"ok": True, "dry_run": True, "existing": len(existing), "candidates": items, "downloaded": []}
 
+    selected_ids = set(str(x) for x in (payload.get("candidate_ids") or payload.get("selected_ids") or []) if x is not None)
+    selected_titles = {_norm_title(str(x)) for x in (payload.get("titles") or payload.get("selected_titles") or []) if x}
+    download_items = items
+    if selected_ids or selected_titles:
+        download_items = [s for s in items if str(s.get("candidate_id")) in selected_ids or _norm_title(s.get("title")) in selected_titles]
+
     downloaded = []
     errors = []
-    for song in items[:limit]:
+    for song in download_items[:limit]:
         try:
             file_path = download_online_song(song)
             synthetic_hash = f"online:{uuid.uuid4().hex}"

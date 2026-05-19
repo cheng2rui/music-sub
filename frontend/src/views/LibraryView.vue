@@ -59,6 +59,8 @@ const player = usePlayerStore()
 const scraping = ref(false)
 const completingAlbum = ref(false)
 const completeAlbumMessage = ref('')
+const completeCandidates = ref([])
+const selectedCompleteIds = ref([])
 const scanning = ref(false)
 const scanJob = ref(null)
 let scanPollTimer = null
@@ -365,22 +367,37 @@ async function playFirstAlbumTrack() {
 async function completeSelectedAlbum() {
   if (!selectedAlbum.value) return
   const { artist, album } = selectedAlbum.value
-  if (!confirm(`自动搜索并补齐「${artist} - ${album}」缺失曲目？会优先选择无损资源。`)) return
   completingAlbum.value = true
   completeAlbumMessage.value = ''
+  completeCandidates.value = []
+  selectedCompleteIds.value = []
   try {
     const preview = await completeAlbum({ artist, album, dry_run: true, limit: 40 })
-    const count = preview.candidates?.length || 0
-    if (!count) {
+    const candidates = preview.candidates || []
+    if (!candidates.length) {
       completeAlbumMessage.value = preview.reason || '没有发现可补齐的新曲目'
       return
     }
-    if (!confirm(`找到 ${count} 首疑似缺失曲目，是否开始下载并自动入库？`)) {
-      completeAlbumMessage.value = `已预览 ${count} 首，未下载`
-      return
-    }
-    const res = await completeAlbum({ artist, album, dry_run: false, limit: 40 })
+    completeCandidates.value = candidates
+    selectedCompleteIds.value = candidates.map(c => c.candidate_id).filter(Boolean)
+    completeAlbumMessage.value = `找到 ${candidates.length} 首候选，请勾选后下载。`
+  } catch (e) {
+    completeAlbumMessage.value = e.message || '补齐失败'
+  } finally {
+    completingAlbum.value = false
+  }
+}
+
+async function downloadSelectedCompleteCandidates() {
+  if (!selectedAlbum.value || !selectedCompleteIds.value.length) return
+  const { artist, album } = selectedAlbum.value
+  if (!confirm(`确认下载选中的 ${selectedCompleteIds.value.length} 首候选并自动入库？`)) return
+  completingAlbum.value = true
+  try {
+    const res = await completeAlbum({ artist, album, dry_run: false, limit: 40, candidate_ids: selectedCompleteIds.value })
     completeAlbumMessage.value = `已下载 ${res.downloaded?.length || 0} 首，失败 ${res.errors?.length || 0} 首`
+    completeCandidates.value = []
+    selectedCompleteIds.value = []
     await openAlbumModal(artist, album)
     await loadStats()
   } catch (e) {
@@ -640,6 +657,20 @@ onMounted(() => { loadStats(); loadAlbums(0) })
           <AppButton variant="ghost" size="sm" @click="openToolbox({ album_artist: selectedAlbum?.artist, album_name: selectedAlbum?.album })">工具箱</AppButton>
         </div>
         <div v-if="completeAlbumMessage" class="album-complete-message">{{ completeAlbumMessage }}</div>
+        <div v-if="completeCandidates.length" class="complete-candidates">
+          <label v-for="c in completeCandidates" :key="c.candidate_id" class="complete-candidate-row">
+            <input type="checkbox" :value="c.candidate_id" v-model="selectedCompleteIds" />
+            <span class="candidate-main">
+              <strong>{{ c.title }}</strong>
+              <small>{{ c.artist }} · {{ c.album }} · {{ c.source || '-' }} · {{ c.format || '-' }} {{ c.bitrate ? `· ${c.bitrate}kbps` : '' }}</small>
+            </span>
+          </label>
+          <div class="complete-candidate-actions">
+            <AppButton variant="primary" size="sm" :disabled="!selectedCompleteIds.length" :loading="completingAlbum" @click="downloadSelectedCompleteCandidates">下载选中 {{ selectedCompleteIds.length }} 首</AppButton>
+            <AppButton variant="ghost" size="sm" @click="selectedCompleteIds = completeCandidates.map(c => c.candidate_id).filter(Boolean)">全选</AppButton>
+            <AppButton variant="ghost" size="sm" @click="selectedCompleteIds = []">清空</AppButton>
+          </div>
+        </div>
         <div v-if="albumPagedMode" class="album-page-info">第 {{ albumPage + 1 }} / {{ albumPageCount }} 页 · 共 {{ albumTotal }} 首</div>
         <div v-if="albumLoading && !albumVisibleTracks.length" class="loading-text">加载曲目中...</div>
         <div v-else class="track-list">
@@ -874,6 +905,13 @@ button.scan-health-chip { cursor: pointer; }
 .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .album-page-info { color: var(--text-dim); font-size: 12px; }
 .album-complete-message { padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-dim); font-size: 12px; }
+.complete-candidates { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); max-height: 260px; overflow: auto; }
+.complete-candidate-row { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; align-items: start; padding: 8px; border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+.complete-candidate-row:hover { background: var(--surface-hover); }
+.candidate-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.candidate-main strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.candidate-main small { color: var(--text-dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.complete-candidate-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .track-list { display: flex; flex-direction: column; gap: 4px; max-height: 350px; overflow-y: auto; }
 .track-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
 .track-row:hover { background: var(--surface-hover); }
