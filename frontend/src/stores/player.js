@@ -8,8 +8,9 @@ export const usePlayerStore = defineStore('player', () => {
   const queueIndex = ref(-1)
   const currentId = computed(() => currentTrack.value?.id || null)
   const queueSize = computed(() => queue.value.length)
-  const hasPrev = computed(() => queueIndex.value > 0)
-  const hasNext = computed(() => queueIndex.value >= 0 && queueIndex.value < queue.value.length - 1)
+  const playbackMode = ref('order') // order | shuffle | repeat
+  const hasPrev = computed(() => queueIndex.value > 0 || (playbackMode.value === 'repeat' && queue.value.length > 1))
+  const hasNext = computed(() => queueIndex.value >= 0 && (queueIndex.value < queue.value.length - 1 || playbackMode.value !== 'order'))
   const isCollapsed = ref(false)
   const isQueueOpen = ref(false)
   const currentTime = ref(0)
@@ -50,21 +51,42 @@ export const usePlayerStore = defineStore('player', () => {
     isCollapsed.value = false
   }
 
+  function randomQueueIndex() {
+    if (queue.value.length <= 1) return queueIndex.value
+    let next = queueIndex.value
+    while (next === queueIndex.value) next = Math.floor(Math.random() * queue.value.length)
+    return next
+  }
+
   function playNext() {
-    if (!hasNext.value) return false
-    queueIndex.value += 1
+    if (!queue.value.length || queueIndex.value < 0) return false
+    if (playbackMode.value === 'shuffle') {
+      queueIndex.value = randomQueueIndex()
+    } else if (queueIndex.value < queue.value.length - 1) {
+      queueIndex.value += 1
+    } else if (playbackMode.value === 'repeat') {
+      queueIndex.value = 0
+    } else {
+      return false
+    }
     currentTime.value = 0
     currentTrack.value = queue.value[queueIndex.value]
-    isCollapsed.value = false
     return true
   }
 
   function playPrev() {
-    if (!hasPrev.value) return false
-    queueIndex.value -= 1
+    if (!queue.value.length || queueIndex.value < 0) return false
+    if (playbackMode.value === 'shuffle') {
+      queueIndex.value = randomQueueIndex()
+    } else if (queueIndex.value > 0) {
+      queueIndex.value -= 1
+    } else if (playbackMode.value === 'repeat') {
+      queueIndex.value = queue.value.length - 1
+    } else {
+      return false
+    }
     currentTime.value = 0
     currentTrack.value = queue.value[queueIndex.value]
-    isCollapsed.value = false
     return true
   }
 
@@ -79,6 +101,16 @@ export const usePlayerStore = defineStore('player', () => {
 
   function setCurrentTime(t) {
     currentTime.value = Number(t) || 0
+  }
+
+  function setPlaybackMode(mode) {
+    if (['order', 'shuffle', 'repeat'].includes(mode)) playbackMode.value = mode
+  }
+
+  function togglePlaybackMode() {
+    const modes = ['order', 'shuffle', 'repeat']
+    const idx = modes.indexOf(playbackMode.value)
+    playbackMode.value = modes[(idx + 1) % modes.length]
   }
 
   function toggleQueue() {
@@ -125,6 +157,7 @@ export const usePlayerStore = defineStore('player', () => {
     isCollapsed,
     isQueueOpen,
     currentTime,
+    playbackMode,
     playTrack,
     playQueue,
     playNext,
@@ -133,6 +166,8 @@ export const usePlayerStore = defineStore('player', () => {
     toggleQueue,
     closeQueue,
     setCurrentTime,
+    setPlaybackMode,
+    togglePlaybackMode,
     streamUrl,
     collapse,
     expand,

@@ -309,9 +309,18 @@ async function loadNextAlbumPage() {
   await changeAlbumPage(albumPage.value + 1)
 }
 
-function playFirstAlbumTrack() {
-  const first = albumVisibleTracks.value[0]
-  if (first) playTrack(first)
+async function getSelectedAlbumQueueTracks() {
+  if (!selectedAlbum.value) return []
+  if (!albumTracks.value.length || albumPagedMode.value) {
+    albumTracks.value = await getAlbumTracks(selectedAlbum.value.artist, selectedAlbum.value.album)
+    if (!albumTotal.value) albumTotal.value = albumTracks.value.length
+  }
+  return albumTracks.value.length ? albumTracks.value : albumVisibleTracks.value
+}
+
+async function playFirstAlbumTrack() {
+  const queueTracks = await getSelectedAlbumQueueTracks()
+  player.playQueue(queueTracks, 0)
 }
 
 async function rescrapeAlbum() {
@@ -329,8 +338,10 @@ async function rescrapeAlbum() {
   finally { scraping.value = false }
 }
 
-function playTrack(track) {
-  player.playTrack(track)
+async function playTrack(track) {
+  const queueTracks = await getSelectedAlbumQueueTracks()
+  const idx = queueTracks.findIndex(t => String(t.id) === String(track.id))
+  player.playQueue(queueTracks, idx >= 0 ? idx : 0)
 }
 
 async function openTrack(id) {
@@ -550,7 +561,7 @@ onMounted(() => { loadStats(); loadAlbums(0) })
         <img :src="coverUrl(selectedAlbum?.artist, selectedAlbum?.album)" class="modal-cover" />
         <div class="modal-meta">{{ selectedAlbum?.artist }} · {{ selectedAlbum?.album }}</div>
         <div class="modal-actions">
-          <AppButton variant="primary" size="sm" :disabled="!albumVisibleTracks.length" @click="playFirstAlbumTrack">播放第一首</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="!albumVisibleTracks.length" @click="playFirstAlbumTrack">播放全部</AppButton>
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
           <AppButton variant="ghost" size="sm" @click="openToolbox({ album_artist: selectedAlbum?.artist, album_name: selectedAlbum?.album })">工具箱</AppButton>
         </div>
