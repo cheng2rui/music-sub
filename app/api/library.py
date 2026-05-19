@@ -1,4 +1,5 @@
 """Library API routes."""
+import datetime
 import os
 import shutil
 import subprocess
@@ -1268,7 +1269,7 @@ def list_library_trash(limit: int = 200):
     return {"items": items[:limit], "total": len(items), "trash_root": str(trash_root)}
 
 
-def _restore_one_trash_file(root: Path, trash_root: Path, trash_path_value: str, overwrite: bool = False) -> dict:
+def _trash_restore_plan(root: Path, trash_root: Path, trash_path_value: str) -> dict:
     trash_path = Path(str(trash_path_value or "")).resolve()
     try:
         rel = trash_path.relative_to(trash_root.resolve())
@@ -1283,9 +1284,54 @@ def _restore_one_trash_file(root: Path, trash_root: Path, trash_path_value: str,
         restore_path.relative_to(root)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid restore target")
-    if restore_path.exists() and not overwrite:
-        raise HTTPException(status_code=409, detail="restore target already exists")
+    return {
+        "trash_path": trash_path,
+        "relative_path": str(rel),
+        "restore_path": restore_path,
+        "restore_exists": restore_path.exists(),
+    }
+
+
+def _conflict_backup_path(root: Path, trash_root: Path, restore_path: Path) -> Path:
+    """Return a unique backup path for an existing restore target.
+
+    Overwrite restore must never discard a real music file. If the target exists,
+    move it into .trash/restore-conflicts first, then restore the requested file.
+    """
+    rel = restore_path.relative_to(root)
+    dest = trash_root / "restore-conflicts" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S") / rel
+    if not dest.exists():
+        return dest
+    stem, suffix = dest.stem, dest.suffix
+    idx = 1
+    while True:
+        candidate = dest.with_name(f"{stem}_{idx}{suffix}")
+        if not candidate.exists():
+            return candidate
+        idx += 1
+
+
+def _restore_one_trash_file(root: Path, trash_root: Path, trash_path_value: str, overwrite: bool = False, dry_run: bool = False) -> dict:
+    plan = _trash_restore_plan(root, trash_root, trash_path_value)
+    trash_path: Path = plan["trash_path"]
+    restore_path: Path = plan["restore_path"]
+    backup_path = None
+    if restore_path.exists():
+        if not overwrite:
+            raise HTTPException(status_code=409, detail="restore target already exists")
+        backup_path = _conflict_backup_path(root, trash_root, restore_path)
+    if dry_run:
+        return {
+            "trash_path": str(trash_path),
+            "restored_path": str(restore_path),
+            "restore_exists": plan["restore_exists"],
+            "would_backup_path": str(backup_path) if backup_path else None,
+            "dry_run": True,
+        }
     restore_path.parent.mkdir(parents=True, exist_ok=True)
+    if backup_path:
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(restore_path), str(backup_path))
     shutil.move(str(trash_path), str(restore_path))
     for parent in list(trash_path.parents):
         if parent == trash_root or parent == root or trash_root not in parent.parents:
@@ -1295,7 +1341,7 @@ def _restore_one_trash_file(root: Path, trash_root: Path, trash_path_value: str,
                 parent.rmdir()
         except Exception:
             break
-    return {"trash_path": str(trash_path), "restored_path": str(restore_path)}
+    return {"trash_path": str(trash_path), "restored_path": str(restore_path), "backup_path": str(backup_path) if backup_path else None}
 
 
 @router.post("/trash/restore")
@@ -1303,7 +1349,13 @@ def restore_library_trash(payload: dict = Body(default={})):
     """Restore one file from .trash to its original library-relative path."""
     root = Path(config.paths.library).resolve()
     trash_root = root / ".trash"
-    result = _restore_one_trash_file(root, trash_root, str(payload.get("trash_path") or ""), bool(payload.get("overwrite")))
+    result = _restore_one_trash_file(
+        root,
+        trash_root,
+        str(payload.get("trash_path") or ""),
+        bool(payload.get("overwrite")),
+        _bool_value(payload.get("dry_run"), False),
+    )
     return {"ok": True, **result}
 
 
@@ -1319,7 +1371,13 @@ def restore_many_library_trash(payload: dict = Body(default={})):
     errors = []
     for p in paths[:200]:
         try:
-            restored.append(_restore_one_trash_file(root, trash_root, p, bool(payload.get("overwrite"))))
+            restored.append(_restore_one_trash_file(
+                root,
+                trash_root,
+                p,
+                bool(payload.get("overwrite")),
+                _bool_value(payload.get("dry_run"), False),
+            ))
         except HTTPException as exc:
             errors.append({"trash_path": p, "error": exc.detail})
         except Exception as exc:

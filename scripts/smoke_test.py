@@ -80,7 +80,14 @@ def main() -> int:
     complete = request(args.base, "/api/library/album-complete", method="POST", token=token, data={"artist": args.album_artist, "album": args.album, "dry_run": True, "limit": 10})
     if not complete.get("ok"):
         raise RuntimeError(f"album complete dry-run failed: {complete}")
-    ok("album-complete dry-run", f"existing={complete.get('existing')} candidates={len(complete.get('candidates') or [])}")
+    candidates = complete.get("candidates") or []
+    candidate_ids = [c.get("candidate_id") for c in candidates]
+    if len([x for x in candidate_ids if x]) != len(set(x for x in candidate_ids if x)):
+        raise RuntimeError(f"album completion candidate_id is not unique: {candidate_ids}")
+    for c in candidates:
+        if "confidence" not in c or "confidence_label" not in c or "recommended" not in c:
+            raise RuntimeError(f"candidate confidence fields missing: {c}")
+    ok("album-complete dry-run", f"existing={complete.get('existing')} candidates={len(candidates)}")
 
     notify = request(args.base, "/api/notify/status", token=token)
     channels = sorted((notify.get("channels") or {}).keys())
@@ -93,6 +100,74 @@ def main() -> int:
     if "items" not in trash:
         raise RuntimeError(f"trash listing failed: {trash}")
     ok("trash listing", f"total={trash.get('total')}")
+
+    if args.container:
+        create_cmd = """from pathlib import Path
+from app.config import config
+root = Path(config.paths.library)
+trash = root / '.trash' / '20990101' / 'Smoke Artist' / 'Smoke Album' / '01 Smoke Restore.txt'
+trash.parent.mkdir(parents=True, exist_ok=True)
+trash.write_text('music-sub-smoke-restore\\n', encoding='utf-8')
+print(str(trash))
+"""
+        trash_path = subprocess.check_output(["docker", "exec", args.container, "python", "-c", create_cmd], text=True, timeout=20).strip()
+        preview = request(args.base, "/api/library/trash/restore", method="POST", token=token, data={"trash_path": trash_path, "dry_run": True})
+        if not preview.get("dry_run") or not str(preview.get("restored_path") or "").endswith("Smoke Artist/Smoke Album/01 Smoke Restore.txt"):
+            raise RuntimeError(f"trash restore dry-run bad response: {preview}")
+        restored = request(args.base, "/api/library/trash/restore", method="POST", token=token, data={"trash_path": trash_path})
+        if not restored.get("ok"):
+            raise RuntimeError(f"trash restore smoke failed: {restored}")
+        cleanup_cmd = """from pathlib import Path
+from app.config import config
+root = Path(config.paths.library)
+p = root / 'Smoke Artist' / 'Smoke Album' / '01 Smoke Restore.txt'
+if p.exists() and p.read_text(encoding='utf-8') == 'music-sub-smoke-restore\\n':
+    p.unlink()
+for d in [p.parent, p.parent.parent, root / '.trash' / '20990101' / 'Smoke Artist' / 'Smoke Album', root / '.trash' / '20990101' / 'Smoke Artist', root / '.trash' / '20990101']:
+    try:
+        d.rmdir()
+    except Exception:
+        pass
+"""
+        subprocess.check_call(["docker", "exec", args.container, "python", "-c", cleanup_cmd], timeout=20)
+        ok("trash restore smoke", "synthetic file restored and cleaned")
+
+        conflict_cmd = """from pathlib import Path
+from app.config import config
+root = Path(config.paths.library)
+target = root / 'Smoke Artist' / 'Smoke Album' / '01 Smoke Conflict.txt'
+trash = root / '.trash' / '20990102' / 'Smoke Artist' / 'Smoke Album' / '01 Smoke Conflict.txt'
+target.parent.mkdir(parents=True, exist_ok=True)
+trash.parent.mkdir(parents=True, exist_ok=True)
+target.write_text('existing-target\\n', encoding='utf-8')
+trash.write_text('restored-from-trash\\n', encoding='utf-8')
+print(str(trash))
+"""
+        conflict_trash_path = subprocess.check_output(["docker", "exec", args.container, "python", "-c", conflict_cmd], text=True, timeout=20).strip()
+        conflict_preview = request(args.base, "/api/library/trash/restore", method="POST", token=token, data={"trash_path": conflict_trash_path, "overwrite": True, "dry_run": True})
+        if not conflict_preview.get("would_backup_path"):
+            raise RuntimeError(f"trash overwrite dry-run did not report backup path: {conflict_preview}")
+        conflict_restored = request(args.base, "/api/library/trash/restore", method="POST", token=token, data={"trash_path": conflict_trash_path, "overwrite": True})
+        backup_path = conflict_restored.get("backup_path")
+        if not backup_path:
+            raise RuntimeError(f"trash overwrite restore did not preserve backup: {conflict_restored}")
+        verify_conflict_cmd = f"""from pathlib import Path
+from app.config import config
+root = Path(config.paths.library)
+target = root / 'Smoke Artist' / 'Smoke Album' / '01 Smoke Conflict.txt'
+backup = Path({backup_path!r})
+assert target.read_text(encoding='utf-8') == 'restored-from-trash\\n'
+assert backup.read_text(encoding='utf-8') == 'existing-target\\n'
+target.unlink()
+backup.unlink()
+for d in [target.parent, target.parent.parent, backup.parent, backup.parent.parent, backup.parent.parent.parent, root / '.trash' / '20990102' / 'Smoke Artist' / 'Smoke Album', root / '.trash' / '20990102' / 'Smoke Artist', root / '.trash' / '20990102']:
+    try:
+        d.rmdir()
+    except Exception:
+        pass
+"""
+        subprocess.check_call(["docker", "exec", args.container, "python", "-c", verify_conflict_cmd], timeout=20)
+        ok("trash overwrite safety", "existing target preserved in .trash/restore-conflicts")
 
     restore_many_error = False
     try:
