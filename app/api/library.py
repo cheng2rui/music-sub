@@ -1159,8 +1159,12 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
     from app.models import DownloadTask
     import uuid
 
-    rows = search_online(f"{artist} {album}", sources=sources, limit=limit)
-    raw = [r.to_dict() if hasattr(r, "to_dict") else dict(r) for r in rows]
+    selected_candidate_payloads = payload.get("selected_candidates") or []
+    if not dry_run and selected_candidate_payloads:
+        raw = [dict(r) for r in selected_candidate_payloads if isinstance(r, dict)]
+    else:
+        rows = search_online(f"{artist} {album}", sources=sources, limit=limit)
+        raw = [r.to_dict() if hasattr(r, "to_dict") else dict(r) for r in rows]
     candidates: dict[str, dict] = {}
     for song in raw:
         title = (song.get("title") or "").strip()
@@ -1187,7 +1191,7 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
 
     items = sorted(candidates.values(), key=_quality_score, reverse=True)
     for idx, song in enumerate(items):
-        song["candidate_id"] = f"{idx}:{_norm_title(song.get('title'))}:{song.get('source') or ''}:{song.get('song_id') or song.get('id') or ''}"
+        song["candidate_id"] = song.get("candidate_id") or f"{idx}:{_norm_title(song.get('title'))}:{song.get('source') or ''}:{song.get('song_id') or song.get('id') or ''}"
         song.update(_completion_confidence(song, artist, album))
     if dry_run:
         return {"ok": True, "dry_run": True, "existing": len(existing), "candidates": items, "downloaded": []}

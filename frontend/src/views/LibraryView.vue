@@ -423,7 +423,8 @@ async function downloadSelectedCompleteCandidates() {
   if (!confirm(`确认下载选中的 ${selectedCompleteIds.value.length} 首候选并自动入库？`)) return
   completingAlbum.value = true
   try {
-    const res = await completeAlbum({ artist, album, dry_run: false, limit: 40, candidate_ids: selectedCompleteIds.value })
+    const selectedCandidates = completeCandidates.value.filter(c => selectedCompleteIds.value.includes(c.candidate_id))
+    const res = await completeAlbum({ artist, album, dry_run: false, limit: 40, candidate_ids: selectedCompleteIds.value, selected_candidates: selectedCandidates })
     completeAlbumMessage.value = `已下载 ${res.downloaded?.length || 0} 首，失败 ${res.errors?.length || 0} 首`
     completeCandidates.value = []
     selectedCompleteIds.value = []
