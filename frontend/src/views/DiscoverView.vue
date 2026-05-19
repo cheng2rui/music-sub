@@ -272,8 +272,9 @@ onMounted(loadAll)
 
 <style scoped>
 .discover { padding: 24px; padding-bottom: 32px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; height: 100%; }
+.discover > * { flex: 0 0 auto; }
 .hero-card { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.85fr); gap: 18px; align-items: stretch; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius-xl); background: radial-gradient(circle at 16% 0%, var(--accent-soft), transparent 34%), linear-gradient(135deg, var(--bg-elevated), var(--surface)); box-shadow: var(--shadow-card); }
-.hero-card::after { content: ''; position: absolute; right: -80px; top: -120px; width: 260px; height: 260px; border-radius: 50%; background: var(--accent-soft); filter: blur(4px); pointer-events: none; }
+.hero-card::after { content: ''; position: absolute; right: 12px; top: 12px; width: 150px; height: 150px; border-radius: 50%; background: var(--accent-soft); filter: blur(4px); pointer-events: none; opacity: 0.8; }
 .hero-copy { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; min-width: 0; }
 .hero-copy h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.04em; }
 .hero-copy p { margin: 0; max-width: 560px; color: var(--text-dim); line-height: 1.6; }
@@ -343,6 +344,7 @@ onMounted(loadAll)
 .song-sub { font-size: 12px; color: var(--text-dim); }
 
 @media (max-width: 1180px) {
+  .hero-card { grid-template-columns: 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
