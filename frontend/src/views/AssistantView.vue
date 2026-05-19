@@ -14,6 +14,8 @@ import {
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
 const conversations = ref([])
 const messages = ref([])
 const currentId = ref(null)
@@ -298,7 +300,7 @@ onMounted(async () => {
         <button v-for="conv in conversations" :key="conv.id" class="conversation-item" :class="{ active: conv.id === currentId }" @click="selectConversation(conv.id)">
           <span>{{ conv.title || '新对话' }}</span>
           <small>{{ new Date(conv.updated_at).toLocaleString() }}</small>
-          <i @click.stop="removeConversation(conv)">×</i>
+          <i @click.stop="removeConversation(conv)"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-remove-icon" /><span v-else>×</span></i>
         </button>
       </div>
       <details class="tool-catalog">
@@ -503,4 +505,5 @@ pre { margin: 6px 0 0; white-space: pre-wrap; }
   .chat-toolbar { flex-direction: column; }
   .chat-toolbar-actions { width: 100%; flex-direction: row; justify-content: space-between; }
 }
+.animal-remove-icon { width: 16px; height: 16px; object-fit: contain; display: block; }
 </style>

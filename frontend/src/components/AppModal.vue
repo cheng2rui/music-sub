@@ -1,11 +1,14 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
+import { useThemeStore } from '@/stores/theme.js'
 
 const props = defineProps({
   title: String
 })
 
 const emit = defineEmits(['close'])
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
 
 function handleKeydown(e) {
   if (e.key === 'Escape') emit('close')
@@ -21,7 +24,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
       <div class="modal-box">
         <div class="modal-header">
           <h3 v-if="title">{{ title }}</h3>
-          <button class="modal-close" @click="$emit('close')">✕</button>
+          <button class="modal-close" @click="$emit('close')"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>✕</span></button>
         </div>
         <div class="modal-body">
           <slot />
@@ -63,6 +66,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
   font-size: 16px; padding: 4px;
 }
 .modal-close:hover { color: var(--text); }
+.animal-close-icon { width: 20px; height: 20px; object-fit: contain; display: block; }
 .modal-body { padding: 20px; overflow-y: auto; }
 
 @media (max-width: 768px) {

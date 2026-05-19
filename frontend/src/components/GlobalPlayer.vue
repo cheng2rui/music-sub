@@ -349,7 +349,7 @@ function formatDuration(seconds) {
       <span class="panel-label">{{ queueLabel }}</span>
     </button>
 
-    <button class="player-close" title="关闭播放器" @click="player.close">×</button>
+    <button class="player-close" title="关闭播放器" @click="player.close"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>×</span></button>
 
     <div v-show="!player.isCollapsed" class="mobile-progress" aria-hidden="true">
       <div :style="{ width: seekPercent + '%' }"></div>
@@ -370,7 +370,7 @@ function formatDuration(seconds) {
               <strong>{{ detailTrack.title || title }}</strong>
               <span>{{ [detailTrack.artist, detailTrack.album].filter(Boolean).join(' · ') || subtitle || '未知来源' }}</span>
             </div>
-            <button class="queue-close" @click="isNowOpen = false">×</button>
+            <button class="queue-close" @click="isNowOpen = false"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>×</span></button>
           </div>
           <div class="now-meta">
             <span>{{ formatDuration(detailTrack.duration) }}</span>
@@ -401,7 +401,7 @@ function formatDuration(seconds) {
           <strong>播放队列</strong>
           <span>{{ player.queueSize }} 首</span>
         </div>
-        <button class="queue-close" @click="player.closeQueue">×</button>
+        <button class="queue-close" @click="player.closeQueue"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>×</span></button>
       </div>
       <div class="queue-list">
         <button
@@ -639,6 +639,7 @@ function formatDuration(seconds) {
 .panel-icon { font-size: 14px; line-height: 1; display: inline-flex; align-items: center; }
 .animal-player-icon { width: 18px; height: 18px; object-fit: contain; }
 .animal-now-icon { width: 74px; height: 74px; object-fit: contain; filter: drop-shadow(0 4px 3px rgba(61, 52, 40, .16)); }
+.animal-close-icon { width: 18px; height: 18px; object-fit: contain; display: block; }
 .panel-label { line-height: 1; }
 .mobile-progress { display: none; }
 .queue-panel,
