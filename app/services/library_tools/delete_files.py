@@ -58,7 +58,8 @@ def _find_empty_dirs(dirs: set[str], library_root: str) -> list[tuple[str, int, 
 
 
 def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> ToolPreview:
-    library_root = options.get("library_root", "/music")
+    from app.config import config
+    library_root = options.get("library_root") or config.paths.library
     delete_files = options.get("delete_files", False)
     delete_empty_dirs = options.get("delete_empty_dirs", True)
     delete_missing_db_rows = options.get("delete_missing_db_rows", True)
@@ -127,7 +128,8 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
 
 
 def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progress) -> dict[str, Any]:
-    library_root = options.get("library_root", "/music")
+    from app.config import config
+    library_root = options.get("library_root") or config.paths.library
     delete_files = options.get("delete_files", False)
     delete_empty_dirs = options.get("delete_empty_dirs", True)
     delete_missing_db_rows = options.get("delete_missing_db_rows", True)

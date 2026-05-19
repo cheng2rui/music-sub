@@ -246,7 +246,9 @@ function formatDuration(seconds) {
 <template>
   <div v-if="player.currentTrack" :class="['global-player', { collapsed: player.isCollapsed }]">
     <button class="collapse-toggle" :title="player.isCollapsed ? '展开播放器' : '缩小播放器'" @click="player.toggleCollapsed">
-      {{ player.isCollapsed ? '‹' : '⌄' }}
+      <span class="collapse-icon" aria-hidden="true">
+        <i></i><i></i>
+      </span>
     </button>
 
     <button class="player-info" type="button" title="查看正在播放详情" @click="handleTitleClick">
@@ -466,10 +468,22 @@ function formatDuration(seconds) {
   font-size: 16px;
   line-height: 1;
 }
+.collapse-toggle { position: relative; overflow: hidden; background: color-mix(in srgb, var(--surface) 86%, var(--accent)); }
+.collapse-toggle::before { content: ''; position: absolute; inset: 4px; border-radius: inherit; background: color-mix(in srgb, var(--accent) 10%, transparent); opacity: 0; transition: opacity .18s ease; }
+.collapse-icon { position: relative; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; transition: transform .22s cubic-bezier(.2,.8,.2,1); }
+.collapse-icon i { position: absolute; width: 9px; height: 2px; border-radius: 999px; background: currentColor; transform-origin: center; transition: transform .22s cubic-bezier(.2,.8,.2,1), width .22s ease; }
+.collapse-icon i:first-child { transform: translateY(-2px) rotate(0deg); }
+.collapse-icon i:last-child { transform: translateY(2px) rotate(0deg); }
+.global-player:not(.collapsed) .collapse-icon i:first-child { transform: translateY(1px) rotate(45deg); }
+.global-player:not(.collapsed) .collapse-icon i:last-child { transform: translateY(1px) rotate(-45deg); }
+.global-player.collapsed .collapse-icon { transform: rotate(180deg); }
+.global-player.collapsed .collapse-icon i:first-child { transform: translateY(-2px) rotate(45deg); }
+.global-player.collapsed .collapse-icon i:last-child { transform: translateY(2px) rotate(-45deg); }
 .collapse-toggle:hover,
 .player-close:hover,
 .transport-btn:hover:not(:disabled),
 .queue-close:hover { color: var(--text); background: var(--surface-hover); }
+.collapse-toggle:hover::before { opacity: 1; }
 .transport-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .player-close:hover { color: var(--danger); }
 .transport { display: flex; gap: 6px; align-items: center; }
@@ -707,12 +721,10 @@ function formatDuration(seconds) {
   .global-player.collapsed .collapse-toggle {
     width: 34px;
     height: 34px;
-    border: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
     color: white;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-    box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 36%, transparent);
-    font-size: 22px;
-    font-weight: 900;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent-hover) 84%, #fff));
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 36%, transparent), inset 0 1px 0 rgba(255,255,255,.25);
   }
   .global-player.collapsed .player-info,
   .global-player.collapsed .transport,

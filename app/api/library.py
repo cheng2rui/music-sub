@@ -1029,9 +1029,35 @@ def get_job(job_id: str):
     return job.to_dict()
 
 
-def _norm_song_key(title: str | None, artist: str | None = "") -> str:
+def _norm_text(value: str | None) -> str:
     import re
-    return f"{re.sub(r'\\s+', '', (title or '').lower())}::{re.sub(r'\\s+', '', (artist or '').split('/')[0].lower())}"
+    text = (value or "").lower()
+    text = re.sub(r"[\s\-_·•.,，。:：;；'\"“”‘’()（）\[\]【】]+", "", text)
+    return text
+
+
+def _norm_title(value: str | None) -> str:
+    import re
+    text = (value or "").lower()
+    text = re.sub(r"[\(（\[【].*?(live|cover|翻唱|remix|伴奏|karaoke|demo|版|现场).*?[\)）\]】]", "", text, flags=re.I)
+    text = re.sub(r"[-_·•]\s*(live|cover|翻唱|remix|伴奏|karaoke|demo|.*版|现场).*$", "", text, flags=re.I)
+    return _norm_text(text)
+
+
+def _norm_song_key(title: str | None, artist: str | None = "") -> str:
+    return f"{_norm_title(title)}::{_norm_text((artist or '').split('/')[0])}"
+
+
+def _is_cover_like(song: dict) -> bool:
+    blob = " ".join(str(song.get(k) or "") for k in ("title", "album", "artist", "filename", "subtitle", "remark")).lower()
+    return any(term in blob for term in ["翻唱", "cover", "remix", "伴奏", "karaoke", "demo", "live", "现场"])
+
+
+def _album_looks_complete(files: list[MusicFile]) -> bool:
+    tracks = sorted({int(f.track_number) for f in files if f.track_number and int(f.track_number) > 0})
+    if len(files) >= 1 and tracks:
+        return tracks == list(range(1, max(tracks) + 1)) and max(tracks) <= len(files)
+    return False
 
 
 def _bool_value(value: Any, default: bool = False) -> bool:
@@ -1074,7 +1100,17 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
         func.coalesce(MusicFile.album, UNKNOWN_ALBUM) == album,
     ).all()
     existing_keys = {_norm_song_key(f.title or Path(f.file_path or "").stem, f.artist or f.album_artist or artist) for f in existing}
-    existing_titles = {((f.title or Path(f.file_path or "").stem or "").strip().lower()) for f in existing}
+    existing_titles = {_norm_title(f.title or Path(f.file_path or "").stem or "") for f in existing}
+    allow_extra = _bool_value(payload.get("allow_extra"), False)
+    if _album_looks_complete(existing) and not allow_extra:
+        return {
+            "ok": True,
+            "dry_run": dry_run,
+            "existing": len(existing),
+            "candidates": [],
+            "downloaded": [],
+            "reason": "本地曲目编号已连续，判断专辑已完整；如确需额外版本可传 allow_extra=true。",
+        }
 
     from app.services.online_music import search_online, download_online_song
     from app.services.pipeline import _process_completed_torrent
@@ -1086,24 +1122,26 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
     candidates: dict[str, dict] = {}
     for song in raw:
         title = (song.get("title") or "").strip()
-        if not title or song.get("disabled"):
+        if not title or song.get("disabled") or _is_cover_like(song):
             continue
         song_album = (song.get("album") or "").strip()
         song_artist = (song.get("artist") or "").strip()
-        # Prefer same album, but keep artist matches because some sources omit album.
-        album_match = song_album and (song_album.lower() == album.lower() or album.lower() in song_album.lower() or song_album.lower() in album.lower())
-        artist_match = not song_artist or artist.lower() in song_artist.lower() or song_artist.lower() in artist.lower()
-        if song_album and not album_match and not artist_match:
+        album_match = bool(song_album) and _norm_text(song_album) == _norm_text(album)
+        artist_match = (not song_artist) or _norm_text(artist) in _norm_text(song_artist) or _norm_text(song_artist) in _norm_text(artist)
+        # Be deliberately conservative: album completion should only trust exact
+        # album matches. Sources that omit album are too noisy and often return covers.
+        if not album_match or not artist_match:
             continue
+        title_key = _norm_title(title)
         key = _norm_song_key(title, song_artist or artist)
-        if key in existing_keys or title.lower() in existing_titles:
+        if key in existing_keys or title_key in existing_titles:
             continue
         song["album"] = song_album or album
         song["artist"] = song_artist or artist
         song["title"] = title
-        current = candidates.get(title.lower())
+        current = candidates.get(title_key)
         if not current or _quality_score(song) > _quality_score(current):
-            candidates[title.lower()] = song
+            candidates[title_key] = song
 
     items = sorted(candidates.values(), key=_quality_score, reverse=True)
     if dry_run:

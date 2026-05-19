@@ -70,7 +70,7 @@ const optionPlaceholder = computed(() => {
   if (id === 'identify') return JSON.stringify({ write_tags: false }, null, 2)
   if (id === 'album_artist') return JSON.stringify({ album_artist: '', write_tags: false }, null, 2)
   if (id === 'dedupe') return JSON.stringify({ mode: 'trash' }, null, 2)
-  if (id === 'delete_files') return JSON.stringify({ delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, library_root: '/music' }, null, 2)
+  if (id === 'delete_files') return JSON.stringify({ delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true }, null, 2)
   if (id === 'split_audio' || id === 'cue_candidates') return JSON.stringify({ keep_original: true, overwrite_existing: false, output_subdir: '', stream_copy: false }, null, 2)
   if (id === 'zh_t2s' || id === 'zh_s2t') return JSON.stringify({ fields: ['title', 'artist', 'album', 'genre'], write_tags: false }, null, 2)
   if (id === 'fix_garble') return JSON.stringify({ fields: ['title', 'artist', 'album', 'genre'], write_tags: false }, null, 2)

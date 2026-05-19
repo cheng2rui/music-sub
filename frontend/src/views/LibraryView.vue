@@ -198,7 +198,7 @@ async function runLibraryScan() {
   scanJob.value = null
   if (scanPollTimer) { clearTimeout(scanPollTimer); scanPollTimer = null }
   try {
-    const res = await scanLibrary({})
+    const res = await scanLibrary({ remove_missing: true })
     if (res?.job_id) pollScanJob(res.job_id)
     else scanning.value = false
   } catch (e) {
@@ -335,7 +335,7 @@ async function completeSelectedAlbum() {
     const preview = await completeAlbum({ artist, album, dry_run: true, limit: 40 })
     const count = preview.candidates?.length || 0
     if (!count) {
-      completeAlbumMessage.value = '没有发现可补齐的新曲目'
+      completeAlbumMessage.value = preview.reason || '没有发现可补齐的新曲目'
       return
     }
     if (!confirm(`找到 ${count} 首疑似缺失曲目，是否开始下载并自动入库？`)) {
@@ -397,11 +397,11 @@ async function saveTrack() {
 }
 
 async function deleteTrack_RB2(track) {
-  if (!track || !confirm(`确认删除「${track.title}」？此操作不可撤销。`)) return
+  if (!track || !confirm(`确认删除「${track.title}」？\n会同时删除音乐库里的本地音频文件，并清理空目录。此操作不可撤销。`)) return
   try {
     await applyLibraryTool('delete_files', {
       file_ids: [track.id],
-      options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, library_root: '/music' },
+      options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true },
       async: false
     })
     showTrackModal.value = false
@@ -503,14 +503,8 @@ onMounted(() => { loadStats(); loadAlbums(0) })
         <button :class="['view-btn', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'">▦</button>
         <button :class="['view-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'">☰</button>
       </div>
-      <AppButton variant="ghost" size="sm" :loading="scraping" @click="handleScrapeUnscraped">
-        刮削未完成
-      </AppButton>
-      <AppButton variant="ghost" size="sm" :loading="scanning" @click="runLibraryScan">
+      <AppButton variant="primary" size="sm" :loading="scanning" @click="runLibraryScan">
         扫描资料库
-      </AppButton>
-      <AppButton variant="ghost" size="sm" @click="openHealthModal">
-        治理
       </AppButton>
       <AppButton variant="ghost" size="sm" @click="openToolbox()">
         工具箱

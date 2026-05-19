@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, completeAlbum } from '@/api/index.js'
+import { getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, completeAlbum, applyLibraryTool } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -135,7 +135,7 @@ async function completeMissingAlbum() {
     const preview = await completeAlbum({ artist: artist.value, album: album.value, dry_run: true, limit: 40 })
     const count = preview.candidates?.length || 0
     if (!count) {
-      completeResult.value = { message: '没有发现可补齐的新曲目' }
+      completeResult.value = { message: preview.reason || '没有发现可补齐的新曲目' }
       return
     }
     if (!confirm(`找到 ${count} 首疑似缺失曲目，是否开始下载并自动入库？`)) {
@@ -184,6 +184,17 @@ async function saveTrack() {
   } finally {
     savingTrack.value = false
   }
+}
+
+async function deleteTrack(track) {
+  if (!track || !confirm(`确认删除「${track.title || track.file_path}」？\n会同时删除音乐库里的本地音频文件，并清理空目录。此操作不可撤销。`)) return
+  await applyLibraryTool('delete_files', {
+    file_ids: [track.id],
+    options: { delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true },
+    async: false
+  })
+  showTrackModal.value = false
+  await loadTracks()
 }
 
 function formatDuration(s) {
@@ -269,7 +280,10 @@ onMounted(loadTracks)
           <label>专辑<input v-model="trackEdit.album" /></label>
           <label>年份<input v-model="trackEdit.year" type="number" /></label>
           <label>流派<input v-model="trackEdit.genre" /></label>
-          <AppButton variant="primary" size="sm" :loading="savingTrack" @click="saveTrack">保存</AppButton>
+          <div class="tag-actions">
+            <AppButton variant="primary" size="sm" :loading="savingTrack" @click="saveTrack">保存</AppButton>
+            <AppButton variant="danger" size="sm" @click="deleteTrack(selectedTrack)">删除本地文件</AppButton>
+          </div>
         </div>
         <div class="pager" v-if="trackPagedMode && trackPageCount > 1">
           <button :disabled="trackPage === 0 || trackLoading" @click="changeTrackPage(0)">&lt;&lt;</button>
@@ -328,6 +342,7 @@ h2 { font-size: clamp(28px, 5vw, 56px); line-height: 1; margin: 0; word-break: b
 .tag-edit h4 { margin: 0; }
 .tag-edit label { display: flex; gap: 10px; align-items: center; color: var(--text-dim); font-size: 13px; }
 .tag-edit input { flex: 1; }
+.tag-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 768px) {
   .album-view { padding: 16px; padding-bottom: 150px; }
@@ -343,5 +358,6 @@ h2 { font-size: clamp(28px, 5vw, 56px); line-height: 1; margin: 0; word-break: b
   .track-modal { min-width: unset; width: 100%; }
   .detail-row { flex-direction: column; gap: 2px; }
   .tag-edit label { flex-direction: column; align-items: stretch; }
+  .tag-actions { flex-direction: column; }
 }
 </style>
