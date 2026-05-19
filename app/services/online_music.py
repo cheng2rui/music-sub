@@ -598,41 +598,123 @@ def search_online(keyword: str, sources: list[str] | None = None, limit: int = 2
     return [r.to_dict() for r in results[:limit]]
 
 
+def _download_headers_for_song(song: dict) -> dict:
+    """Headers that make direct music CDN downloads less likely to be rejected."""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    source = song.get("source") or ""
+    if source == "qq":
+        headers.update({
+            "Referer": "https://y.qq.com/",
+            "Origin": "https://y.qq.com",
+        })
+    elif source == "netease":
+        headers.update({"Referer": "https://music.163.com/"})
+    elif source == "kuwo":
+        headers.update({"Referer": "https://www.kuwo.cn/"})
+    return headers
+
+
+def _unique_target(target_dir: Path, filename: str) -> Path:
+    target = target_dir / filename
+    if not target.exists():
+        return target
+    stem, suffix = target.stem, target.suffix
+    i = 1
+    while target.exists():
+        target = target_dir / f"{stem}({i}){suffix}"
+        i += 1
+    return target
+
+
+def _qq_download_candidates(song: dict) -> list[tuple[str, str]]:
+    """Return QQ download candidates as (url, ext), including fresh fallback URLs.
+
+    QQ CDN vkeys expire and NKI-returned isure6 links can start returning 418.
+    Keep the originally searched URL first for quality, then refresh through both
+    built-in musicu.fcg and NKI as fallback.
+    """
+    candidates: list[tuple[str, str]] = []
+    original_url = song.get("url") or ""
+    original_ext = song.get("format") or "mp3"
+    if original_url:
+        candidates.append((original_url, original_ext))
+
+    song_mid = song.get("song_id") or ""
+    if song_mid:
+        try:
+            url, ext, _size = _qq_pick_download_url(song_mid)
+            if url and all(url != u for u, _ in candidates):
+                candidates.append((url, ext or "mp3"))
+        except Exception as e:
+            logger.debug(f"[online:qq] builtin fallback resolve failed: {e}")
+        try:
+            url, ext, _size, _bitrate, _meta = _nki_pick_qq_download_url(song_mid)
+            if url and all(url != u for u, _ in candidates):
+                candidates.append((url, ext or original_ext or "mp3"))
+        except Exception as e:
+            logger.debug(f"[online:qq] nki fallback resolve failed: {e}")
+    return candidates
+
+
 def download_online_song(song: dict) -> str:
     """Download an online song to config.paths.downloads/online and return file path."""
     url = song.get("url") or ""
     if not url:
         raise ValueError("没有可下载链接")
 
+    source = song.get("source") or "online"
     filename = _clean_filename(song.get("filename") or f"{song.get('title','unknown')} - {song.get('artist','unknown')}.{song.get('format','mp3')}")
     target_dir = Path(config.paths.downloads) / "online"
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / filename
 
-    # Avoid overwriting existing files.
-    if target.exists():
-        stem, suffix = target.stem, target.suffix
-        i = 1
-        while target.exists():
-            target = target_dir / f"{stem}({i}){suffix}"
-            i += 1
+    if source == "qq":
+        candidates = _qq_download_candidates(song)
+    else:
+        candidates = [(url, song.get("format") or Path(filename).suffix.lstrip(".") or "mp3")]
 
-    logger.info(f"[online:{song.get('source')}] Downloading {filename}")
-    with _SESSION.get(url, stream=True, timeout=60) as resp:
-        resp.raise_for_status()
-        with open(target, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 256):
-                if chunk:
-                    f.write(chunk)
+    if not candidates:
+        raise ValueError("没有可下载链接")
+
+    headers = _download_headers_for_song(song)
+    last_error: Exception | None = None
+    for idx, (candidate_url, ext) in enumerate(candidates, start=1):
+        candidate_filename = filename
+        if ext:
+            current_suffix = Path(candidate_filename).suffix.lower().lstrip(".")
+            if current_suffix and current_suffix != ext.lower():
+                candidate_filename = str(Path(candidate_filename).with_suffix(f".{ext}"))
+            elif not current_suffix:
+                candidate_filename = f"{candidate_filename}.{ext}"
+        target = _unique_target(target_dir, candidate_filename)
+
+        logger.info(f"[online:{source}] Downloading {candidate_filename} (candidate {idx}/{len(candidates)})")
+        try:
+            with _SESSION.get(candidate_url, stream=True, timeout=60, headers=headers) as resp:
+                resp.raise_for_status()
+                with open(target, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024 * 256):
+                        if chunk:
+                            f.write(chunk)
+            break
+        except Exception as e:
+            last_error = e
+            try:
+                if target.exists():
+                    target.unlink()
+            except Exception:
+                pass
+            logger.warning(f"[online:{source}] download candidate {idx}/{len(candidates)} failed: {e}")
+    else:
+        raise last_error or RuntimeError("下载失败")
 
     # Save source-provided lyrics if available. Pipeline scraping may improve/overwrite later.
     lyric_url = song.get("lyric_url") or ""
     if lyric_url:
         try:
-            lyric_text = _SESSION.get(lyric_url, timeout=15).text
+            lyric_text = _SESSION.get(lyric_url, timeout=15, headers=headers).text
             if lyric_text and len(lyric_text) > 20:
                 target.with_suffix(".lrc").write_text(lyric_text, encoding="utf-8")
         except Exception as e:
-            logger.debug(f"[online:{song.get('source')}] lyric download failed: {e}")
+            logger.debug(f"[online:{source}] lyric download failed: {e}")
 
     return str(target)
