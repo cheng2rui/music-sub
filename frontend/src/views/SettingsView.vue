@@ -69,6 +69,8 @@ const settingsTabs = [
   { key: 'security', label: '安全', icon: '🔐', islandIconSrc: animalAsset('animal_icon.svg') }
 ]
 const activeSettingsTab = ref('sites')
+const tabMeta = (key) => settingsTabs.find(tab => tab.key === key) || {}
+const islandIconFor = (key) => tabMeta(key).islandIconSrc || ''
 
 // Password change
 const pwdForm = ref({ old_password: '', new_username: '', new_password: '' })
@@ -342,7 +344,7 @@ onMounted(loadAll)
 
       <!-- PT站配置 -->
       <div v-show="activeSettingsTab === 'sites'" class="settings-section">
-        <h3>📡 PT站配置</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('sites')" alt="" /><span v-else>📡</span><span>PT站配置</span></h3>
         <div class="site-grid">
           <!-- M-Team -->
           <div class="site-card">
@@ -398,7 +400,7 @@ onMounted(loadAll)
 
       <!-- qBittorrent -->
       <div v-show="activeSettingsTab === 'downloader'" class="settings-section">
-        <h3>⬇️ qBittorrent</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('downloader')" alt="" /><span v-else>⬇️</span><span>qBittorrent</span></h3>
         <div class="fields-row">
           <div class="field flex-1">
             <label>地址</label>
@@ -432,7 +434,7 @@ onMounted(loadAll)
 
       <!-- 路径配置 -->
       <div v-show="activeSettingsTab === 'paths'" class="settings-section">
-        <h3>📁 路径配置</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('paths')" alt="" /><span v-else>📁</span><span>路径配置</span></h3>
         <div class="fields-row">
           <div class="field flex-1">
             <label>音乐库目录</label>
@@ -451,7 +453,7 @@ onMounted(loadAll)
 
       <!-- 刮削配置 -->
       <div v-show="activeSettingsTab === 'scraper'" class="settings-section">
-        <h3>🎵 刮削配置</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('scraper')" alt="" /><span v-else>🎵</span><span>刮削配置</span></h3>
         <div class="toggle-list">
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.embed_cover" /><span>嵌入封面到音频标签</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.scraper.save_cover_file" /><span>保存 cover.jpg 到专辑目录</span></label>
@@ -472,7 +474,7 @@ onMounted(loadAll)
 
       <!-- 定时任务 -->
       <div v-show="activeSettingsTab === 'automation'" class="settings-section">
-        <h3>⏰ 定时任务</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('automation')" alt="" /><span v-else>⏰</span><span>定时任务</span></h3>
         <div class="fields-row" style="margin-bottom:16px">
           <div class="field">
             <label>搜索间隔(分钟)</label>
@@ -502,7 +504,7 @@ onMounted(loadAll)
 
       <!-- 通知 -->
       <div v-show="activeSettingsTab === 'notify'" class="settings-section">
-        <h3>📢 通知与消息入口</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('notify')" alt="" /><span v-else>📢</span><span>通知与消息入口</span></h3>
         <div class="field" style="margin-bottom:14px">
           <label>Webhook Token（入站消息校验）</label>
           <input v-model="settings.notify.webhook_token" placeholder="必填；/api/notify/webhook/... 必须带 ?token=" />
@@ -616,7 +618,7 @@ onMounted(loadAll)
 
       <!-- 智能助手 -->
       <div v-show="activeSettingsTab === 'assistant'" class="settings-section">
-        <h3>🤖 智能助手</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('assistant')" alt="" /><span v-else>🤖</span><span>智能助手</span></h3>
         <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.assistant.enabled" /><span>启用智能助手</span></label>
         <div class="fields-grid">
           <div class="field">
@@ -698,7 +700,7 @@ onMounted(loadAll)
 
       <!-- 账号安全 -->
       <div v-show="activeSettingsTab === 'security'" class="settings-section">
-        <h3>账号安全</h3>
+        <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('security')" alt="" /><span v-else>🔐</span><span>账号安全</span></h3>
         <div class="pwd-form">
           <input v-model="pwdForm.old_password" type="password" placeholder="旧密码" />
           <input v-model="pwdForm.new_username" placeholder="新用户名（可选）" />
@@ -717,6 +719,8 @@ onMounted(loadAll)
 </template>
 
 <style scoped>
+.animal-section-title { display: inline-flex; align-items: center; gap: 8px; }
+.animal-section-title img { width: 26px; height: 26px; object-fit: contain; filter: drop-shadow(0 2px 1px rgba(61, 52, 40, .14)); }
 .settings-view { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; height: 100%; }
 .loading-text { color: var(--text-dim); padding: 20px 0; }
 .settings-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; margin: -2px -2px 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; align-items: center; }

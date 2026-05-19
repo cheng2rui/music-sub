@@ -2,8 +2,11 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { getAlbumCover, getFile } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
+import { useThemeStore } from '@/stores/theme.js'
 
 const player = usePlayerStore()
+const theme = useThemeStore()
+const isIsland = computed(() => theme.current === 'island')
 
 const title = computed(() => player.currentTrack?.title || '正在播放')
 const subtitle = computed(() => [player.currentTrack?.artist, player.currentTrack?.album].filter(Boolean).join(' · '))
@@ -259,11 +262,11 @@ function formatDuration(seconds) {
     </button>
 
     <div v-show="!player.isCollapsed" class="transport">
-      <button class="transport-btn side" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev">⏮</button>
+      <button class="transport-btn side" title="上一首" :disabled="!player.hasPrev" @click="player.playPrev"><span aria-hidden="true">‹</span></button>
       <button :class="['transport-btn', 'play-main', { playing: isPlaying }]" :title="isPlaying ? '暂停' : '播放'" @click="togglePlay">
         <span aria-hidden="true">{{ isPlaying ? 'Ⅱ' : '▶' }}</span>
       </button>
-      <button class="transport-btn side" title="下一首" :disabled="!player.hasNext" @click="player.playNext">⏭</button>
+      <button class="transport-btn side" title="下一首" :disabled="!player.hasNext" @click="player.playNext"><span aria-hidden="true">›</span></button>
     </div>
 
     <div v-show="!player.isCollapsed" class="seek-wrap">
@@ -339,7 +342,10 @@ function formatDuration(seconds) {
       aria-label="播放队列"
       @click="toggleQueuePanel"
     >
-      <span class="panel-icon" aria-hidden="true">☰</span>
+      <span class="panel-icon" aria-hidden="true">
+        <img v-if="isIsland" src="/animal-island/nook-phone/Property-Recipes.svg" alt="" class="animal-player-icon" />
+        <span v-else>☰</span>
+      </span>
       <span class="panel-label">{{ queueLabel }}</span>
     </button>
 
@@ -353,7 +359,10 @@ function formatDuration(seconds) {
       <div v-if="isNowOpen && !player.isCollapsed" class="now-panel">
         <div class="now-cover-wrap">
           <img v-if="coverUrl" :src="coverUrl" class="now-cover" />
-          <div v-else class="now-cover placeholder">♪</div>
+          <div v-else class="now-cover placeholder">
+            <img v-if="isIsland" src="/animal-island/nook-phone/AppIcons.svg" alt="" class="animal-now-icon" />
+            <span v-else>♪</span>
+          </div>
         </div>
         <div class="now-content">
           <div class="now-head">
@@ -627,7 +636,9 @@ function formatDuration(seconds) {
   font-weight: 700;
 }
 .panel-toggle:hover, .panel-toggle.active { color: var(--text); background: var(--surface-hover); }
-.panel-icon { font-size: 14px; line-height: 1; }
+.panel-icon { font-size: 14px; line-height: 1; display: inline-flex; align-items: center; }
+.animal-player-icon { width: 18px; height: 18px; object-fit: contain; }
+.animal-now-icon { width: 74px; height: 74px; object-fit: contain; filter: drop-shadow(0 4px 3px rgba(61, 52, 40, .16)); }
 .panel-label { line-height: 1; }
 .mobile-progress { display: none; }
 .queue-panel,
