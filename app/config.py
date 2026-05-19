@@ -75,6 +75,8 @@ class WeComNotifyConfig(NotifyChannelEvents):
     agent_id: str = ""
     app_secret: str = ""
     to_user: str = "@all"
+    token: str = ""
+    encoding_aes_key: str = ""
     proxy: str = "https://qyapi.weixin.qq.com"
 
 

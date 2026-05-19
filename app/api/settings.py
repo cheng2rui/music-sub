@@ -90,6 +90,8 @@ class WeComNotifyInput(NotifyEventInput):
     agent_id: str = ""
     app_secret: str = ""
     to_user: str = "@all"
+    token: str = ""
+    encoding_aes_key: str = ""
     proxy: str = "https://qyapi.weixin.qq.com"
 
 
@@ -180,6 +182,10 @@ def get_settings():
         data.notify.telegram.bot_token = _mask_secret(data.notify.telegram.bot_token, 6)
     if data.notify.wecom.app_secret:
         data.notify.wecom.app_secret = _mask_secret(data.notify.wecom.app_secret, 6)
+    if data.notify.wecom.token:
+        data.notify.wecom.token = _mask_secret(data.notify.wecom.token, 6)
+    if data.notify.wecom.encoding_aes_key:
+        data.notify.wecom.encoding_aes_key = _mask_secret(data.notify.wecom.encoding_aes_key, 6)
     if data.notify.qqbot.app_secret:
         data.notify.qqbot.app_secret = _mask_secret(data.notify.qqbot.app_secret, 6)
     if data.notify.wechatbot.token:
@@ -255,6 +261,10 @@ def save_settings(settings: AllSettings):
         raw["notify"]["telegram"]["bot_token"] = cfg_module.config.notify.telegram.bot_token
     if _is_unchanged_mask(raw["notify"]["wecom"].get("app_secret", ""), cfg_module.config.notify.wecom.app_secret, 6):
         raw["notify"]["wecom"]["app_secret"] = cfg_module.config.notify.wecom.app_secret
+    if _is_unchanged_mask(raw["notify"]["wecom"].get("token", ""), cfg_module.config.notify.wecom.token, 6):
+        raw["notify"]["wecom"]["token"] = cfg_module.config.notify.wecom.token
+    if _is_unchanged_mask(raw["notify"]["wecom"].get("encoding_aes_key", ""), cfg_module.config.notify.wecom.encoding_aes_key, 6):
+        raw["notify"]["wecom"]["encoding_aes_key"] = cfg_module.config.notify.wecom.encoding_aes_key
     if _is_unchanged_mask(raw["notify"]["qqbot"].get("app_secret", ""), cfg_module.config.notify.qqbot.app_secret, 6):
         raw["notify"]["qqbot"]["app_secret"] = cfg_module.config.notify.qqbot.app_secret
     if _is_unchanged_mask(raw["notify"]["wechatbot"].get("token", ""), cfg_module.config.notify.wechatbot.token, 6):

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -66,6 +67,68 @@ def incoming(req: IncomingRequest, token: str = Query(default=""), db: Session =
         group=req.group,
         msg_id=req.msg_id,
     )
+
+
+@router.get("/webhook/wecom")
+def wecom_verify(
+    msg_signature: str = Query(default=""),
+    timestamp: str = Query(default=""),
+    nonce: str = Query(default=""),
+    echostr: str = Query(default=""),
+):
+    """Native WeCom URL verification endpoint."""
+    from app.services.wecom_crypto import verify_url, WeComCryptoError
+    wc = cfg_module.config.notify.wecom
+    if not wc.token or not wc.encoding_aes_key or not wc.corp_id:
+        raise HTTPException(status_code=400, detail="wecom token/encoding_aes_key/corp_id not configured")
+    try:
+        plain = verify_url(
+            token=wc.token,
+            encoding_aes_key=wc.encoding_aes_key,
+            receive_id=wc.corp_id,
+            msg_signature=msg_signature,
+            timestamp=timestamp,
+            nonce=nonce,
+            echostr=echostr,
+        )
+        return PlainTextResponse(plain)
+    except WeComCryptoError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
+@router.post("/webhook/wecom")
+async def wecom_native_webhook(
+    request: Request,
+    msg_signature: str = Query(default=""),
+    timestamp: str = Query(default=""),
+    nonce: str = Query(default=""),
+    token: str = Query(default=""),
+    db: Session = Depends(get_db),
+):
+    """Native encrypted WeCom application callback."""
+    from app.services.wecom_crypto import decrypt_message, parse_plain_message, WeComCryptoError
+    wc = cfg_module.config.notify.wecom
+    if wc.token and wc.encoding_aes_key and wc.corp_id and msg_signature and timestamp and nonce:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        try:
+            plain_xml = decrypt_message(
+                token=wc.token,
+                encoding_aes_key=wc.encoding_aes_key,
+                receive_id=wc.corp_id,
+                msg_signature=msg_signature,
+                timestamp=timestamp,
+                nonce=nonce,
+                body=body,
+            )
+            msg = parse_plain_message(plain_xml)
+        except WeComCryptoError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        if not msg.content:
+            return PlainTextResponse("success")
+        handle_incoming_assistant(db, channel="wecom", text=msg.content, user_id=msg.from_user, target=msg.from_user, msg_id=msg.msg_id)
+        return PlainTextResponse("success")
+    # Fallback to generic token-protected JSON/form webhook for proxy mode.
+    return await provider_webhook("wecom", request, token=token, db=db)
 
 
 @router.post("/webhook/{channel}")

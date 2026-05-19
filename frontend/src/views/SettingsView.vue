@@ -437,6 +437,8 @@ onMounted(loadAll)
             <div class="field flex-1"><label>Agent ID</label><input v-model="settings.notify.wecom.agent_id" /></div>
             <div class="field flex-1"><label>App Secret</label><input v-model="settings.notify.wecom.app_secret" type="password" /></div>
             <div class="field flex-1"><label>ToUser</label><input v-model="settings.notify.wecom.to_user" placeholder="@all / UserID" /></div>
+            <div class="field flex-1"><label>回调 Token</label><input v-model="settings.notify.wecom.token" type="password" placeholder="企业微信后台设置的 Token" /></div>
+            <div class="field flex-1"><label>EncodingAESKey</label><input v-model="settings.notify.wecom.encoding_aes_key" type="password" placeholder="43 位 EncodingAESKey" /></div>
           </div>
           <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'wc-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.wecom[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
         </div>
