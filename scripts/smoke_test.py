@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -51,6 +53,7 @@ def main() -> int:
     ap.add_argument("--username", default="888")
     ap.add_argument("--password", default="888")
     ap.add_argument("--expect-version", default="")
+    ap.add_argument("--container", default="music-sub", help="Docker container name to validate; empty to skip")
     ap.add_argument("--album-artist", default="蔡依林")
     ap.add_argument("--album", default="Ugly Beauty")
     args = ap.parse_args()
@@ -90,6 +93,35 @@ def main() -> int:
     if "items" not in trash:
         raise RuntimeError(f"trash listing failed: {trash}")
     ok("trash listing", f"total={trash.get('total')}")
+
+    restore_many_error = False
+    try:
+        request(args.base, "/api/library/trash/restore_many", method="POST", token=token, data={"trash_paths": []})
+    except RuntimeError as exc:
+        restore_many_error = "HTTP 400" in str(exc)
+    if not restore_many_error:
+        raise RuntimeError("trash restore_many empty payload should return HTTP 400")
+    ok("trash restore_many guard")
+
+    if args.expect_version:
+        html = request(args.base, "/", timeout=20)
+        match = re.search(r'/(assets/index-[^"\']+\.js)', str(html))
+        if not match:
+            raise RuntimeError("frontend index asset not found in /")
+        asset_path = "/" + match.group(1)
+        asset = request(args.base, asset_path, timeout=20)
+        if args.expect_version not in str(asset):
+            raise RuntimeError(f"frontend asset {asset_path} does not contain version {args.expect_version}")
+        ok("frontend asset version", asset_path)
+
+    if args.container and args.expect_version:
+        try:
+            image = subprocess.check_output(["docker", "inspect", "--format", "{{.Config.Image}}", args.container], text=True, timeout=20).strip()
+        except Exception as exc:
+            raise RuntimeError(f"docker inspect failed for {args.container}: {exc}") from exc
+        if args.expect_version not in image:
+            raise RuntimeError(f"container image mismatch: expected {args.expect_version} in {image}")
+        ok("docker image", image)
 
     print("\nSmoke test passed.")
     return 0
