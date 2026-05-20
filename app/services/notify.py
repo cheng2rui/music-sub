@@ -97,9 +97,14 @@ def normalize_incoming_message(channel: str, body: dict[str, Any] | Any) -> Inco
             msg = callback.get("message") or {}
             chat = msg.get("chat") or {}
             data = _as_str(callback.get("data"))
+            text = f"CALLBACK:{data}" if data else _pick_text(callback.get("message"), callback.get("text"))
+            if data == "ms_confirm":
+                text = "确认"
+            elif data == "ms_cancel":
+                text = "取消"
             return IncomingMessage(
                 channel="telegram",
-                text=f"CALLBACK:{data}" if data else _pick_text(callback.get("message"), callback.get("text")),
+                text=text,
                 user_id=_as_str(user.get("id")),
                 username=_pick_text(user.get("username"), user.get("first_name"), user.get("last_name")),
                 target=_as_str(chat.get("id") or user.get("id")),
@@ -233,15 +238,18 @@ def _event_enabled(channel_cfg: Any, event: str) -> bool:
     return bool(getattr(channel_cfg, "enabled", False) and getattr(channel_cfg, event, True))
 
 
-def _send_telegram(text: str, target: str | None = None) -> SendResult:
+def _send_telegram(text: str, target: str | None = None, reply_markup: dict[str, Any] | None = None) -> SendResult:
     tg = cfg_module.config.notify.telegram
     chat_id = target or tg.chat_id
     if not tg.enabled or not tg.bot_token or not chat_id:
         return SendResult("telegram", False, "telegram not configured")
     try:
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         resp = requests.post(
             f"https://api.telegram.org/bot{tg.bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            json=payload,
             timeout=10,
         )
         data = resp.json() if resp.content else {}
@@ -388,10 +396,10 @@ def _send_wechatbot(text: str, target: str | None = None) -> SendResult:
         return SendResult("wechatbot", False, str(e))
 
 
-def send_channel(channel: str, text: str, *, target: str | None = None, group: bool | None = None, msg_id: str | None = None) -> SendResult:
+def send_channel(channel: str, text: str, *, target: str | None = None, group: bool | None = None, msg_id: str | None = None, reply_markup: dict[str, Any] | None = None) -> SendResult:
     channel = (channel or "").lower()
     if channel == "telegram":
-        result = _send_telegram(text, target=target)
+        result = _send_telegram(text, target=target, reply_markup=reply_markup)
     elif channel in {"wecom", "wechat", "wework"}:
         result = _send_wecom(text, userid=target)
     elif channel == "qqbot":
@@ -476,6 +484,7 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
     service = AssistantService(db)
     conv = _get_or_create_notify_conversation(db, channel, user_id, target)
     pending = _latest_pending_action(db, conv.id)
+    reply_markup = None
 
     if pending and _looks_cancel(text):
         res = service.cancel_action(pending.action_id)
@@ -487,10 +496,17 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
         res = service.chat(text, conv.id)
         reply = res.get("message") or "助手没有返回内容。"
         if res.get("needs_confirm") and res.get("action_id"):
-            reply += "\n\n回复“确认”执行，或回复“取消”放弃。"
+            if channel == "telegram":
+                reply += "\n\n点击按钮确认，或直接回复“确认”/“取消”。"
+                reply_markup = {"inline_keyboard": [[
+                    {"text": "✅ 确认执行", "callback_data": "ms_confirm"},
+                    {"text": "❌ 取消", "callback_data": "ms_cancel"},
+                ]]}
+            else:
+                reply += "\n\n回复“确认”执行，或回复“取消”放弃。"
 
     # Prefer explicit target; otherwise reply to inbound user id.
-    send_res = send_channel(channel, reply, target=target or user_id or None, group=group, msg_id=msg_id)
+    send_res = send_channel(channel, reply, target=target or user_id or None, group=group, msg_id=msg_id, reply_markup=reply_markup)
     return {"ok": bool(res.get("ok", True)), "conversation_id": conv.id, "incoming": incoming.meta(), "assistant": res, "send": send_res.__dict__}
 
 
