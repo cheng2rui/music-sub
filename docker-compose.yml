@@ -1,6 +1,6 @@
 services:
   music-sub:
-    image: music-sub:0.7.87
+    image: music-sub:0.7.88
     build: .
     container_name: music-sub
     ports:
@@ -16,6 +16,9 @@ services:
       - MUSIC_SUB_DB=/app/data/music_sub.db
       - no_proxy=*
       - NO_PROXY=*
+    extra_hosts:
+      # Stable Telegram Bot API IP for Docker DNS environments where local DNS returns blocked/poisoned routes.
+      - "api.telegram.org:149.154.166.110"
     dns:
       - 223.5.5.5
       - 119.29.29.29

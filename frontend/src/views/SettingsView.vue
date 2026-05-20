@@ -24,7 +24,7 @@ const settings = ref({
     webhook_token: '',
     public_base_url: '',
     templates: {},
-    telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
+    telegram: { enabled: false, bot_token: '', chat_id: '', enable_polling: true, polling_timeout: 25, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', enable_gateway: false, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wechatbot: { enabled: false, webhook_url: '', token: '', enable_claw: false, claw_base_url: 'https://ilinkai.weixin.qq.com', claw_default_target: '', claw_poll_timeout: 25, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true }
@@ -263,6 +263,7 @@ const notifyChannelLabels = { telegram: 'Telegram', wecom: '企业微信', qqbot
 
 function notifyChannelColor(name, ch) {
   if (ch?.last_error) return 'red'
+  if (name === 'telegram' && ch?.polling?.running) return 'green'
   if (name === 'qqbot' && ch?.gateway?.running) return 'green'
   if (name === 'wechatbot' && ch?.claw?.connected) return 'green'
   if (ch?.enabled) return 'orange'
@@ -270,6 +271,7 @@ function notifyChannelColor(name, ch) {
 }
 
 function notifyChannelLabel(name, ch) {
+  if (name === 'telegram' && ch?.polling?.running) return '轮询收消息中'
   if (name === 'qqbot' && ch?.gateway?.running) return 'Gateway 运行中'
   if (name === 'wechatbot' && ch?.claw?.connected) return 'Claw 已登录'
   if (ch?.enabled) return '已启用'
@@ -692,11 +694,18 @@ onMounted(loadAll)
             <div class="field flex-1"><label>Bot Token</label><input v-model="settings.notify.telegram.bot_token" placeholder="123456:ABC-DEF..." /></div>
             <div class="field flex-1"><label>Chat ID</label><input v-model="settings.notify.telegram.chat_id" placeholder="-100... 或 user id" /></div>
           </div>
-          <div v-if="settings.notify.telegram.enabled" class="telegram-webhook-box">
+          <div v-if="settings.notify.telegram.enabled" class="gateway-row">
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.assistant_chat" /><span>允许在 Telegram 里和助手对话</span></label>
+            <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.enable_polling" /><span>内网轮询收消息（推荐，无需公网）</span></label>
+            <AppBadge :color="notifyStatus?.channels?.telegram?.polling?.running ? 'green' : (settings.notify.telegram.enable_polling ? 'orange' : 'dim')">{{ notifyStatus?.channels?.telegram?.polling?.running ? '收消息中' : (settings.notify.telegram.enable_polling ? '保存后启动' : '未启用') }}</AppBadge>
+            <small class="text-dim">像 MoviePilot/OpenClaw 一样：填 Bot Token + Chat ID，保存后即可收发；Webhook 只作为有公网 HTTPS 时的高级选项。</small>
+          </div>
+          <details v-if="settings.notify.telegram.enabled" class="telegram-webhook-box">
+            <summary>高级：Webhook（有公网 HTTPS 时才需要）</summary>
             <div class="telegram-webhook-head">
               <div>
                 <strong>Telegram 入站 Webhook</strong>
-                <small>用于让 Telegram 消息直接进入 Music Sub 助手。需要公网 HTTPS 域名。</small>
+                <small>公网部署可选；内网/NAS 请保持上面的“内网轮询收消息”。</small>
               </div>
               <AppButton variant="ghost" size="sm" :loading="telegramWebhookBusy === 'refresh'" @click="loadTelegramWebhook(true)">刷新状态</AppButton>
             </div>
@@ -717,7 +726,7 @@ onMounted(loadAll)
               <AppButton variant="ghost" size="sm" :disabled="!settings.notify.telegram.bot_token" :loading="telegramWebhookBusy === 'delete'" @click="handleDeleteTelegramWebhook">删除 Webhook</AppButton>
               <AppButton variant="ghost" size="sm" :disabled="!telegramFinalWebhookUrl" @click="copyText(telegramFinalWebhookUrl, 'Telegram Webhook 地址')">复制最终地址</AppButton>
             </div>
-          </div>
+          </details>
           <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'tg-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
         </div>
 

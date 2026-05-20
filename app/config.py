@@ -69,6 +69,8 @@ class NotifyChannelEvents(BaseModel):
 class TelegramNotifyConfig(NotifyChannelEvents):
     bot_token: str = ""
     chat_id: str = ""
+    enable_polling: bool = False
+    polling_timeout: int = 25
 
 
 class WeComNotifyConfig(NotifyChannelEvents):

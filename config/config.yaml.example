@@ -71,10 +71,15 @@ scheduler:
   cleanup_scan_interval_hours: 24
 
 notify:
+  webhook_token: ""      # auto-generated on first run; protects inbound webhooks
+  public_base_url: ""     # optional public HTTPS origin for webhook mode
   telegram:
     enabled: false
     bot_token: ""
     chat_id: ""
+    assistant_chat: true
+    enable_polling: true   # recommended for NAS/private deployments; no public HTTPS needed
+    polling_timeout: 25
     on_download_added: false
     on_download_complete: true
     on_scrape_complete: true

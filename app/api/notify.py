@@ -191,6 +191,11 @@ def notify_status(db: Session = Depends(get_db)):
         by_channel["wechatbot"]["claw"] = get_status()
     except Exception as exc:
         by_channel["wechatbot"]["claw"] = {"error": str(exc)}
+    try:
+        from app.services.telegram_polling import telegram_polling_status
+        by_channel["telegram"]["polling"] = telegram_polling_status()
+    except Exception as exc:
+        by_channel["telegram"]["polling"] = {"error": str(exc)}
     return {"channels": by_channel}
 
 

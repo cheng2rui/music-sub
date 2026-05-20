@@ -83,6 +83,8 @@ class NotifyEventInput(BaseModel):
 class TelegramNotifyInput(NotifyEventInput):
     bot_token: str = ""
     chat_id: str = ""
+    enable_polling: bool = False
+    polling_timeout: int = 25
 
 
 class WeComNotifyInput(NotifyEventInput):
@@ -297,8 +299,10 @@ def save_settings(settings: AllSettings):
     try:
         from app.services.qqbot_gateway import restart_qqbot_gateway
         from app.services.wechatclaw import restart_wechatclaw_polling
+        from app.services.telegram_polling import restart_telegram_polling
         restart_qqbot_gateway()
         restart_wechatclaw_polling()
+        restart_telegram_polling()
     except Exception as exc:
         warnings.append(f"通知运行时重启失败：{str(exc)[:120]}")
     message = "Settings saved and reloaded"
