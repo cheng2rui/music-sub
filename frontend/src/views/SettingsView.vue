@@ -178,9 +178,8 @@ async function loadTelegramWebhook(showAlert = false) {
 }
 
 async function handleSetTelegramWebhook() {
-  ensureWebhookToken()
-  const base = (telegramWebhookBaseUrl.value || settings.value.notify.public_base_url || window.location.origin || '').trim().replace(/\/$/, '')
-  if (!base.startsWith('https://')) return alert('Telegram Webhook 需要公网 HTTPS 地址，例如 https://music.example.com')
+  const base = (telegramWebhookBaseUrl.value || settings.value.notify.public_base_url || '').trim().replace(/\/$/, '')
+  if (!base.startsWith('https://')) return alert('请填写公网 HTTPS 地址，例如 https://music.example.com。没有公网地址也可以正常发送通知，只是不能接收 Telegram 入站消息。')
   telegramWebhookBusy.value = 'set'
   try {
     const res = await setTelegramWebhook(base, telegramWebhookDropPending.value)
@@ -305,9 +304,10 @@ const notifyWebhookUrls = computed(() => {
     { key: 'wechatbot', label: 'WeChatBot Webhook', desc: 'WeChatBot / iLink / 自建微信转发器推送', url: `${notifyWebhookBase.value}/webhook/wechatbot?token=${token}` },
   ]
 })
-const telegramRecommendedWebhookUrl = computed(() => {
-  const item = notifyWebhookUrls.value.find(x => x.key === 'telegram')
-  return item?.url || ''
+const telegramRecommendedWebhookUrl = computed(() => `${notifyWebhookBase.value}/webhook/telegram?token=***`)
+const telegramFinalWebhookUrl = computed(() => {
+  const base = (telegramWebhookBaseUrl.value || settings.value.notify.public_base_url || '').trim().replace(/\/$/, '')
+  return base ? `${base}${telegramWebhookStatus.value?.recommended_path || '/api/notify/webhook/telegram?...'}` : ''
 })
 const wecomNativeCallbackUrl = computed(() => `${notifyWebhookBase.value}/webhook/wecom`)
 
@@ -630,58 +630,6 @@ onMounted(loadAll)
       <!-- 通知 -->
       <div v-show="activeSettingsTab === 'notify'" class="settings-section">
         <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('notify')" alt="" /><span v-else>📢</span><span>通知与消息入口</span></h3>
-        <div class="notify-webhook-panel">
-          <div class="notify-webhook-head">
-            <div>
-              <strong>通讯入口</strong>
-              <div class="text-dim">像 MoviePilot / OpenClaw 一样，通常只需要配置下面各通讯软件参数。Music Sub 会自动生成内部入站密钥并拼接回调地址。</div>
-            </div>
-            <AppBadge :color="notifyWebhookTokenReady ? 'green' : 'orange'">{{ notifyWebhookTokenReady ? '内部密钥已就绪' : '保存时自动生成' }}</AppBadge>
-          </div>
-          <div class="fields-row">
-            <div class="field flex-1">
-              <label>公网访问地址（可选）</label>
-              <input v-model="settings.notify.public_base_url" placeholder="https://music.example.com" />
-              <small class="text-dim">用于 Telegram Webhook 和通知深链按钮。没有公网地址也能发送通知；入站消息需要公网 HTTPS。</small>
-            </div>
-          </div>
-          <details class="webhook-advanced">
-            <summary>高级：查看/重置自动生成的入站密钥和回调地址</summary>
-            <div class="fields-row">
-              <div class="field flex-1">
-                <label>内部入站密钥</label>
-                <input v-model="settings.notify.webhook_token" type="password" placeholder="保存设置时自动生成" />
-                <small class="text-dim">一般不用管。只有自建 webhook 转发器或需要排障时才复制它。</small>
-              </div>
-              <AppButton variant="ghost" size="sm" @click="ensureWebhookToken(); copyText(notifyWebhookToken, '入站密钥')">复制密钥</AppButton>
-              <AppButton variant="ghost" size="sm" @click="regenerateWebhookToken">重新生成</AppButton>
-            </div>
-            <div class="webhook-url-list">
-            <div v-for="item in notifyWebhookUrls" :key="item.key" class="webhook-url-row">
-              <div class="webhook-url-main">
-                <strong>{{ item.label }}</strong>
-                <small>{{ item.desc }}</small>
-                <code>{{ item.url }}</code>
-              </div>
-              <AppButton variant="ghost" size="sm" :disabled="!notifyWebhookToken" @click="copyText(item.url, item.label + '地址')">复制地址</AppButton>
-            </div>
-            </div>
-          </details>
-          <div class="webhook-help-grid">
-            <div class="webhook-help-card">
-              <strong>标准 JSON 示例</strong>
-              <code>{"channel":"telegram","text":"帮我看看下载状态","user_id":"rey"}</code>
-              <small>适合自建脚本、n8n、青龙、Webhook 转发器等；Telegram / QQBot 等原始回调会被自动归一化。</small>
-            </div>
-            <div class="webhook-help-card">
-              <strong>企业微信原生回调</strong>
-              <code>{{ wecomNativeCallbackUrl }}</code>
-              <small>企业微信后台配置的是这个地址；它使用下方“回调 Token / EncodingAESKey / Corp ID”验签解密，不使用上面的入站密钥。</small>
-            </div>
-          </div>
-          <div v-if="!notifyWebhookTokenReady" class="webhook-warning">提示：当前显示的是脱敏密钥。需要设置 webhook 时，点“设置 Webhook”会使用服务端保存的真实密钥；如需手动复制，请先重新生成并保存。</div>
-        </div>
-
         <details class="notify-template-panel">
           <summary>通知模板</summary>
           <div class="text-dim template-help">参考 MoviePilot 的模板思路：每类通知可自定义文案，使用变量占位符；未配置时使用默认模板。</div>
@@ -760,14 +708,14 @@ onMounted(loadAll)
               <div class="field flex-1">
                 <label>公网 HTTPS 域名</label>
                 <input v-model="telegramWebhookBaseUrl" placeholder="https://music.example.com" />
-                <small class="text-dim">最终地址：{{ telegramWebhookBaseUrl ? telegramWebhookBaseUrl.replace(/\/$/, '') + (telegramWebhookStatus?.recommended_path || '/api/notify/webhook/telegram?...') : telegramRecommendedWebhookUrl }}</small>
+                <small class="text-dim">最终地址：{{ telegramFinalWebhookUrl || '填写公网 HTTPS 地址后自动生成；密钥由系统内部管理。' }}</small>
               </div>
               <label class="toggle-item"><input type="checkbox" v-model="telegramWebhookDropPending" /><span>丢弃 Telegram 待处理消息</span></label>
             </div>
             <div class="header-actions">
-              <AppButton variant="primary" size="sm" :disabled="!notifyWebhookTokenReady || !settings.notify.telegram.bot_token" :loading="telegramWebhookBusy === 'set'" @click="handleSetTelegramWebhook">设置 Webhook</AppButton>
+              <AppButton variant="primary" size="sm" :disabled="!settings.notify.telegram.bot_token" :loading="telegramWebhookBusy === 'set'" @click="handleSetTelegramWebhook">设置 Webhook</AppButton>
               <AppButton variant="ghost" size="sm" :disabled="!settings.notify.telegram.bot_token" :loading="telegramWebhookBusy === 'delete'" @click="handleDeleteTelegramWebhook">删除 Webhook</AppButton>
-              <AppButton variant="ghost" size="sm" :disabled="!telegramRecommendedWebhookUrl" @click="copyText(telegramRecommendedWebhookUrl, 'Telegram Webhook 地址')">复制推荐地址</AppButton>
+              <AppButton variant="ghost" size="sm" :disabled="!telegramFinalWebhookUrl" @click="copyText(telegramFinalWebhookUrl, 'Telegram Webhook 地址')">复制最终地址</AppButton>
             </div>
           </div>
           <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'tg-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
