@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.db import SessionLocal
 from app.models import DownloadTask
-from app.services.online_music import search_online, download_online_song
+from app.services.online_music import OnlineDownloadError, search_online, download_online_song
 from app.services.pipeline import _process_completed_torrent
 
 router = APIRouter()
@@ -39,8 +39,10 @@ def download(req: OnlineDownloadRequest):
     source = song.get("source") or "online"
     try:
         file_path = download_online_song(song)
+    except OnlineDownloadError as e:
+        raise HTTPException(status_code=502, detail=e.to_detail())
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"下载失败: {e}")
+        raise HTTPException(status_code=500, detail={"message": f"下载失败: {e}", "reason": "unexpected_error", "source": source})
 
     synthetic_hash = f"online:{uuid.uuid4().hex}"
     db = SessionLocal()

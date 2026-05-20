@@ -12,6 +12,7 @@ const keyword = ref('')
 const results = ref([])
 const loading = ref(false)
 const downloading = ref('')
+const downloadMessage = ref(null)
 const page = ref(1)
 const pageSize = ref(20)
 const searchLimit = 100
@@ -60,15 +61,26 @@ async function handleSearch() {
   }
 }
 
+function downloadErrorHint(message = '') {
+  const text = String(message || '')
+  if (text.includes('qq_resolve_failed') || text.includes('没有拿到可下载链接')) return 'QQ 解析源未返回可用链接，可能是 NKI 短时不可用或该曲目需要会员权限。可以稍后重试，或换酷狗/网易云/咪咕。'
+  if (text.includes('qq_download_failed') || text.includes('候选链接均不可用')) return 'QQ 链接已解析但 CDN 下载失败，通常是链接过期、区域限制或服务器返回异常内容。可以重试一次，或换源下载。'
+  if (text.includes('非音频内容')) return '下载地址返回了错误页，不是真正音频文件。建议换源或稍后重试。'
+  if (text.includes('内容过小')) return '下载文件过小，疑似试听片段或错误响应，已自动丢弃。'
+  return text || '下载失败，请稍后重试。'
+}
+
 async function handleDownload(song) {
   if (song.disabled) return
   downloading.value = song.source + ':' + song.song_id
+  downloadMessage.value = null
   try {
     const res = await downloadOnlineSong(song, true)
-    if (res.ok) alert('✅ 下载并整理完成')
-    else alert('下载失败')
+    if (res.ok) downloadMessage.value = { type: 'ok', text: `✅ 已下载并整理完成：${song.title}` }
+    else downloadMessage.value = { type: 'error', text: '下载失败' }
   } catch (e) {
-    alert('下载失败: ' + e.message)
+    const hint = downloadErrorHint(e.message)
+    downloadMessage.value = { type: 'error', text: `下载失败：${hint}` }
   } finally {
     downloading.value = ''
   }
@@ -93,6 +105,7 @@ async function handleDownload(song) {
     </div>
 
     <div class="results-card">
+      <div v-if="downloadMessage" :class="['download-message', downloadMessage.type]">{{ downloadMessage.text }}</div>
       <div v-if="loading" class="empty-text">搜索中...</div>
       <div v-else-if="results.length === 0" class="empty-text">暂无结果</div>
       <div v-else class="result-summary">
@@ -159,6 +172,9 @@ async function handleDownload(song) {
 .search-row { display: flex; gap: 10px; }
 .search-row input { flex: 1; min-width: 0; }
 .empty-text { color: var(--text-dim); padding: 20px 0; text-align: center; }
+.download-message { margin-bottom: 10px; padding: 10px 12px; border-radius: var(--radius-md); font-size: 13px; line-height: 1.5; border: 1px solid var(--border); background: var(--surface-soft); color: var(--text-dim); }
+.download-message.ok { border-color: rgba(58, 196, 125, .35); color: var(--success); }
+.download-message.error { border-color: rgba(255, 193, 7, .35); color: var(--warning); }
 .result-summary { display: flex; justify-content: space-between; gap: 12px; color: var(--text-dim); font-size: 13px; margin-bottom: 10px; flex-wrap: wrap; }
 .more-hint { color: var(--warning); }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }

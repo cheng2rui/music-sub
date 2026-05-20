@@ -24,6 +24,19 @@ from app.config import config
 logger = logging.getLogger(__name__)
 
 
+class OnlineDownloadError(RuntimeError):
+    """Structured online-download failure for user-facing diagnostics."""
+
+    def __init__(self, message: str, *, reason: str = "download_failed", source: str = "online", details: dict | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.source = source
+        self.details = details or {}
+
+    def to_detail(self) -> dict:
+        return {"message": str(self), "reason": self.reason, "source": self.source, "details": self.details}
+
+
 @dataclass
 class OnlineSong:
     source: str
@@ -706,7 +719,7 @@ def download_online_song(song: dict) -> str:
     url = song.get("url") or ""
     source = song.get("source") or "online"
     if not url and source != "qq":
-        raise ValueError("没有可下载链接")
+        raise OnlineDownloadError("没有可下载链接", reason="no_download_url", source=source)
     filename = _clean_filename(song.get("filename") or f"{song.get('title','unknown')} - {song.get('artist','unknown')}.{song.get('format','mp3')}")
     target_dir = Path(config.paths.downloads) / "online"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -717,10 +730,12 @@ def download_online_song(song: dict) -> str:
         candidates = [(url, song.get("format") or Path(filename).suffix.lstrip(".") or "mp3")]
 
     if not candidates:
-        raise ValueError("没有可下载链接")
+        reason = "qq_resolve_failed" if source == "qq" else "no_download_url"
+        raise OnlineDownloadError("解析失败：没有拿到可下载链接", reason=reason, source=source, details={"song_id": song.get("song_id") or ""})
 
     headers = _download_headers_for_song(song)
     last_error: Exception | None = None
+    failures = []
     for idx, (candidate_url, ext) in enumerate(candidates, start=1):
         candidate_filename = filename
         if ext:
@@ -752,6 +767,7 @@ def download_online_song(song: dict) -> str:
                 break
             except Exception as e:
                 last_error = e
+                failures.append({"candidate": idx, "attempt": attempt, "error": str(e)[:300]})
                 try:
                     if target.exists():
                         target.unlink()
@@ -764,7 +780,13 @@ def download_online_song(song: dict) -> str:
             continue
         break
     else:
-        raise RuntimeError(f"下载失败，所有候选链接均不可用: {last_error}")
+        reason = "qq_download_failed" if source == "qq" else "download_failed"
+        raise OnlineDownloadError(
+            f"下载失败，所有候选链接均不可用: {last_error}",
+            reason=reason,
+            source=source,
+            details={"song_id": song.get("song_id") or "", "candidate_count": len(candidates), "failures": failures[-6:]},
+        )
 
     # Save source-provided lyrics if available. Pipeline scraping may improve/overwrite later.
     lyric_url = song.get("lyric_url") or ""

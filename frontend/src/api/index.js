@@ -111,10 +111,10 @@ export const searchOnlineMusic = (keyword, sources = ['qq', 'migu', 'kugou', 'ne
   body: JSON.stringify({ keyword, sources, limit })
 }).then(r => r.json())
 
-export const downloadOnlineSong = (song, organize = true) => authFetch('/api/online/download', {
+export const downloadOnlineSong = (song, organize = true) => json(authFetch('/api/online/download', {
   method: 'POST',
   body: JSON.stringify({ song, organize })
-}).then(r => r.json())
+}))
 
 // ============ Tasks ============
 export const getTasks = () => authFetch('/api/tasks/').then(r => r.json())
