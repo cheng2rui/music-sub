@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getNotifyStatus, getNotifyEvents, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getNotifyStatus, getNotifyEvents, getTelegramWebhook, setTelegramWebhook, deleteTelegramWebhook, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import { useThemeStore } from '@/stores/theme.js'
@@ -44,6 +44,10 @@ const loading = ref(false)
 const saving = ref(false)
 const testingQb = ref(false)
 const testingTg = ref(false)
+const telegramWebhookStatus = ref(null)
+const telegramWebhookBusy = ref('')
+const telegramWebhookBaseUrl = ref('')
+const telegramWebhookDropPending = ref(false)
 const testingNotify = ref('')
 const notifyStatus = ref(null)
 const notifyRuntimeEvents = ref([])
@@ -93,6 +97,7 @@ async function loadAll() {
     const toolData = await getAssistantTools()
     assistantTools.value = toolData.tools || []
     await loadNotifyRuntime()
+    await loadTelegramWebhook(false)
     await loadQqGatewayStatus()
     await loadWechatClawStatus(false, false)
   } catch (e) { console.error(e) }
@@ -155,6 +160,40 @@ async function loadNotifyRuntime() {
     notifyRuntimeEvents.value = events.items || []
   } catch (e) { console.warn('load notify runtime failed', e) }
   finally { refreshingNotifyRuntime.value = false }
+}
+
+async function loadTelegramWebhook(showAlert = false) {
+  telegramWebhookBusy.value = 'refresh'
+  try {
+    telegramWebhookStatus.value = await getTelegramWebhook()
+    if (showAlert) alert('Telegram Webhook 状态已刷新')
+  } catch (e) {
+    telegramWebhookStatus.value = { ok: false, message: e.message }
+    if (showAlert) alert('刷新 Telegram Webhook 失败: ' + e.message)
+  } finally { telegramWebhookBusy.value = '' }
+}
+
+async function handleSetTelegramWebhook() {
+  const base = (telegramWebhookBaseUrl.value || window.location.origin || '').trim().replace(/\/$/, '')
+  if (!base.startsWith('https://')) return alert('Telegram Webhook 需要公网 HTTPS 地址，例如 https://music.example.com')
+  telegramWebhookBusy.value = 'set'
+  try {
+    const res = await setTelegramWebhook(base, telegramWebhookDropPending.value)
+    await loadTelegramWebhook(false)
+    alert(res.ok ? '✅ Telegram Webhook 已设置' : '设置失败')
+  } catch (e) { alert('设置 Telegram Webhook 失败: ' + e.message) }
+  finally { telegramWebhookBusy.value = '' }
+}
+
+async function handleDeleteTelegramWebhook() {
+  if (!confirm('确认删除 Telegram Webhook？删除后 Telegram 入站消息不会再进入 Music Sub。')) return
+  telegramWebhookBusy.value = 'delete'
+  try {
+    await deleteTelegramWebhook(telegramWebhookDropPending.value)
+    await loadTelegramWebhook(false)
+    alert('✅ Telegram Webhook 已删除')
+  } catch (e) { alert('删除 Telegram Webhook 失败: ' + e.message) }
+  finally { telegramWebhookBusy.value = '' }
 }
 
 async function loadQqGatewayStatus() {
@@ -251,6 +290,10 @@ const notifyWebhookUrls = computed(() => {
     { key: 'qqbot', label: 'QQBot Webhook', desc: 'QQBot HTTP 回调或转发器推送', url: `${notifyWebhookBase.value}/webhook/qqbot?token=${token}` },
     { key: 'wechatbot', label: 'WeChatBot Webhook', desc: 'WeChatBot / iLink / 自建微信转发器推送', url: `${notifyWebhookBase.value}/webhook/wechatbot?token=${token}` },
   ]
+})
+const telegramRecommendedWebhookUrl = computed(() => {
+  const item = notifyWebhookUrls.value.find(x => x.key === 'telegram')
+  return item?.url || ''
 })
 const wecomNativeCallbackUrl = computed(() => `${notifyWebhookBase.value}/webhook/wecom`)
 
@@ -621,6 +664,32 @@ onMounted(loadAll)
             <div class="field flex-1"><label>Bot Token</label><input v-model="settings.notify.telegram.bot_token" placeholder="123456:ABC-DEF..." /></div>
             <div class="field flex-1"><label>Chat ID</label><input v-model="settings.notify.telegram.chat_id" placeholder="-100... 或 user id" /></div>
           </div>
+          <div v-if="settings.notify.telegram.enabled" class="telegram-webhook-box">
+            <div class="telegram-webhook-head">
+              <div>
+                <strong>Telegram 入站 Webhook</strong>
+                <small>用于让 Telegram 消息直接进入 Music Sub 助手。需要公网 HTTPS 域名。</small>
+              </div>
+              <AppButton variant="ghost" size="sm" :loading="telegramWebhookBusy === 'refresh'" @click="loadTelegramWebhook(true)">刷新状态</AppButton>
+            </div>
+            <div class="webhook-status-line">
+              <AppBadge :color="telegramWebhookStatus?.telegram?.url ? 'green' : (telegramWebhookStatus?.configured ? 'orange' : 'dim')">{{ telegramWebhookStatus?.telegram?.url ? '已设置' : '未设置' }}</AppBadge>
+              <span class="text-dim">当前：{{ telegramWebhookStatus?.telegram?.url || telegramWebhookStatus?.message || '-' }}</span>
+            </div>
+            <div class="fields-row">
+              <div class="field flex-1">
+                <label>公网 HTTPS 域名</label>
+                <input v-model="telegramWebhookBaseUrl" placeholder="https://music.example.com" />
+                <small class="text-dim">最终地址：{{ telegramWebhookBaseUrl ? telegramWebhookBaseUrl.replace(/\/$/, '') + (telegramWebhookStatus?.recommended_path || '/api/notify/webhook/telegram?...') : telegramRecommendedWebhookUrl }}</small>
+              </div>
+              <label class="toggle-item"><input type="checkbox" v-model="telegramWebhookDropPending" /><span>丢弃 Telegram 待处理消息</span></label>
+            </div>
+            <div class="header-actions">
+              <AppButton variant="primary" size="sm" :disabled="!notifyWebhookTokenReady || !settings.notify.telegram.bot_token" :loading="telegramWebhookBusy === 'set'" @click="handleSetTelegramWebhook">设置 Webhook</AppButton>
+              <AppButton variant="ghost" size="sm" :disabled="!settings.notify.telegram.bot_token" :loading="telegramWebhookBusy === 'delete'" @click="handleDeleteTelegramWebhook">删除 Webhook</AppButton>
+              <AppButton variant="ghost" size="sm" :disabled="!telegramRecommendedWebhookUrl" @click="copyText(telegramRecommendedWebhookUrl, 'Telegram Webhook 地址')">复制推荐地址</AppButton>
+            </div>
+          </div>
           <div class="toggle-list compact"><label v-for="ev in notifyEvents" :key="'tg-' + ev[0]" class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram[ev[0]]" /><span>{{ ev[1] }}</span></label></div>
         </div>
 
@@ -847,7 +916,11 @@ onMounted(loadAll)
 .notify-event-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .notify-channel-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 14px; margin-top: 12px; }
 .notify-channel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.gateway-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.gateway-row, .telegram-webhook-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.telegram-webhook-box { align-items: stretch; flex-direction: column; }
+.telegram-webhook-head, .webhook-status-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.telegram-webhook-head small { color: var(--text-dim); display: block; margin-top: 4px; }
+.webhook-status-line { justify-content: flex-start; }
 .wechat-qrcode-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border-radius: var(--radius-md); background: var(--surface-soft); }
 .wechat-qrcode-box img { width: 132px; height: 132px; object-fit: contain; border-radius: var(--radius-sm); background: #fff; }
 .wechat-qrcode-box code { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }

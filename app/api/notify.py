@@ -8,6 +8,8 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import requests
+
 import app.config as cfg_module
 from app.db import get_db
 from app.models import NotifyEvent
@@ -32,6 +34,29 @@ class IncomingRequest(BaseModel):
     group: bool | None = None
     msg_id: str | None = None
     raw: dict[str, Any] = {}
+
+
+
+
+def _telegram_webhook_url() -> str:
+    token = cfg_module.config.notify.webhook_token
+    if not token:
+        return ""
+    return f"/api/notify/webhook/telegram?token={token}"
+
+
+def _telegram_api(method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    tg = cfg_module.config.notify.telegram
+    if not tg.bot_token or "***" in tg.bot_token:
+        raise HTTPException(status_code=400, detail="telegram bot_token is not configured")
+    try:
+        resp = requests.post(f"https://api.telegram.org/bot{tg.bot_token}/{method}", json=payload or {}, timeout=15)
+        data = resp.json() if resp.content else {}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"telegram api error: {exc}")
+    if resp.status_code >= 400 or data.get("ok") is False:
+        raise HTTPException(status_code=502, detail=data.get("description") or resp.text[:300])
+    return data
 
 
 def _check_webhook_token(token: str = ""):
@@ -121,6 +146,41 @@ def notify_status(db: Session = Depends(get_db)):
     except Exception as exc:
         by_channel["wechatbot"]["claw"] = {"error": str(exc)}
     return {"channels": by_channel}
+
+
+
+
+@router.get("/telegram/webhook")
+def telegram_webhook_info():
+    """Return current Telegram webhook state and Music Sub recommended URL path."""
+    tg = cfg_module.config.notify.telegram
+    recommended = _telegram_webhook_url()
+    if not tg.bot_token or "***" in tg.bot_token:
+        return {"ok": False, "configured": False, "recommended_path": recommended, "message": "telegram bot_token is not configured"}
+    data = _telegram_api("getWebhookInfo")
+    return {"ok": True, "configured": True, "recommended_path": recommended, "telegram": data.get("result") or data}
+
+
+@router.post("/telegram/webhook")
+def telegram_set_webhook(base_url: str = Body(default="", embed=True), drop_pending_updates: bool = Body(default=False, embed=True)):
+    """Set Telegram webhook to this Music Sub callback URL.
+
+    `base_url` should be the public origin, e.g. https://music.example.com.
+    """
+    if not cfg_module.config.notify.webhook_token:
+        raise HTTPException(status_code=400, detail="notify webhook_token is not configured")
+    origin = (base_url or "").strip().rstrip("/")
+    if not origin.startswith("https://"):
+        raise HTTPException(status_code=400, detail="base_url must be a public https origin")
+    url = origin + _telegram_webhook_url()
+    data = _telegram_api("setWebhook", {"url": url, "drop_pending_updates": bool(drop_pending_updates)})
+    return {"ok": True, "url": url, "telegram": data.get("result") if "result" in data else data}
+
+
+@router.delete("/telegram/webhook")
+def telegram_delete_webhook(drop_pending_updates: bool = Query(default=False)):
+    data = _telegram_api("deleteWebhook", {"drop_pending_updates": bool(drop_pending_updates)})
+    return {"ok": True, "telegram": data.get("result") if "result" in data else data}
 
 
 @router.get("/wechatclaw/status")

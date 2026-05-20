@@ -261,6 +261,12 @@ export const testTelegram = () => authFetch('/api/settings/test_telegram', { met
 export const testNotifyChannel = (channel) => authFetch(`/api/notify/test/${channel}`, { method: 'POST' }).then(r => r.json())
 export const getNotifyStatus = () => authFetch('/api/notify/status').then(r => r.json())
 export const getNotifyEvents = (limit = 30) => authFetch(`/api/notify/events?limit=${limit}`).then(r => r.json())
+export const getTelegramWebhook = () => authFetch('/api/notify/telegram/webhook').then(r => r.json())
+export const setTelegramWebhook = (baseUrl, dropPendingUpdates = false) => authFetch('/api/notify/telegram/webhook', {
+  method: 'POST',
+  body: JSON.stringify({ base_url: baseUrl, drop_pending_updates: dropPendingUpdates })
+}).then(r => r.json())
+export const deleteTelegramWebhook = (dropPendingUpdates = false) => authFetch(`/api/notify/telegram/webhook?drop_pending_updates=${dropPendingUpdates ? 'true' : 'false'}`, { method: 'DELETE' }).then(r => r.json())
 export const getQqbotGatewayStatus = () => authFetch('/api/notify/qqbot/gateway/status').then(r => r.json())
 export const restartQqbotGateway = () => authFetch('/api/notify/qqbot/gateway/restart', { method: 'POST' }).then(r => r.json())
 export const getWechatClawStatus = (refresh = false, autoQrcode = false) => authFetch(`/api/notify/wechatclaw/status?refresh=${refresh ? 'true' : 'false'}&auto_qrcode=${autoQrcode ? 'true' : 'false'}`).then(r => r.json())
