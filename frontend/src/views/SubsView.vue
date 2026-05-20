@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
-import { getSubs, addSub, updateSub, deleteSub, toggleSub, parsePlaylistUrl } from '@/api/index.js'
+import { computed, ref, onMounted, watch } from 'vue'
+import { getSubs, addSub, addSubsBatch, updateSub, deleteSub, deleteSubsBatch, toggleSub, parsePlaylistUrl } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
@@ -12,6 +12,28 @@ const isIsland = computed(() => theme.current === 'island')
 const parseModalTitle = computed(() => `${isIsland.value ? '' : '🎵 '}${parsedResult.value?.title || '歌单解析结果'}`)
 const subs = ref([])
 const loading = ref(false)
+const selectedIds = ref(new Set())
+const filterText = ref('')
+const filterType = ref('all')
+const page = ref(1)
+const pageSize = ref(100)
+const deletingBatch = ref(false)
+
+const filteredSubs = computed(() => subs.value.filter(sub => {
+  const kw = filterText.value.trim().toLowerCase()
+  if (kw && !String(sub.keyword || '').toLowerCase().includes(kw)) return false
+  if (filterType.value !== 'all' && sub.type !== filterType.value) return false
+  return true
+}))
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredSubs.value.length / pageSize.value)))
+const pagedSubs = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredSubs.value.slice(start, start + pageSize.value)
+})
+const selectedCount = computed(() => selectedIds.value.size)
+const pageAllSelected = computed(() => pagedSubs.value.length > 0 && pagedSubs.value.every(s => selectedIds.value.has(s.id)))
+watch([filterText, filterType, pageSize], () => { page.value = 1 })
+watch(totalPages, n => { if (page.value > n) page.value = n })
 
 // New sub form
 const newSub = ref({ keyword: '', type: 'artist', quality: 'any', sites: [] })
@@ -106,10 +128,77 @@ async function handleDelete(id) {
   if (!confirm('确认删除这个订阅？')) return
   try {
     await deleteSub(id)
+    selectedIds.value.delete(id)
+    selectedIds.value = new Set(selectedIds.value)
     await loadSubs()
   } catch (e) {
     console.error(e)
   }
+}
+
+function toggleSelect(id) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function toggleSelectPage() {
+  const next = new Set(selectedIds.value)
+  if (pageAllSelected.value) pagedSubs.value.forEach(s => next.delete(s.id))
+  else pagedSubs.value.forEach(s => next.add(s.id))
+  selectedIds.value = next
+}
+
+function selectFiltered() {
+  selectedIds.value = new Set(filteredSubs.value.map(s => s.id))
+}
+
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+async function handleBatchDeleteSelected() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  if (!confirm(`确认删除选中的 ${ids.length} 个订阅？`)) return
+  deletingBatch.value = true
+  try {
+    const res = await deleteSubsBatch({ ids })
+    alert(`已删除 ${res.deleted || 0} 个订阅`)
+    clearSelection()
+    await loadSubs()
+  } catch (e) {
+    alert(e.message || '批量删除失败')
+  } finally {
+    deletingBatch.value = false
+  }
+}
+
+async function handleDeleteFiltered() {
+  const count = filteredSubs.value.length
+  if (!count) return
+  if (!confirm(`确认删除当前筛选的 ${count} 个订阅？这个操作不可撤销。`)) return
+  deletingBatch.value = true
+  try {
+    const payload = {
+      keyword_contains: filterText.value.trim(),
+      type: filterType.value === 'all' ? '' : filterType.value,
+      delete_all: !filterText.value.trim() && filterType.value === 'all',
+    }
+    const res = await deleteSubsBatch(payload)
+    alert(`已删除 ${res.deleted || 0} 个订阅`)
+    clearSelection()
+    await loadSubs()
+  } catch (e) {
+    alert(e.message || '批量删除失败')
+  } finally {
+    deletingBatch.value = false
+  }
+}
+
+function changePage(next) {
+  page.value = Math.min(Math.max(1, next), totalPages.value)
 }
 
 function typeBadgeColor(type) {
@@ -140,17 +229,16 @@ async function handleParseUrl() {
 
 async function batchSubscribe() {
   if (!parsedResult.value?.songs) return
-  let count = 0
-  for (const song of parsedResult.value.songs) {
-    try {
-      await addSub({ keyword: `${song.title} ${song.artist}`.trim(), type: 'song', quality: 'any', sites: 'all' })
-      count++
-    } catch (e) { /* skip duplicates */ }
+  const items = parsedResult.value.songs.map(song => ({ keyword: `${song.title} ${song.artist}`.trim(), type: 'song', quality: 'any', sites: 'all' }))
+  try {
+    const res = await addSubsBatch(items, true)
+    alert(`✅ 已添加 ${res.added || 0} 个订阅，跳过 ${res.skipped || 0} 个`)
+    showParseModal.value = false
+    playlistUrl.value = ''
+    await loadSubs()
+  } catch (e) {
+    alert(e.message || '批量订阅失败')
   }
-  alert(`✅ 已添加 ${count} 个订阅`)
-  showParseModal.value = false
-  playlistUrl.value = ''
-  await loadSubs()
 }
 
 onMounted(loadSubs)
@@ -236,6 +324,28 @@ onMounted(loadSubs)
 
     <!-- 订阅列表 -->
     <div class="subs-list">
+      <div class="subs-toolbar">
+        <div class="subs-filter-row">
+          <input v-model="filterText" placeholder="筛选关键词，例：歌手/歌名" />
+          <select v-model="filterType">
+            <option value="all">全部类型</option>
+            <option v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+          <select v-model.number="pageSize">
+            <option :value="50">每页 50</option>
+            <option :value="100">每页 100</option>
+            <option :value="200">每页 200</option>
+            <option :value="500">每页 500</option>
+          </select>
+        </div>
+        <div class="subs-bulk-row">
+          <span>总 {{ subs.length }} 个，筛选 {{ filteredSubs.length }} 个，已选 {{ selectedCount }} 个</span>
+          <AppButton size="sm" variant="ghost" @click="selectFiltered">选择当前筛选</AppButton>
+          <AppButton size="sm" variant="ghost" :disabled="!selectedCount" @click="clearSelection">清空选择</AppButton>
+          <AppButton size="sm" variant="danger" :disabled="!selectedCount" :loading="deletingBatch" @click="handleBatchDeleteSelected">删除选中</AppButton>
+          <AppButton size="sm" variant="danger" :disabled="!filteredSubs.length" :loading="deletingBatch" @click="handleDeleteFiltered">删除当前筛选</AppButton>
+        </div>
+      </div>
       <div v-if="loading" class="loading-text">加载中...</div>
       <div v-else-if="subs.length === 0" class="empty-text">暂无订阅</div>
       <div v-else class="subs-results">
@@ -243,6 +353,7 @@ onMounted(loadSubs)
           <table class="subs-table">
           <thead>
             <tr>
+              <th><input type="checkbox" :checked="pageAllSelected" @change="toggleSelectPage" /></th>
               <th>类型</th>
               <th>关键词</th>
               <th>品质</th>
@@ -252,7 +363,8 @@ onMounted(loadSubs)
             </tr>
           </thead>
           <tbody>
-            <tr v-for="sub in subs" :key="sub.id">
+            <tr v-for="sub in pagedSubs" :key="sub.id">
+              <td><input type="checkbox" :checked="selectedIds.has(sub.id)" @change="toggleSelect(sub.id)" /></td>
               <td><AppBadge :color="typeBadgeColor(sub.type)">{{ sub.type }}</AppBadge></td>
               <td class="keyword-cell">{{ sub.keyword }}</td>
               <td>{{ sub.quality }}</td>
@@ -277,7 +389,8 @@ onMounted(loadSubs)
         </div>
 
         <div class="sub-cards">
-          <article v-for="sub in subs" :key="`card-${sub.id}`" class="sub-card">
+          <article v-for="sub in pagedSubs" :key="`card-${sub.id}`" class="sub-card" :class="{ selected: selectedIds.has(sub.id) }">
+            <label class="card-select"><input type="checkbox" :checked="selectedIds.has(sub.id)" @change="toggleSelect(sub.id)" /> 选择</label>
             <div class="sub-card-head">
               <h3>{{ sub.keyword }}</h3>
               <AppBadge :color="sub.enabled ? 'green' : 'dim'">
@@ -301,6 +414,11 @@ onMounted(loadSubs)
             </div>
           </article>
         </div>
+        <div v-if="filteredSubs.length > pageSize" class="pager">
+          <AppButton variant="ghost" size="sm" :disabled="page <= 1" @click="changePage(page - 1)">上一页</AppButton>
+          <span>第 {{ page }} / {{ totalPages }} 页</span>
+          <AppButton variant="ghost" size="sm" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</AppButton>
+        </div>
       </div>
     </div>
   </div>
@@ -312,7 +430,12 @@ onMounted(loadSubs)
 .add-form h3 { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
 .form-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .input-keyword { flex: 1; min-width: 180px; }
-.subs-list { display: flex; flex-direction: column; }
+.subs-list { display: flex; flex-direction: column; gap: 12px; }
+.subs-toolbar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.subs-filter-row, .subs-bulk-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.subs-filter-row input { flex: 1; min-width: 180px; }
+.subs-filter-row select { min-width: 110px; }
+.subs-bulk-row { color: var(--text-dim); font-size: 13px; }
 .loading-text, .empty-text { color: var(--text-dim); padding: 20px 0; }
 .subs-results { display: block; }
 .table-wrap { overflow-x: auto; }
@@ -345,6 +468,8 @@ onMounted(loadSubs)
 .parse-actions { display: flex; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
 .sub-cards { display: none; }
 .sub-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); padding: 14px; }
+.sub-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)); }
+.card-select { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12px; margin-bottom: 8px; }
 .sub-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .sub-card-head h3 { min-width: 0; margin: 0; font-size: 15px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; }
 .sub-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
@@ -353,10 +478,11 @@ onMounted(loadSubs)
 .sub-last-search span { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 2px; }
 .action-btns.mobile { margin-top: 12px; flex-wrap: wrap; }
 .action-btns.mobile .icon-btn { border: 1px solid var(--border); background: var(--surface); padding: 6px 9px; font-size: 13px; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px 0; color: var(--text-dim); font-size: 13px; }
 
 @media (max-width: 768px) {
   .add-form { padding: 14px; border-radius: 16px; }
-  .form-row { flex-direction: column; align-items: stretch; }
+  .form-row, .subs-filter-row, .subs-bulk-row { flex-direction: column; align-items: stretch; }
   .input-keyword { min-width: 0; width: 100%; }
   .parse-result { min-width: unset; }
   .edit-form { min-width: 0; grid-template-columns: 1fr; gap: 6px; }

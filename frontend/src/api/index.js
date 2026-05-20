@@ -87,6 +87,14 @@ export const updateSub = (id, data) => authFetch(`/api/subscriptions/${id}`, {
   body: JSON.stringify(data)
 }).then(r => r.json())
 export const deleteSub = (id) => authFetch(`/api/subscriptions/${id}`, { method: 'DELETE' }).then(r => r.json())
+export const addSubsBatch = (items, skipDuplicates = true) => authFetch('/api/subscriptions/batch', {
+  method: 'POST',
+  body: JSON.stringify({ items, skip_duplicates: skipDuplicates })
+}).then(r => r.json())
+export const deleteSubsBatch = (payload) => authFetch('/api/subscriptions/batch', {
+  method: 'DELETE',
+  body: JSON.stringify(payload)
+}).then(r => r.json())
 export const toggleSub = (id) => authFetch(`/api/subscriptions/${id}/toggle`, { method: 'PUT' }).then(r => r.json())
 
 // ============ Search ============
