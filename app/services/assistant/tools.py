@@ -152,6 +152,35 @@ def search_online_tool(db: Session, keyword: str, sources: list[str] | None = No
     return {"items": items, "instruction": "如果用户要下载某个结果，调用 download_online_song，并原样传入该结果的 download_args。"}
 
 
+def search_download_candidates(db: Session, keyword: str, sites: list[str] | None = None, sources: list[str] | None = None, limit: int = 8, **kwargs) -> dict:
+    """Search both PT torrents and online music candidates for download decisions."""
+    if not keyword:
+        raise ToolError("缺少 keyword")
+    per_source_limit = max(1, min(int(limit or 8), 12))
+    pt_error = ""
+    online_error = ""
+    try:
+        pt = search_pt(db, keyword=keyword, sites=sites, limit=per_source_limit)
+    except Exception as exc:
+        pt = {"items": []}
+        pt_error = str(exc)[:200]
+    try:
+        online = search_online_tool(db, keyword=keyword, sources=sources, limit=per_source_limit)
+    except Exception as exc:
+        online = {"items": []}
+        online_error = str(exc)[:200]
+    return {
+        "keyword": keyword,
+        "pt": {"items": pt.get("items") or [], "error": pt_error},
+        "online": {"items": online.get("items") or [], "error": online_error},
+        "instruction": (
+            "下载决策：专辑、合集、整轨、CUE、PT/做种/无损包优先使用 pt.items 的 download_args 调用 download_torrent；"
+            "单曲、在线试听源、快速下载优先使用 online.items 的 download_args 调用 download_online_song。"
+            "如果用户明确说直接下载，选择最匹配候选继续调用对应下载工具；否则推荐 1-3 个候选让用户选。"
+        ),
+    }
+
+
 def pause_task(db: Session, task_id: int, **kwargs) -> dict:
     task = db.query(DownloadTask).filter(DownloadTask.id == int(task_id)).first()
     if not task:
@@ -332,6 +361,7 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
     "list_subscriptions": {"risk": "low", "function": list_subscriptions, "description": "列出订阅。", "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
     "search_pt": {"risk": "low", "function": search_pt, "description": "搜索 PT 音乐资源。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "sites": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer"}}, "required": ["keyword"]}},
     "search_online": {"risk": "low", "function": search_online_tool, "description": "搜索在线音乐源。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "sources": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer"}}, "required": ["keyword"]}},
+    "search_download_candidates": {"risk": "low", "function": search_download_candidates, "description": "同时搜索 PT 资源和在线音乐源，用于下载决策。用户说找资源、下载音乐、下载单曲/专辑时优先使用。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "sites": {"type": "array", "items": {"type": "string"}}, "sources": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer"}}, "required": ["keyword"]}},
     "pause_task": {"risk": "medium", "function": pause_task, "description": "暂停下载任务。", "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
     "resume_task": {"risk": "medium", "function": resume_task, "description": "继续下载任务。", "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
     "create_subscription": {"risk": "medium", "function": create_subscription, "description": "创建一个 PT 音乐订阅。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "type": {"type": "string", "enum": ["artist", "album", "keyword"]}, "quality": {"type": "string"}, "sites": {"type": "string"}, "enabled": {"type": "boolean"}}, "required": ["keyword"]}},
@@ -383,6 +413,7 @@ def tool_catalog(enabled_names: set[str] | list[str] | None = None) -> list[dict
         "list_subscriptions": "订阅",
         "search_pt": "搜索",
         "search_online": "搜索",
+        "search_download_candidates": "搜索",
         "pause_task": "任务动作",
         "resume_task": "任务动作",
         "create_subscription": "订阅动作",

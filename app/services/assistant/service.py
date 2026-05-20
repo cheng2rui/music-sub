@@ -58,7 +58,16 @@ def _compact_tool_result(tool_name: str, result: Any) -> Any:
             "instruction": result.get("instruction") or "",
         }
     if tool_name == "search_online":
-        return {"items": (result.get("items") or [])[:6]}
+        return {"items": (result.get("items") or [])[:6], "instruction": result.get("instruction") or ""}
+    if tool_name == "search_download_candidates":
+        pt_items = ((result or {}).get("pt") or {}).get("items") or []
+        online_items = ((result or {}).get("online") or {}).get("items") or []
+        return {
+            "keyword": (result or {}).get("keyword"),
+            "pt": {"items": pt_items[:5], "total": len(pt_items), "error": ((result or {}).get("pt") or {}).get("error")},
+            "online": {"items": online_items[:5], "total": len(online_items), "error": ((result or {}).get("online") or {}).get("error")},
+            "instruction": (result or {}).get("instruction") or "",
+        }
     if tool_name in {"list_tasks", "list_subscriptions", "search_library"}:
         return {"items": (result.get("items") or [])[:15]}
     if tool_name == "query_library_health":
