@@ -26,7 +26,7 @@ def _append_path(base_url: str, path: str) -> str:
 
 
 class AssistantLLMClient:
-    def __init__(self, provider: str, runtime: str, base_url: str, api_key: str, model: str, temperature: float = 0.2, timeout_seconds: int = 60):
+    def __init__(self, provider: str, runtime: str, base_url: str, api_key: str, model: str, temperature: float = 0.2, timeout_seconds: int = 60, max_context_tokens_k: int = 64, thinking_level: str = "off"):
         resolved_runtime, resolved_base_url = resolve_provider(provider, base_url)
         self.provider = provider or "openai_compatible"
         self.runtime = runtime or resolved_runtime or "openai_compatible"
@@ -35,6 +35,8 @@ class AssistantLLMClient:
         self.model = model or ""
         self.temperature = temperature
         self.timeout_seconds = max(5, min(int(timeout_seconds or 60), 180))
+        self.max_context_tokens_k = max(4, min(int(max_context_tokens_k or 64), 1024))
+        self.thinking_level = (thinking_level or "off").strip().lower()
 
     @property
     def configured(self) -> bool:
@@ -63,6 +65,10 @@ class AssistantLLMClient:
             "messages": messages,
             "temperature": self.temperature,
         }
+        max_tokens = max(1024, min(self.max_context_tokens_k * 1024 // 4, 8192))
+        payload["max_tokens"] = max_tokens
+        if self.thinking_level and self.thinking_level != "off":
+            payload["extra_body"] = {"thinking": {"type": "enabled", "budget_tokens": _thinking_budget(self.thinking_level)}}
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -140,8 +146,10 @@ class AssistantLLMClient:
             "model": self.model,
             "messages": anthropic_messages,
             "temperature": self.temperature,
-            "max_tokens": 2048,
+            "max_tokens": max(1024, min(self.max_context_tokens_k * 1024 // 4, 8192)),
         }
+        if self.thinking_level and self.thinking_level != "off":
+            payload["thinking"] = {"type": "enabled", "budget_tokens": _thinking_budget(self.thinking_level)}
         if system:
             payload["system"] = system
         if tools:
@@ -191,6 +199,18 @@ class AssistantLLMClient:
         except Exception as e:
             logger.exception("assistant anthropic-compatible request failed")
             raise AssistantLLMError(f"模型调用失败：{_sanitize_error(e, self.api_key)}") from e
+
+
+def _thinking_budget(level: str) -> int:
+    return {
+        "minimal": 512,
+        "low": 1024,
+        "medium": 2048,
+        "high": 4096,
+        "max": 8192,
+        "xhigh": 8192,
+        "auto": 2048,
+    }.get((level or "").lower(), 2048)
 
 
 def _sanitize_error(error: Exception | str, api_key: str = "") -> str:

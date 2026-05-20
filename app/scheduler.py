@@ -65,6 +65,31 @@ def _check_downloads():
         _record_run("check_downloads", False, str(e)[:200])
 
 
+def _assistant_wake():
+    """Periodic Assistant wake-up: run a lightweight health/status check."""
+    from app.db import SessionLocal
+    from app.services.assistant.tools import execute_tool
+    from app.services.notify import send_all
+
+    db = SessionLocal()
+    try:
+        status = execute_tool(db, "get_system_status", {})
+        health = execute_tool(db, "query_library_health", {"kind": "", "limit": 3})
+        totals = health.get("totals") or {}
+        issues = sum(int(v or 0) for v in totals.values()) if totals else 0
+        msg = f"助手定时唤醒完成：曲库 {status.get('library_files', 0)} 首，任务 {status.get('tasks', 0)} 个，治理问题 {issues} 项。"
+        logger.info(msg)
+        # Only notify when there is something useful to say.
+        if issues:
+            send_all("on_error", f"🤖 <b>助手定时巡检</b>\n{msg}\n请到音乐库治理查看详情。")
+        _record_run("assistant_wake", True, msg)
+    except Exception as e:
+        logger.error(f"Assistant wake failed: {e}")
+        _record_run("assistant_wake", False, str(e)[:200])
+    finally:
+        db.close()
+
+
 def _cleanup_scan():
     """Periodic task: dry-run cleanup scan, log and notify when candidates appear."""
     from app.db import SessionLocal
@@ -122,6 +147,19 @@ def apply_scheduler_config():
         id="check_downloads",
         replace_existing=True,
     )
+    if config.assistant.enabled and getattr(config.assistant, "wake_interval_hours", 0):
+        scheduler.add_job(
+            _assistant_wake,
+            "interval",
+            hours=max(1, int(config.assistant.wake_interval_hours or 0)),
+            id="assistant_wake",
+            replace_existing=True,
+        )
+    else:
+        job = scheduler.get_job("assistant_wake")
+        if job:
+            scheduler.remove_job("assistant_wake")
+
     if config.scheduler.cleanup_scan_enabled:
         scheduler.add_job(
             _cleanup_scan,
@@ -161,6 +199,7 @@ def get_scheduler_status() -> list[dict]:
                 "search_subscriptions": "订阅搜索",
                 "check_downloads": "下载检查",
                 "cleanup_scan": "清理扫描",
+                "assistant_wake": "助手定时唤醒",
             }.get(job.id, job.id),
             "interval": str(job.trigger),
             "next_run": job.next_run_time.isoformat() if job.next_run_time else None,

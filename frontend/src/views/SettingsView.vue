@@ -32,8 +32,9 @@ const settings = ref({
   assistant: {
     enabled: false,
     global_chat: true,
-    provider: { provider: 'openai_compatible', runtime: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60 },
+    provider: { provider: 'openai_compatible', runtime: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60, max_context_tokens_k: 64, thinking_level: 'off' },
     max_history_messages: 20,
+    wake_interval_hours: 0,
     require_confirm_for_download: true,
     require_confirm_for_delete: true,
     require_confirm_for_apply_tools: true,
@@ -843,8 +844,30 @@ onMounted(loadAll)
             <input v-model.number="settings.assistant.provider.temperature" type="number" min="0" max="2" step="0.1" />
           </div>
           <div class="field">
+            <label>思考模式/深度</label>
+            <select v-model="settings.assistant.provider.thinking_level">
+              <option value="off">off（关闭）</option>
+              <option value="auto">auto</option>
+              <option value="minimal">minimal</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="max">max</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>最大上下文 Token（K）</label>
+            <input v-model.number="settings.assistant.provider.max_context_tokens_k" type="number" min="4" max="1024" />
+            <small class="text-dim">用于控制模型上下文预算，类似 MoviePilot 的 LLM_MAX_CONTEXT_TOKENS。</small>
+          </div>
+          <div class="field">
             <label>超时秒数</label>
             <input v-model.number="settings.assistant.provider.timeout_seconds" type="number" min="10" max="300" />
+          </div>
+          <div class="field">
+            <label>定时唤醒间隔（小时）</label>
+            <input v-model.number="settings.assistant.wake_interval_hours" type="number" min="0" max="168" />
+            <small class="text-dim">0 = 关闭；开启后会定期做轻量巡检，有问题时推送提醒。</small>
           </div>
         </div>
         <div style="margin-top:12px">

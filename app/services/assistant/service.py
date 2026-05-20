@@ -213,6 +213,8 @@ class AssistantService:
             model=cfg.model,
             temperature=cfg.temperature,
             timeout_seconds=cfg.timeout_seconds,
+            max_context_tokens_k=getattr(cfg, "max_context_tokens_k", 64),
+            thinking_level=getattr(cfg, "thinking_level", "off"),
         )
 
     def _chat_response(

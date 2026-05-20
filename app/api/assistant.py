@@ -99,6 +99,8 @@ def test_provider(req: AssistantProviderTestRequest):
             model=provider.get("model") or "",
             temperature=float(provider.get("temperature") or 0.2),
             timeout_seconds=int(provider.get("timeout_seconds") or 30),
+            max_context_tokens_k=int(provider.get("max_context_tokens_k") or 64),
+            thinking_level=str(provider.get("thinking_level") or "off"),
         )
         return client.test()
     except AssistantLLMError as e:

@@ -95,6 +95,7 @@ assistant:
   enabled: false
   global_chat: true       # true = all channel messages enter Assistant; false = only /ai messages
   max_history_messages: 20
+  wake_interval_hours: 0
   require_confirm_for_download: true
   require_confirm_for_delete: true
   require_confirm_for_apply_tools: true
@@ -110,3 +111,5 @@ assistant:
     model: ""
     temperature: 0.2
     timeout_seconds: 60
+    max_context_tokens_k: 64
+    thinking_level: off

@@ -132,6 +132,8 @@ class AssistantProviderInput(BaseModel):
     model: str = ""
     temperature: float = 0.2
     timeout_seconds: int = 60
+    max_context_tokens_k: int = 64
+    thinking_level: str = "off"
 
 
 class AssistantSettingInput(BaseModel):
@@ -139,6 +141,7 @@ class AssistantSettingInput(BaseModel):
     global_chat: bool = True
     provider: AssistantProviderInput = AssistantProviderInput()
     max_history_messages: int = 20
+    wake_interval_hours: int = 0
     require_confirm_for_download: bool = True
     require_confirm_for_delete: bool = True
     require_confirm_for_apply_tools: bool = True
