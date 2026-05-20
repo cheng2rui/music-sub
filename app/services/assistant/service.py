@@ -249,9 +249,10 @@ class AssistantService:
         """
         text = (message or "").strip().lower()
         aliases = {
-            "查看任务": "tasks", "任务": "tasks", "打开任务": "tasks", "下载任务": "tasks",
-            "打开音乐库": "library", "音乐库": "library", "查看音乐库": "library",
-            "打开治理": "health", "治理": "health", "音乐库治理": "health",
+            "查看任务": "tasks", "任务": "tasks", "打开任务": "tasks", "下载任务": "tasks", "任务状态": "tasks",
+            "打开音乐库": "library", "音乐库": "library", "查看音乐库": "library", "曲库": "library",
+            "曲库状态": "library", "音乐库状态": "library", "帮我看看曲库状态": "library", "看看曲库状态": "library",
+            "打开治理": "health", "治理": "health", "音乐库治理": "health", "曲库治理": "health",
             "清理扫描": "cleanup", "执行清理扫描": "cleanup",
         }
         kind = aliases.get(text)

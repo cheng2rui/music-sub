@@ -306,22 +306,43 @@ def _event_enabled(channel_cfg: Any, event: str) -> bool:
     return bool(getattr(channel_cfg, "enabled", False) and getattr(channel_cfg, event, True))
 
 
+def _send_telegram_chat_action(target: str | None = None, action: str = "typing") -> None:
+    tg = cfg_module.config.notify.telegram
+    chat_id = target or tg.chat_id
+    if not tg.enabled or not tg.bot_token or not chat_id:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{tg.bot_token}/sendChatAction",
+            json={"chat_id": chat_id, "action": action},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _send_telegram(text: str, target: str | None = None, reply_markup: dict[str, Any] | None = None) -> SendResult:
     tg = cfg_module.config.notify.telegram
     chat_id = target or tg.chat_id
     if not tg.enabled or not tg.bot_token or not chat_id:
         return SendResult("telegram", False, "telegram not configured")
     try:
+        url = f"https://api.telegram.org/bot{tg.bot_token}/sendMessage"
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if reply_markup:
             payload["reply_markup"] = reply_markup
-        resp = requests.post(
-            f"https://api.telegram.org/bot{tg.bot_token}/sendMessage",
-            json=payload,
-            timeout=10,
-        )
+        resp = requests.post(url, json=payload, timeout=15)
         data = resp.json() if resp.content else {}
         ok = resp.status_code == 200 and data.get("ok")
+        # Assistant replies often contain Markdown, raw JSON, or angle brackets.
+        # Telegram HTML parsing rejects those. Retry as plain text so a bad parse
+        # never looks like a slow/no reply to the user.
+        if not ok and "parse entities" in (data.get("description") or "").lower():
+            plain_payload = dict(payload)
+            plain_payload.pop("parse_mode", None)
+            resp = requests.post(url, json=plain_payload, timeout=15)
+            data = resp.json() if resp.content else {}
+            ok = resp.status_code == 200 and data.get("ok")
         return SendResult("telegram", bool(ok), data.get("description") or resp.text[:200], data)
     except Exception as e:
         logger.error("Telegram send error: %s", e)
@@ -562,6 +583,8 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
         res = service.confirm_action(pending.action_id)
         reply = res.get("message") or ("已执行。" if res.get("ok") else "执行失败。")
     else:
+        if channel == "telegram":
+            _send_telegram_chat_action(target=target or user_id or None)
         res = service.chat(text, conv.id)
         reply = res.get("message") or "助手没有返回内容。"
         if res.get("needs_confirm") and res.get("action_id"):
