@@ -213,6 +213,31 @@ def normalize_incoming_message(channel: str, body: dict[str, Any] | Any) -> Inco
     )
 
 
+DEFAULT_NOTIFY_TEMPLATES: dict[str, str] = {
+    "download_added": "⬇️ <b>开始下载</b>\n{name}\n来源: {site}",
+    "download_complete": "✅ <b>下载完成</b>\n{name}\n文件数: {file_count}",
+    "scrape_complete": "🎵 <b>刮削完成</b>\n{name}\n成功: {scraped}/{total}",
+    "error": "❌ <b>错误</b>\n{context}\n{error}",
+    "cleanup_candidates": "🧹 <b>Music Sub 清理扫描发现候选</b>\n候选任务: {candidate_count}\nqB+DB: {qb_and_db_count} · 仅DB: {db_only_count}\n影响大小: {total_size_mb:.1f} MB · 剩余未下载: {total_amount_left_mb:.1f} MB\n请到任务列表执行清理扫描确认。",
+}
+
+
+class _SafeTemplateDict(dict):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def render_notify_template(event: str, **context: Any) -> str:
+    """Render a notification template with safe `{variable}` substitution."""
+    template = (cfg_module.config.notify.templates or {}).get(event) or DEFAULT_NOTIFY_TEMPLATES.get(event) or "{message}"
+    try:
+        return template.format_map(_SafeTemplateDict(**context))
+    except Exception as exc:
+        logger.warning("render notify template failed for %s: %s", event, exc)
+        fallback = DEFAULT_NOTIFY_TEMPLATES.get(event) or "{message}"
+        return fallback.format_map(_SafeTemplateDict(**context))
+
+
 _wecom_token_cache: dict[str, Any] = {"key": "", "token": "", "expires_at": 0.0}
 _qq_token_cache: dict[str, Any] = {"app_id": "", "token": "", "expires_at": 0.0}
 
@@ -556,19 +581,33 @@ def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: 
 
 # Event helpers ----------------------------------------------------------------
 def notify_download_added(torrent_name: str, site: str):
-    send_all("on_download_added", f"⬇️ <b>开始下载</b>\n{torrent_name}\n来源: {site}")
+    send_all("on_download_added", render_notify_template("download_added", name=torrent_name, site=site))
 
 
 def notify_download_complete(torrent_name: str, file_count: int):
-    send_all("on_download_complete", f"✅ <b>下载完成</b>\n{torrent_name}\n文件数: {file_count}")
+    send_all(
+        "on_download_complete",
+        render_notify_template("download_complete", name=torrent_name, file_count=file_count),
+        actions=[
+            NotifyAction("📚 打开音乐库", "打开音乐库", "/library"),
+            NotifyAction("⬇️ 查看任务", "查看任务", "/tasks"),
+        ],
+    )
 
 
 def notify_scrape_complete(torrent_name: str, scraped: int, total: int):
-    send_all("on_scrape_complete", f"🎵 <b>刮削完成</b>\n{torrent_name}\n成功: {scraped}/{total}")
+    send_all(
+        "on_scrape_complete",
+        render_notify_template("scrape_complete", name=torrent_name, scraped=scraped, total=total),
+        actions=[
+            NotifyAction("📚 打开音乐库", "打开音乐库", "/library"),
+            NotifyAction("🛠️ 治理", "打开治理", "/library?health=1"),
+        ],
+    )
 
 
 def notify_error(context: str, error: str):
-    send_all("on_error", f"❌ <b>错误</b>\n{context}\n{error[:200]}")
+    send_all("on_error", render_notify_template("error", context=context, error=(error or "")[:200]))
 
 
 def notify_cleanup_candidates(candidate_count: int, qb_and_db_count: int, db_only_count: int, total_size: float, total_amount_left: float):
@@ -576,9 +615,18 @@ def notify_cleanup_candidates(candidate_count: int, qb_and_db_count: int, db_onl
     left_mb = total_amount_left / 1024 / 1024 if total_amount_left else 0
     send_all(
         "on_cleanup_candidates",
-        "🧹 <b>Music Sub 清理扫描发现候选</b>\n"
-        f"候选任务: {candidate_count}\n"
-        f"qB+DB: {qb_and_db_count} · 仅DB: {db_only_count}\n"
-        f"影响大小: {size_mb:.1f} MB · 剩余未下载: {left_mb:.1f} MB\n"
-        "请到任务列表执行清理扫描确认。",
+        render_notify_template(
+            "cleanup_candidates",
+            candidate_count=candidate_count,
+            qb_and_db_count=qb_and_db_count,
+            db_only_count=db_only_count,
+            total_size=total_size,
+            total_amount_left=total_amount_left,
+            total_size_mb=size_mb,
+            total_amount_left_mb=left_mb,
+        ),
+        actions=[
+            NotifyAction("⬇️ 查看任务", "查看任务", "/tasks"),
+            NotifyAction("🧹 清理扫描", "清理扫描", "/tasks?cleanup=1"),
+        ],
     )

@@ -23,6 +23,7 @@ const settings = ref({
   notify: {
     webhook_token: '',
     public_base_url: '',
+    templates: {},
     telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', enable_gateway: false, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
@@ -250,6 +251,13 @@ const notifyEvents = [
   ['on_cleanup_candidates', '清理候选提醒'],
   ['assistant_chat', '允许和智能助手对话']
 ]
+const notifyTemplateDefs = [
+  { key: 'download_added', label: '开始下载', vars: '{name}, {site}', defaultText: '⬇️ <b>开始下载</b>\n{name}\n来源: {site}' },
+  { key: 'download_complete', label: '下载完成', vars: '{name}, {file_count}', defaultText: '✅ <b>下载完成</b>\n{name}\n文件数: {file_count}' },
+  { key: 'scrape_complete', label: '刮削完成', vars: '{name}, {scraped}, {total}', defaultText: '🎵 <b>刮削完成</b>\n{name}\n成功: {scraped}/{total}' },
+  { key: 'error', label: '错误告警', vars: '{context}, {error}', defaultText: '❌ <b>错误</b>\n{context}\n{error}' },
+  { key: 'cleanup_candidates', label: '清理候选', vars: '{candidate_count}, {qb_and_db_count}, {db_only_count}, {total_size_mb}, {total_amount_left_mb}', defaultText: '🧹 <b>Music Sub 清理扫描发现候选</b>\n候选任务: {candidate_count}\nqB+DB: {qb_and_db_count} · 仅DB: {db_only_count}\n影响大小: {total_size_mb:.1f} MB · 剩余未下载: {total_amount_left_mb:.1f} MB\n请到任务列表执行清理扫描确认。' },
+]
 const notifyChannelLabels = { telegram: 'Telegram', wecom: '企业微信', qqbot: 'QQBot', wechatbot: '微信 Claw' }
 
 function notifyChannelColor(name, ch) {
@@ -320,6 +328,16 @@ async function copyText(text, label = '内容') {
   } catch (e) {
     window.prompt(`复制${label}`, text)
   }
+}
+
+function resetNotifyTemplate(key) {
+  const def = notifyTemplateDefs.find(t => t.key === key)
+  if (!def) return
+  settings.value.notify.templates = { ...(settings.value.notify.templates || {}), [key]: def.defaultText }
+}
+
+function resetAllNotifyTemplates() {
+  settings.value.notify.templates = Object.fromEntries(notifyTemplateDefs.map(t => [t.key, t.defaultText]))
 }
 
 async function handleRunScheduler(id) {
@@ -649,6 +667,22 @@ onMounted(loadAll)
           <div v-if="!notifyWebhookTokenReady" class="webhook-warning">提示：当前显示的是脱敏密钥。需要设置 webhook 时，点“设置 Webhook”会使用服务端保存的真实密钥；如需手动复制，请先重新生成并保存。</div>
         </div>
 
+        <details class="notify-template-panel">
+          <summary>通知模板</summary>
+          <div class="text-dim template-help">参考 MoviePilot 的模板思路：每类通知可自定义文案，使用变量占位符；未配置时使用默认模板。</div>
+          <div class="template-actions"><AppButton variant="ghost" size="sm" @click="resetAllNotifyTemplates">填充默认模板</AppButton></div>
+          <div class="notify-template-list">
+            <div v-for="tpl in notifyTemplateDefs" :key="tpl.key" class="notify-template-card">
+              <div class="notify-template-head">
+                <strong>{{ tpl.label }}</strong>
+                <small>变量：{{ tpl.vars }}</small>
+                <AppButton variant="ghost" size="sm" @click="resetNotifyTemplate(tpl.key)">恢复默认</AppButton>
+              </div>
+              <textarea v-model="settings.notify.templates[tpl.key]" :placeholder="tpl.defaultText" rows="4"></textarea>
+            </div>
+          </div>
+        </details>
+
         <div class="notify-runtime-panel">
           <div class="notify-runtime-head">
             <div>
@@ -928,6 +962,15 @@ onMounted(loadAll)
 .webhook-help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .webhook-help-card { border: 1px dashed var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .webhook-warning { color: #b45309; background: color-mix(in srgb, #f59e0b 14%, transparent); border: 1px solid color-mix(in srgb, #f59e0b 35%, var(--border)); border-radius: var(--radius-md); padding: 9px 10px; font-size: 13px; }
+.notify-template-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; }
+.notify-template-panel summary { cursor: pointer; font-weight: 700; }
+.template-help { margin: 8px 0 10px; }
+.template-actions { margin-bottom: 10px; }
+.notify-template-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.notify-template-card { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 10px; min-width: 0; }
+.notify-template-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; margin-bottom: 8px; }
+.notify-template-head small { color: var(--text-dim); grid-column: 1 / -1; }
+.notify-template-card textarea { width: 100%; min-height: 96px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; }
 .notify-runtime-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .notify-runtime-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .notify-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -1022,7 +1065,7 @@ onMounted(loadAll)
   .scheduler-row { flex-direction: column; align-items: stretch; gap: 8px; }
   .notify-webhook-head, .notify-runtime-head { flex-direction: column; align-items: stretch; }
   .webhook-url-row { grid-template-columns: 1fr; }
-  .webhook-help-grid { grid-template-columns: 1fr; }
+  .webhook-help-grid, .notify-template-list { grid-template-columns: 1fr; }
   .notify-event-row { grid-template-columns: 1fr auto; gap: 6px; }
   .notify-event-meta { grid-column: 1 / -1; white-space: normal; }
   .notify-event-text { white-space: normal; }
