@@ -3,6 +3,7 @@ import os
 import copy
 import datetime
 import logging
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -271,6 +272,72 @@ def _merge_hints(*hints: dict | None) -> dict:
             if value not in (None, "", 0, False):
                 merged[key] = repair_garble_hint(value) if isinstance(value, str) else value
     return merged
+
+
+_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
+_ROMAN_TEXT_RE = re.compile(r"[A-Za-z]")
+
+
+def _has_cjk_text(value: str | None) -> bool:
+    return bool(_CJK_TEXT_RE.search(value or ""))
+
+
+def _looks_romanized(value: str | None) -> bool:
+    text = value or ""
+    return bool(_ROMAN_TEXT_RE.search(text)) and not _has_cjk_text(text)
+
+
+def _prefer_trusted_cjk(existing: str | None, trusted: str | None, *, min_score: float = 0.55) -> str:
+    """Keep trusted local/download Chinese names over romanized translated scraper names.
+
+    Scrapers sometimes return English/romanized aliases for Chinese songs/albums.
+    When the local filename/tag/torrent hint is Chinese and the scraped value is
+    romanized or poorly matches it, the local Chinese text is the safer library
+    identity. This prevents both wrong English song titles and split album dirs.
+    """
+    trusted = repair_garble_hint((trusted or "").strip())
+    existing = (existing or "").strip()
+    if not trusted:
+        return existing
+    if not existing:
+        return trusted
+    if _has_cjk_text(trusted) and (_looks_romanized(existing) or text_score(trusted, existing) < min_score):
+        return trusted
+    return existing
+
+
+def _stabilize_scraped_meta(meta: MusicMeta | None, trusted_hint: dict | None, *, lock_album: bool = False, lock_album_artist: bool = False) -> MusicMeta | None:
+    """Apply conservative local identity locks to scraper metadata.
+
+    Textual identity priority:
+    1. local/download/torrent hints for Chinese title/album/artist;
+    2. locked album and album_artist for multi-track packages;
+    3. scraper metadata for cover/lyrics/track/year enrichment.
+    """
+    if not meta:
+        return None
+    hint = trusted_hint or {}
+    before = (meta.title, meta.artist, meta.album, meta.album_artist)
+    meta.title = _prefer_trusted_cjk(meta.title, hint.get("title"), min_score=0.58)
+    meta.artist = _prefer_trusted_cjk(meta.artist, hint.get("artist") or hint.get("album_artist"), min_score=0.62)
+    album_hint = hint.get("album") or ""
+    if lock_album and album_hint:
+        meta.album = album_hint
+    else:
+        meta.album = _prefer_trusted_cjk(meta.album, album_hint, min_score=0.62)
+    album_artist_hint = hint.get("album_artist") or hint.get("artist") or ""
+    if lock_album_artist and album_artist_hint:
+        meta.album_artist = album_artist_hint
+    else:
+        meta.album_artist = _prefer_trusted_cjk(meta.album_artist or meta.artist, album_artist_hint, min_score=0.62)
+    after = (meta.title, meta.artist, meta.album, meta.album_artist)
+    if before != after:
+        logger.info(
+            "Stabilized scraped metadata: "
+            f"title={before[0]!r}->{after[0]!r}, artist={before[1]!r}->{after[1]!r}, "
+            f"album={before[2]!r}->{after[2]!r}, album_artist={before[3]!r}->{after[3]!r}"
+        )
+    return meta
 
 
 def _meta_from_hint(hint: dict) -> MusicMeta | None:
@@ -557,6 +624,10 @@ def _process_completed_torrent(torrent: dict):
         context=scrape_context,
     ) or _meta_from_hint(first_hint)
     if first_meta:
+        # The first track decides the target album folder. Preserve trusted
+        # Chinese torrent/tag/path hints here so a romanized scraper result does
+        # not create a second English album folder for the same release.
+        _stabilize_scraped_meta(first_meta, first_hint, lock_album=bool(first_hint.get("album")), lock_album_artist=bool(first_hint.get("album_artist")))
         _enrich_from_local_assets(source_audio_files[0], first_meta)
     meta_cache[os.path.basename(source_audio_files[0])] = first_meta
     organize_artist = (first_meta.album_artist or first_meta.artist) if first_meta else ""
@@ -629,17 +700,13 @@ def _process_completed_torrent(torrent: dict):
                     context=scrape_context,
                 ) or _meta_from_hint(_merge_hints(use_hint, {"album": shared_album, "album_artist": shared_artist}))
                 if meta:
+                    # For later tracks in the same package, lock album/folder
+                    # identity to the first track / local package hint, but keep
+                    # per-track artist/title unless the scraper romanized a
+                    # trusted Chinese filename/tag.
+                    stable_hint = _merge_hints(use_hint, {"album": shared_album, "album_artist": shared_artist})
+                    _stabilize_scraped_meta(meta, stable_hint, lock_album=bool(shared_album), lock_album_artist=bool(shared_artist))
                     _enrich_from_local_assets(file_path, meta)
-                # 同专辑下接选中的 meta 专辑名不一致（例如刮到翻唱/Live 版本），强制覆盖为共享专辑。
-                # album_artist 也锁到首曲/专辑 hint；track artist 保留原始歌手，前端用 album_artist 分组。
-                if meta and shared_album and meta.album and meta.album != shared_album:
-                    logger.info(
-                        f"Override album for {os.path.basename(file_path)}: "
-                        f"{meta.album} -> {shared_album}"
-                    )
-                    meta.album = shared_album
-                if meta and shared_artist:
-                    meta.album_artist = shared_artist
                 meta_cache[os.path.basename(file_path)] = meta
             audio_meta = read_audio_metadata(file_path)
             if meta:
