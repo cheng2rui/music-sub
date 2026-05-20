@@ -230,6 +230,42 @@ function formatTime(ts) {
   return ts ? new Date(ts).toLocaleString() : '-'
 }
 
+function randomSecret(bytes = 24) {
+  const arr = new Uint8Array(bytes)
+  crypto.getRandomValues(arr)
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('')
+}
+
+const notifyWebhookToken = computed(() => settings.value.notify.webhook_token || '')
+const notifyWebhookTokenReady = computed(() => Boolean(notifyWebhookToken.value) && !notifyWebhookToken.value.includes('***'))
+const notifyWebhookBase = computed(() => {
+  if (typeof window === 'undefined') return ''
+  return `${window.location.origin}/api/notify`
+})
+const notifyWebhookUrls = computed(() => {
+  const token = encodeURIComponent(notifyWebhookToken.value || '<入站密钥>')
+  return [
+    { key: 'generic', label: '通用入站', desc: '外部代理或自定义脚本推送标准 JSON', url: `${notifyWebhookBase.value}/incoming?token=${token}` },
+    { key: 'wecom', label: '企业微信代理模式', desc: '外部已解密/转发时使用；原生企业微信回调见下方说明', url: `${notifyWebhookBase.value}/webhook/wecom?token=${token}` },
+    { key: 'qqbot', label: 'QQBot Webhook', desc: 'QQBot HTTP 回调或转发器推送', url: `${notifyWebhookBase.value}/webhook/qqbot?token=${token}` },
+    { key: 'wechatbot', label: 'WeChatBot Webhook', desc: 'WeChatBot / iLink / 自建微信转发器推送', url: `${notifyWebhookBase.value}/webhook/wechatbot?token=${token}` },
+  ]
+})
+const wecomNativeCallbackUrl = computed(() => `${notifyWebhookBase.value}/webhook/wecom`)
+
+function generateWebhookToken() {
+  settings.value.notify.webhook_token = randomSecret(24)
+}
+
+async function copyText(text, label = '内容') {
+  try {
+    await navigator.clipboard.writeText(text)
+    alert(`已复制${label}`)
+  } catch (e) {
+    window.prompt(`复制${label}`, text)
+  }
+}
+
 async function handleRunScheduler(id) {
   try { await runScheduler(id) } catch (e) { console.error(e) }
 }
@@ -505,10 +541,45 @@ onMounted(loadAll)
       <!-- 通知 -->
       <div v-show="activeSettingsTab === 'notify'" class="settings-section">
         <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('notify')" alt="" /><span v-else>📢</span><span>通知与消息入口</span></h3>
-        <div class="field" style="margin-bottom:14px">
-          <label>Webhook Token（入站消息校验）</label>
-          <input v-model="settings.notify.webhook_token" placeholder="必填；/api/notify/webhook/... 必须带 ?token=" />
-          <small class="text-dim">入站地址：/api/notify/webhook/wecom、/api/notify/webhook/qqbot、/api/notify/webhook/wechatbot。未配置 token 时拒绝入站。</small>
+        <div class="notify-webhook-panel">
+          <div class="notify-webhook-head">
+            <div>
+              <strong>入站 Webhook 密钥</strong>
+              <div class="text-dim">用于保护 Music Sub 的外部消息入口。外部系统调用 /api/notify/webhook/... 或 /api/notify/incoming 时必须带 <code>?token=密钥</code>。</div>
+            </div>
+            <AppButton variant="ghost" size="sm" @click="generateWebhookToken">生成密钥</AppButton>
+          </div>
+          <div class="fields-row">
+            <div class="field flex-1">
+              <label>密钥</label>
+              <input v-model="settings.notify.webhook_token" type="password" placeholder="建议点击生成；不是 Telegram Bot Token / 企业微信 Token" />
+              <small class="text-dim">这个密钥只属于 Music Sub，用来校验入站消息。保存设置后才会生效。</small>
+            </div>
+            <AppButton variant="ghost" size="sm" :disabled="!notifyWebhookToken" @click="copyText(notifyWebhookToken, '入站密钥')">复制密钥</AppButton>
+          </div>
+          <div class="webhook-url-list">
+            <div v-for="item in notifyWebhookUrls" :key="item.key" class="webhook-url-row">
+              <div class="webhook-url-main">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.desc }}</small>
+                <code>{{ item.url }}</code>
+              </div>
+              <AppButton variant="ghost" size="sm" :disabled="!notifyWebhookToken" @click="copyText(item.url, item.label + '地址')">复制地址</AppButton>
+            </div>
+          </div>
+          <div class="webhook-help-grid">
+            <div class="webhook-help-card">
+              <strong>标准 JSON 示例</strong>
+              <code>{"channel":"telegram","text":"帮我看看下载状态","user_id":"rey"}</code>
+              <small>适合自建脚本、n8n、青龙、Webhook 转发器等。</small>
+            </div>
+            <div class="webhook-help-card">
+              <strong>企业微信原生回调</strong>
+              <code>{{ wecomNativeCallbackUrl }}</code>
+              <small>企业微信后台配置的是这个地址；它使用下方“回调 Token / EncodingAESKey / Corp ID”验签解密，不使用上面的入站密钥。</small>
+            </div>
+          </div>
+          <div v-if="!notifyWebhookTokenReady" class="webhook-warning">提示：当前密钥为空或为已脱敏显示。复制真实入站地址前，建议点击“生成密钥”并保存设置。</div>
         </div>
 
         <div class="notify-runtime-panel">
@@ -750,6 +821,17 @@ onMounted(loadAll)
 .toggle-list { display: flex; flex-direction: column; gap: 8px; }
 .toggle-list.compact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .toggle-item { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 14px; line-height: 1.35; }
+.notify-webhook-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.notify-webhook-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.notify-webhook-head code { font-size: 12px; color: var(--accent); }
+.webhook-url-list { display: flex; flex-direction: column; gap: 8px; }
+.webhook-url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 10px; }
+.webhook-url-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.webhook-url-main small, .webhook-help-card small { color: var(--text-dim); line-height: 1.4; }
+.webhook-url-main code, .webhook-help-card code { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); background: var(--surface-soft); border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px; }
+.webhook-help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.webhook-help-card { border: 1px dashed var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.webhook-warning { color: #b45309; background: color-mix(in srgb, #f59e0b 14%, transparent); border: 1px solid color-mix(in srgb, #f59e0b 35%, var(--border)); border-radius: var(--radius-md); padding: 9px 10px; font-size: 13px; }
 .notify-runtime-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .notify-runtime-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .notify-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -838,7 +920,9 @@ onMounted(loadAll)
   .pwd-form { flex-direction: column; align-items: stretch; }
   .pwd-form input { min-width: unset; width: 100%; }
   .scheduler-row { flex-direction: column; align-items: stretch; gap: 8px; }
-  .notify-runtime-head { flex-direction: column; align-items: stretch; }
+  .notify-webhook-head, .notify-runtime-head { flex-direction: column; align-items: stretch; }
+  .webhook-url-row { grid-template-columns: 1fr; }
+  .webhook-help-grid { grid-template-columns: 1fr; }
   .notify-event-row { grid-template-columns: 1fr auto; gap: 6px; }
   .notify-event-meta { grid-column: 1 / -1; white-space: normal; }
   .notify-event-text { white-space: normal; }
