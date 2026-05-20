@@ -180,13 +180,22 @@ for d in [target.parent, target.parent.parent, backup.parent, backup.parent.pare
 
     if args.expect_version:
         required_assets = [
+            "/animal-island/README.md",
             "/animal-island/animal_icon.svg",
             "/animal-island/content_bg_pc.jpg",
+            "/animal-island/guide-bg-line.webp",
+            "/animal-island/home_bg.svg",
             "/animal-island/menu_bg.svg",
             "/animal-island/components/cursor-icon.png",
+            "/animal-island/components/divider_line.png",
             "/animal-island/nook-phone/AppIcons.svg",
-            "/animal-island/nook-phone/nook1.svg",
+            "/animal-island/nook-phone/Property-Camera.svg",
+            "/animal-island/nook-phone/Property-Chat.svg",
+            "/animal-island/nook-phone/Property-Helicopter.svg",
+            "/animal-island/nook-phone/Property-Recipes.svg",
             "/animal-island/nook-phone/Property-Shopping.svg",
+            "/animal-island/nook-phone/nook1.svg",
+            "/animal-island/nook-phone/nook2.svg",
         ]
         for asset_url in required_assets:
             asset_bytes = request(args.base, asset_url, timeout=20)
