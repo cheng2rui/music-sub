@@ -69,6 +69,7 @@ const optionPlaceholder = computed(() => {
   if (id === 'split_meta') return JSON.stringify({ prefer_artist_left: true, write_tags: false }, null, 2)
   if (id === 'identify') return JSON.stringify({ write_tags: false }, null, 2)
   if (id === 'album_artist') return JSON.stringify({ album_artist: '', write_tags: false }, null, 2)
+  if (id === 'merge_split_albums') return JSON.stringify({ album_artist: '' }, null, 2)
   if (id === 'dedupe') return JSON.stringify({ mode: 'trash' }, null, 2)
   if (id === 'delete_files') return JSON.stringify({ delete_files: true, delete_empty_dirs: true, delete_missing_db_rows: true, mode: 'trash' }, null, 2)
   if (id === 'split_audio' || id === 'cue_candidates') return JSON.stringify({ keep_original: true, overwrite_existing: false, output_subdir: '', stream_copy: false }, null, 2)

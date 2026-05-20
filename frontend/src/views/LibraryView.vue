@@ -94,7 +94,7 @@ function openToolbox(ctx = {}) {
 const healthLoading = ref(false)
 const healthRescraping = ref('')
 const healthKind = ref('missing_cover')
-const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0, cue_candidates: 0, album_artist_conflicts: 0 })
+const healthTotals = ref({ missing_cover: 0, missing_lyrics: 0, missing_duration: 0, unknown_artist: 0, unscraped: 0, cue_candidates: 0, album_artist_conflicts: 0, split_album_folders: 0 })
 const healthItems = ref([])
 const healthKinds = [
   { id: 'missing_cover', label: '缺封面' },
@@ -103,10 +103,11 @@ const healthKinds = [
   { id: 'unknown_artist', label: '艺人异常' },
   { id: 'unscraped', label: '未刮削' },
   { id: 'cue_candidates', label: 'CUE整轨' },
-  { id: 'album_artist_conflicts', label: '专辑艺人冲突' }
+  { id: 'album_artist_conflicts', label: '专辑艺人冲突' },
+  { id: 'split_album_folders', label: '同名专辑分裂' }
 ]
 const healthLabels = Object.fromEntries(healthKinds.map(k => [k.id, k.label]))
-const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped', 'cue_candidates', 'album_artist_conflicts']
+const scanHealthOrder = ['missing_cover', 'missing_lyrics', 'missing_duration', 'unknown_artist', 'unscraped', 'cue_candidates', 'album_artist_conflicts', 'split_album_folders']
 
 async function openHealthModal(kind = healthKind.value) {
   showHealthModal.value = true
@@ -169,6 +170,12 @@ async function batchRescrapeCurrentKind() {
     const ids = healthItems.value.flatMap(it => Array.isArray(it.file_ids) ? it.file_ids : [it.sample_track_id]).filter(Boolean)
     const suggestions = [...new Set(healthItems.value.map(it => it.suggested_album_artist).filter(Boolean))]
     openToolbox({ file_ids: ids, preferred_tool: 'album_artist', options: suggestions.length === 1 ? { album_artist: suggestions[0] } : {} })
+    return
+  }
+  if (healthKind.value === 'split_album_folders') {
+    const ids = healthItems.value.flatMap(it => Array.isArray(it.file_ids) ? it.file_ids : [it.sample_track_id]).filter(Boolean)
+    const suggestions = [...new Set(healthItems.value.map(it => it.suggested_album_artist).filter(Boolean))]
+    openToolbox({ file_ids: ids, preferred_tool: 'merge_split_albums', options: suggestions.length === 1 ? { album_artist: suggestions[0] } : {} })
     return
   }
   batchBusy.value = true
@@ -865,7 +872,7 @@ onMounted(() => { loadStats(); loadAlbums(0) })
             :disabled="!healthItems.length"
             :loading="batchBusy"
             @click="batchRescrapeCurrentKind"
-          >{{ healthKind === 'cue_candidates' ? '打开工具箱批量拆分' : healthKind === 'album_artist_conflicts' ? '打开工具箱批量修复' : `批量重刮削当前 ${healthItems.length} 项` }}</AppButton>
+          >{{ healthKind === 'cue_candidates' ? '打开工具箱批量拆分' : healthKind === 'album_artist_conflicts' ? '打开工具箱批量修复' : healthKind === 'split_album_folders' ? '打开工具箱批量合并' : `批量重刮削当前 ${healthItems.length} 项` }}</AppButton>
         </div>
         <div v-if="batchJob" class="job-progress">
           <div class="job-progress-head">
@@ -906,8 +913,8 @@ onMounted(() => { loadStats(); loadAlbums(0) })
                 variant="primary"
                 size="sm"
                 :loading="healthRescraping === `${item.artist}::${item.album}`"
-                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : healthKind === 'album_artist_conflicts' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'album_artist', options: { album_artist: item.suggested_album_artist || item.artist } }) : rescrapeHealthAlbum(item)"
-              >{{ healthKind === 'cue_candidates' ? '拆分' : healthKind === 'album_artist_conflicts' ? '修复' : '重刮削' }}</AppButton>
+                @click="healthKind === 'cue_candidates' ? openToolbox({ file_ids: [item.sample_track_id], preferred_tool: 'cue_candidates' }) : healthKind === 'album_artist_conflicts' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'album_artist', options: { album_artist: item.suggested_album_artist || item.artist } }) : healthKind === 'split_album_folders' ? openToolbox({ file_ids: item.file_ids || [item.sample_track_id], preferred_tool: 'merge_split_albums', options: { album_artist: item.suggested_album_artist || item.artist } }) : rescrapeHealthAlbum(item)"
+              >{{ healthKind === 'cue_candidates' ? '拆分' : healthKind === 'album_artist_conflicts' ? '修复' : healthKind === 'split_album_folders' ? '合并' : '重刮削' }}</AppButton>
             </div>
           </div>
         </div>

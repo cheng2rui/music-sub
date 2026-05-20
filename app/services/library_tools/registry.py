@@ -24,6 +24,7 @@ from app.services.library_tools import (
     cue_candidates as cue_candidates_mod,
     album_artist as album_artist_mod,
     delete_files as delete_files_mod,
+    merge_split_albums as merge_split_albums_mod,
 )
 from app.services.scrape_jobs import runner as job_runner, JobStep, mark_step
 
@@ -102,6 +103,12 @@ _TOOLS: dict[str, dict[str, Any]] = {
         "description": "删除选中的文件，并清理由此产生的空目录。",
         "preview": delete_files_mod.preview,
         "apply": delete_files_mod.apply,
+    },
+    "merge_split_albums": {
+        "label": "合并分裂专辑",
+        "description": "把历史库里同名专辑被不同歌手拆开的文件夹合并到主歌手目录，并同步 DB 路径和 album_artist。",
+        "preview": merge_split_albums_mod.preview,
+        "apply": merge_split_albums_mod.apply,
     },
 }
 

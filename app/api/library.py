@@ -13,6 +13,7 @@ from app.auth import verify_token
 from app.config import config
 from app.db import get_db
 from app.models import LibraryAuditEvent, MusicFile
+from app.services.album_identity import primary_artist
 
 router = APIRouter()
 
@@ -416,7 +417,55 @@ def _album_artist_conflict_items(files: list[MusicFile], limit: int) -> tuple[in
     return total_tracks, items[:limit]
 
 
-_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts")
+def _split_album_folder_items(files: list[MusicFile], limit: int) -> tuple[int, list[dict]]:
+    """Find same album names spread across multiple artist folders/album artists."""
+    groups: dict[str, dict] = {}
+    for f in files:
+        album = _display_album(f.album)
+        key = _norm_text(album)
+        if not key:
+            continue
+        bucket = groups.setdefault(key, {"album": album, "files": [], "folders": set(), "artists": set()})
+        bucket["files"].append(f)
+        if f.file_path:
+            try:
+                p = Path(f.file_path).resolve()
+                bucket["folders"].add(str(p.parent))
+            except Exception:
+                pass
+        aa = (f.album_artist or f.artist or "").strip()
+        if aa:
+            bucket["artists"].add(aa)
+    items = []
+    total_tracks = 0
+    for bucket in groups.values():
+        folders = sorted(bucket["folders"])
+        artists = sorted(bucket["artists"])
+        if len(folders) <= 1 and len(artists) <= 1:
+            continue
+        rows = sorted(bucket["files"], key=lambda r: (r.track_number is None, r.track_number or 9999, r.id))
+        if len(rows) < 2:
+            continue
+        sample = rows[0]
+        suggested = primary_artist(sample.album_artist or sample.artist) or _library_path_album_artist(sample.file_path) or _display_album_artist(sample)
+        total_tracks += len(rows)
+        items.append({
+            "artist": suggested or UNKNOWN_ARTIST,
+            "album": bucket["album"],
+            "track_count": len(rows),
+            "sample_track_id": sample.id,
+            "sample_path": sample.file_path,
+            "has_cover": _has_cover(sample.file_path),
+            "file_ids": [r.id for r in rows],
+            "artists": artists,
+            "folders": folders,
+            "suggested_album_artist": suggested,
+        })
+    items.sort(key=lambda x: (len(x.get("folders") or []), x["track_count"]), reverse=True)
+    return total_tracks, items[:limit]
+
+
+_HEALTH_KINDS = ("missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts", "split_album_folders")
 
 
 @router.get("/health")
@@ -471,10 +520,14 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
 
     conflict_total, conflict_items = _album_artist_conflict_items(files, limit)
     totals["album_artist_conflicts"] = conflict_total
+    split_total, split_items = _split_album_folder_items(files, limit)
+    totals["split_album_folders"] = split_total
 
     def _serialize(bucket_key: str):
         if bucket_key == "album_artist_conflicts":
             return conflict_items
+        if bucket_key == "split_album_folders":
+            return split_items
         items = list(buckets[bucket_key].values())
         items.sort(key=lambda x: x["track_count"], reverse=True)
         return items[:limit]
