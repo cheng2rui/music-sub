@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+import app.config as cfg_module
 from app.config import config
 from app.version import APP_VERSION
 from app.models import DownloadTask, MusicFile, Subscription
@@ -164,18 +165,22 @@ def search_download_candidates(db: Session, keyword: str, sites: list[str] | Non
     except Exception as exc:
         pt = {"items": []}
         pt_error = str(exc)[:200]
-    try:
-        online = search_online_tool(db, keyword=keyword, sources=sources, limit=per_source_limit)
-    except Exception as exc:
+    if getattr(cfg_module.config.assistant, "allow_online_search_candidates", True):
+        try:
+            online = search_online_tool(db, keyword=keyword, sources=sources, limit=per_source_limit)
+        except Exception as exc:
+            online = {"items": []}
+            online_error = str(exc)[:200]
+    else:
         online = {"items": []}
-        online_error = str(exc)[:200]
+        online_error = "智能助手设置已关闭在线音乐候选。"
     return {
         "keyword": keyword,
         "pt": {"items": pt.get("items") or [], "error": pt_error},
         "online": {"items": online.get("items") or [], "error": online_error},
         "instruction": (
             "下载决策：专辑、合集、整轨、CUE、PT/做种/无损包优先使用 pt.items 的 download_args 调用 download_torrent；"
-            "单曲、在线试听源、快速下载优先使用 online.items 的 download_args 调用 download_online_song。"
+            "只有在线候选开关开启且 online.items 有结果时，单曲/快速下载才可考虑 online.items 的 download_args 调用 download_online_song。"
             "如果用户明确说直接下载，选择最匹配候选继续调用对应下载工具；否则推荐 1-3 个候选让用户选。"
         ),
     }

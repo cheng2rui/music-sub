@@ -102,6 +102,7 @@ assistant:
   require_confirm_for_download: true
   require_confirm_for_delete: true
   require_confirm_for_apply_tools: true
+  allow_online_search_candidates: true
   allow_online_download: false
   allow_library_write: true
   allow_task_delete: false

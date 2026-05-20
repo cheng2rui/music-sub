@@ -148,6 +148,7 @@ class AssistantSettingInput(BaseModel):
     require_confirm_for_download: bool = True
     require_confirm_for_delete: bool = True
     require_confirm_for_apply_tools: bool = True
+    allow_online_search_candidates: bool = True
     allow_online_download: bool = False
     allow_library_write: bool = True
     allow_task_delete: bool = False

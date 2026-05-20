@@ -41,6 +41,7 @@ const settings = ref({
     require_confirm_for_download: true,
     require_confirm_for_delete: true,
     require_confirm_for_apply_tools: true,
+    allow_online_search_candidates: true,
     allow_online_download: false,
     allow_library_write: true,
     allow_task_delete: false,
@@ -891,6 +892,7 @@ onMounted(loadAll)
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_download" /><span>下载前需要确认</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_delete" /><span>删除前需要确认</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_apply_tools" /><span>中高风险工具需要确认</span></label>
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_online_search_candidates" /><span>下载搜索包含在线音乐源</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_online_download" /><span>允许在线音乐下载工具</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_library_write" /><span>允许音乐库写入工具</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.allow_task_delete" /><span>允许任务删除工具</span></label>
