@@ -246,6 +246,7 @@ const notifyWebhookUrls = computed(() => {
   const token = encodeURIComponent(notifyWebhookToken.value || '<入站密钥>')
   return [
     { key: 'generic', label: '通用入站', desc: '外部代理或自定义脚本推送标准 JSON', url: `${notifyWebhookBase.value}/incoming?token=${token}` },
+    { key: 'telegram', label: 'Telegram Webhook', desc: 'Telegram Bot API setWebhook 可配置到这个地址', url: `${notifyWebhookBase.value}/webhook/telegram?token=${token}` },
     { key: 'wecom', label: '企业微信代理模式', desc: '外部已解密/转发时使用；原生企业微信回调见下方说明', url: `${notifyWebhookBase.value}/webhook/wecom?token=${token}` },
     { key: 'qqbot', label: 'QQBot Webhook', desc: 'QQBot HTTP 回调或转发器推送', url: `${notifyWebhookBase.value}/webhook/qqbot?token=${token}` },
     { key: 'wechatbot', label: 'WeChatBot Webhook', desc: 'WeChatBot / iLink / 自建微信转发器推送', url: `${notifyWebhookBase.value}/webhook/wechatbot?token=${token}` },
@@ -571,7 +572,7 @@ onMounted(loadAll)
             <div class="webhook-help-card">
               <strong>标准 JSON 示例</strong>
               <code>{"channel":"telegram","text":"帮我看看下载状态","user_id":"rey"}</code>
-              <small>适合自建脚本、n8n、青龙、Webhook 转发器等。</small>
+              <small>适合自建脚本、n8n、青龙、Webhook 转发器等；Telegram / QQBot 等原始回调会被自动归一化。</small>
             </div>
             <div class="webhook-help-card">
               <strong>企业微信原生回调</strong>

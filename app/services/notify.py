@@ -30,6 +30,146 @@ class SendResult:
     response: Any = None
 
 
+@dataclass
+class IncomingMessage:
+    """Normalized inbound chat message.
+
+    This is intentionally close to MoviePilot's CommingMessage idea: provider
+    webhooks are parsed once into a stable shape, then the assistant pipeline no
+    longer needs to know each platform's raw payload format.
+    """
+    channel: str
+    text: str = ""
+    user_id: str = ""
+    username: str = ""
+    target: str = ""
+    group: bool | None = None
+    msg_id: str = ""
+    chat_id: str = ""
+    source: str = ""
+    raw: Any = None
+
+    def meta(self) -> dict[str, Any]:
+        return {
+            "username": self.username,
+            "chat_id": self.chat_id,
+            "source": self.source,
+            "group": self.group,
+            "msg_id": self.msg_id,
+        }
+
+
+def _as_str(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _pick_text(*values: Any) -> str:
+    for value in values:
+        text = _as_str(value)
+        if text:
+            return text
+    return ""
+
+
+def normalize_incoming_message(channel: str, body: dict[str, Any] | Any) -> IncomingMessage:
+    """Normalize common provider webhook payloads into IncomingMessage.
+
+    Supported today:
+    - generic JSON/form: {channel,text,user_id,target,group,msg_id}
+    - Telegram Update: message / edited_message / callback_query
+    - QQBot event: content + author.user_openid / group_openid
+    - WeCom decrypted/proxy payload: Content + FromUserName + MsgId
+    - WeChatBot/iLink-like payload: text/content + from/sender/chat_id
+    """
+    raw = body
+    if not isinstance(body, dict):
+        body = {}
+    ch = (channel or body.get("channel") or "").lower()
+
+    # Telegram Bot API update.
+    if ch == "telegram":
+        update = body
+        callback = update.get("callback_query") if isinstance(update.get("callback_query"), dict) else None
+        if callback:
+            user = callback.get("from") or {}
+            msg = callback.get("message") or {}
+            chat = msg.get("chat") or {}
+            data = _as_str(callback.get("data"))
+            return IncomingMessage(
+                channel="telegram",
+                text=f"CALLBACK:{data}" if data else _pick_text(callback.get("message"), callback.get("text")),
+                user_id=_as_str(user.get("id")),
+                username=_pick_text(user.get("username"), user.get("first_name"), user.get("last_name")),
+                target=_as_str(chat.get("id") or user.get("id")),
+                chat_id=_as_str(chat.get("id")),
+                group=(chat.get("type") not in {None, "private"}),
+                msg_id=_as_str(msg.get("message_id") or callback.get("id")),
+                source="telegram",
+                raw=raw,
+            )
+        msg = update.get("message") or update.get("edited_message") or update.get("channel_post") or update
+        if isinstance(msg, dict):
+            user = msg.get("from") or msg.get("sender_chat") or {}
+            chat = msg.get("chat") or {}
+            text = _pick_text(msg.get("text"), msg.get("caption"))
+            return IncomingMessage(
+                channel="telegram",
+                text=text,
+                user_id=_as_str(user.get("id") or chat.get("id")),
+                username=_pick_text(user.get("username"), user.get("first_name"), user.get("title")),
+                target=_as_str(chat.get("id") or user.get("id")),
+                chat_id=_as_str(chat.get("id")),
+                group=(chat.get("type") not in {None, "private"}),
+                msg_id=_as_str(msg.get("message_id")),
+                source="telegram",
+                raw=raw,
+            )
+
+    text = _pick_text(body.get("text"), body.get("content"), body.get("Content"), body.get("message"))
+    user_id = _pick_text(body.get("user_id"), body.get("userid"), body.get("FromUserName"), body.get("from_user"))
+    target = _pick_text(body.get("target"), body.get("chat_id"), body.get("group_openid"))
+    group = body.get("group")
+    msg_id = _pick_text(body.get("msg_id"), body.get("message_id"), body.get("MsgId"), body.get("id"))
+    username = _pick_text(body.get("username"), body.get("user_name"), body.get("name"), body.get("nickname"))
+    chat_id = _pick_text(body.get("chat_id"), body.get("room_id"), body.get("group_openid"))
+
+    if ch == "qqbot":
+        event_type = body.get("type") or ""
+        author = body.get("author") or {}
+        if isinstance(author, dict):
+            user_id = _pick_text(author.get("user_openid"), author.get("id"), user_id)
+            username = _pick_text(author.get("username"), author.get("nick"), username)
+        if event_type == "GROUP_AT_MESSAGE_CREATE" or body.get("group_openid"):
+            group = True
+            target = _pick_text(body.get("group_openid"), target)
+            chat_id = target
+        else:
+            group = False if group is None else group
+            target = target or user_id
+    elif ch in {"wechatbot", "weichatbot"}:
+        user_id = user_id or _pick_text(body.get("from"), body.get("sender"))
+        target = target or _pick_text(body.get("to"), body.get("room_id"), user_id)
+        chat_id = chat_id or target
+    elif ch in {"wecom", "wechat", "wework"}:
+        target = target or user_id
+        chat_id = chat_id or target
+
+    return IncomingMessage(
+        channel=ch,
+        text=text,
+        user_id=user_id,
+        username=username,
+        target=target,
+        group=group,
+        msg_id=msg_id,
+        chat_id=chat_id,
+        source=ch,
+        raw=raw,
+    )
+
+
 _wecom_token_cache: dict[str, Any] = {"key": "", "token": "", "expires_at": 0.0}
 _qq_token_cache: dict[str, Any] = {"app_id": "", "token": "", "expires_at": 0.0}
 
@@ -93,14 +233,15 @@ def _event_enabled(channel_cfg: Any, event: str) -> bool:
     return bool(getattr(channel_cfg, "enabled", False) and getattr(channel_cfg, event, True))
 
 
-def _send_telegram(text: str) -> SendResult:
+def _send_telegram(text: str, target: str | None = None) -> SendResult:
     tg = cfg_module.config.notify.telegram
-    if not tg.enabled or not tg.bot_token or not tg.chat_id:
+    chat_id = target or tg.chat_id
+    if not tg.enabled or not tg.bot_token or not chat_id:
         return SendResult("telegram", False, "telegram not configured")
     try:
         resp = requests.post(
             f"https://api.telegram.org/bot{tg.bot_token}/sendMessage",
-            json={"chat_id": tg.chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
             timeout=10,
         )
         data = resp.json() if resp.content else {}
@@ -250,7 +391,7 @@ def _send_wechatbot(text: str, target: str | None = None) -> SendResult:
 def send_channel(channel: str, text: str, *, target: str | None = None, group: bool | None = None, msg_id: str | None = None) -> SendResult:
     channel = (channel or "").lower()
     if channel == "telegram":
-        result = _send_telegram(text)
+        result = _send_telegram(text, target=target)
     elif channel in {"wecom", "wechat", "wework"}:
         result = _send_wecom(text, userid=target)
     elif channel == "qqbot":
@@ -310,17 +451,22 @@ def _looks_cancel(text: str) -> bool:
     return normalized in {"取消", "不要", "停止", "算了", "否", "no", "n", "cancel"}
 
 
-def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: str = "", target: str = "", group: bool | None = None, msg_id: str | None = None) -> dict[str, Any]:
+def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str, Any]:
     """Forward a normalized inbound chat message to Music Sub Assistant and reply on the same channel.
 
     Unlike the web UI, messaging surfaces need sticky sessions and a simple
     confirm/cancel grammar so high-risk assistant actions can be completed from
-    WeCom/QQ/WeChat without opening the browser.
+    WeCom/QQ/WeChat/Telegram without opening the browser.
     """
     from app.services.assistant.service import AssistantService
 
-    text = (text or "").strip()
-    log_notify_event(channel=channel, direction="inbound", text=text, user_id=user_id, target=target, status="ok" if text else "ignored", message="inbound message", raw={"group": group, "msg_id": msg_id}, db=db)
+    channel = (incoming.channel or "").lower()
+    text = (incoming.text or "").strip()
+    user_id = incoming.user_id or incoming.target or ""
+    target = incoming.target or incoming.chat_id or user_id
+    group = incoming.group
+    msg_id = incoming.msg_id or None
+    log_notify_event(channel=channel, direction="inbound", text=text, user_id=user_id, target=target, status="ok" if text else "ignored", message="inbound message", raw={"incoming": incoming.meta(), "raw": incoming.raw}, db=db)
     if not text:
         return {"ok": False, "message": "empty text"}
     ch_cfg = getattr(cfg_module.config.notify, "wechatbot" if channel in {"wechatbot", "weichatbot"} else channel, None)
@@ -345,7 +491,12 @@ def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: 
 
     # Prefer explicit target; otherwise reply to inbound user id.
     send_res = send_channel(channel, reply, target=target or user_id or None, group=group, msg_id=msg_id)
-    return {"ok": bool(res.get("ok", True)), "conversation_id": conv.id, "assistant": res, "send": send_res.__dict__}
+    return {"ok": bool(res.get("ok", True)), "conversation_id": conv.id, "incoming": incoming.meta(), "assistant": res, "send": send_res.__dict__}
+
+
+def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: str = "", target: str = "", group: bool | None = None, msg_id: str | None = None) -> dict[str, Any]:
+    """Backward-compatible wrapper for older call sites."""
+    return handle_incoming_message(db, IncomingMessage(channel=channel, text=text, user_id=user_id, target=target, group=group, msg_id=msg_id))
 
 
 # Event helpers ----------------------------------------------------------------

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import app.config as cfg_module
 from app.db import get_db
 from app.models import NotifyEvent
-from app.services.notify import send_channel, handle_incoming_assistant
+from app.services.notify import IncomingMessage, normalize_incoming_message, send_channel, handle_incoming_message
 
 router = APIRouter()
 
@@ -170,15 +170,15 @@ def qqbot_gateway_restart():
 @router.post("/incoming")
 def incoming(req: IncomingRequest, token: str = Query(default=""), db: Session = Depends(get_db)):
     _check_webhook_token(token)
-    return handle_incoming_assistant(
-        db,
+    return handle_incoming_message(db, IncomingMessage(
         channel=req.channel,
         text=req.text,
         user_id=req.user_id,
         target=req.target,
         group=req.group,
-        msg_id=req.msg_id,
-    )
+        msg_id=req.msg_id or "",
+        raw=req.raw,
+    ))
 
 
 @router.get("/webhook/wecom")
@@ -237,7 +237,7 @@ async def wecom_native_webhook(
             raise HTTPException(status_code=403, detail=str(exc))
         if not msg.content:
             return PlainTextResponse("success")
-        handle_incoming_assistant(db, channel="wecom", text=msg.content, user_id=msg.from_user, target=msg.from_user, msg_id=msg.msg_id)
+        handle_incoming_message(db, IncomingMessage(channel="wecom", text=msg.content, user_id=msg.from_user, target=msg.from_user, msg_id=msg.msg_id, source="wecom-native", raw={"plain_xml": plain_xml}))
         return PlainTextResponse("success")
     # Fallback to generic token-protected JSON/form webhook for proxy mode.
     return await provider_webhook("wecom", request, token=token, db=db)
@@ -245,13 +245,12 @@ async def wecom_native_webhook(
 
 @router.post("/webhook/{channel}")
 async def provider_webhook(channel: str, request: Request, token: str = Query(default=""), db: Session = Depends(get_db)):
-    """Best-effort provider webhook normalizer.
+    """Provider webhook endpoint.
 
-    Supported payload shapes:
-    - generic: {text,user_id,target,group,msg_id}
-    - QQBot gateway event: {type, id, content, author.user_openid, group_openid}
-    - WeCom callback after external decrypt/proxy: {Content, FromUserName, MsgId}
-    - WeChatBot/iLink-like: {text/content, user_id/from_user/chat_id}
+    Raw provider payloads are parsed into `IncomingMessage` first, then the
+    assistant pipeline handles one stable shape. This mirrors MoviePilot's
+    message-parser pattern and keeps future image/audio/button support isolated
+    in provider parsers.
     """
     _check_webhook_token(token)
     try:
@@ -260,30 +259,5 @@ async def provider_webhook(channel: str, request: Request, token: str = Query(de
         form = await request.form()
         body = dict(form)
 
-    ch = channel.lower()
-    text = str(body.get("text") or body.get("content") or body.get("Content") or body.get("message") or "").strip()
-    user_id = str(body.get("user_id") or body.get("userid") or body.get("FromUserName") or body.get("from_user") or "")
-    target = str(body.get("target") or body.get("chat_id") or body.get("group_openid") or "")
-    group = body.get("group")
-    msg_id = str(body.get("msg_id") or body.get("message_id") or body.get("MsgId") or body.get("id") or "")
-
-    if ch == "qqbot":
-        event_type = body.get("type") or ""
-        content = body.get("content") or ""
-        if isinstance(content, str) and content:
-            text = content
-        author = body.get("author") or {}
-        if event_type == "GROUP_AT_MESSAGE_CREATE" or body.get("group_openid"):
-            group = True
-            target = str(body.get("group_openid") or target or "")
-        else:
-            group = False
-            user_id = str(author.get("user_openid") or user_id or "")
-            target = target or user_id
-    elif ch in {"wechatbot", "weichatbot"}:
-        user_id = user_id or str(body.get("from") or body.get("sender") or "")
-        target = target or str(body.get("to") or body.get("room_id") or user_id or "")
-    elif ch in {"wecom", "wechat", "wework"}:
-        target = target or user_id
-
-    return handle_incoming_assistant(db, channel=ch, text=text, user_id=user_id, target=target, group=group, msg_id=msg_id)
+    incoming = normalize_incoming_message(channel, body)
+    return handle_incoming_message(db, incoming)
