@@ -1,6 +1,7 @@
 """Assistant orchestration service."""
 from __future__ import annotations
 
+import concurrent.futures
 import datetime
 import json
 import logging
@@ -355,11 +356,12 @@ class AssistantService:
         tool_events: list[dict[str, Any]] = []
 
         try:
-            for _ in range(4):
+            for _ in range(max(1, min(int(getattr(cfg, "max_iterations", 4) or 4), 32))):
                 assistant_msg = client.chat(messages, tools=openai_tools(self._enabled_tool_names()))
                 tool_calls = assistant_msg.get("tool_calls") or []
                 if not tool_calls:
                     content = assistant_msg.get("content") or "我查到了，但模型没有生成文字总结。"
+                    content = self._append_verbose_summary(content, tool_events)
                     self._save_message(conv.id, "assistant", content)
                     return self._chat_response(conv.id, content, tool_calls=tool_events)
 
@@ -369,7 +371,7 @@ class AssistantService:
                     if outcome:
                         return outcome
 
-            text = "这次调用的工具步骤太多，我先暂停一下。请确认下一步要继续搜索、下载还是整理。"
+            text = f"这次调用工具步骤超过上限（{getattr(cfg, 'max_iterations', 4)} 轮），我先暂停一下。请确认下一步要继续搜索、下载还是整理。"
             self._save_message(conv.id, "assistant", text)
             return self._chat_response(conv.id, text, tool_calls=tool_events)
         except AssistantLLMError as e:
@@ -381,6 +383,27 @@ class AssistantService:
             text = f"助手执行失败：{_sanitize_error(e, cfg.provider.api_key)}"
             self._save_message(conv.id, "assistant", text, status="failed")
             return self._chat_response(conv.id, text, ok=False, error_code="assistant_error", tool_calls=tool_events)
+
+    def _run_tool_with_timeout(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        timeout = max(5, min(int(getattr(cfg_module.config.assistant, "tool_timeout_seconds", 120) or 120), 600))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(execute_tool, self.db, name, args)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError as exc:
+                future.cancel()
+                raise TimeoutError(f"工具调用超时（{timeout}s）：{name}") from exc
+
+    def _append_verbose_summary(self, content: str, tool_events: list[dict[str, Any]]) -> str:
+        if not getattr(cfg_module.config.assistant, "verbose", False) or not tool_events:
+            return content
+        lines = [content.rstrip(), "", "---", "工具调用摘要："]
+        for event in tool_events[:10]:
+            status = event.get("status") or "-"
+            name = event.get("name") or "unknown"
+            risk = event.get("risk") or "-"
+            lines.append(f"- {name} · {status} · risk={risk}")
+        return "\n".join(lines).strip()
 
     def _execute_or_request_confirm(self, conversation_id: int, call: dict[str, Any], messages: list[dict[str, Any]], tool_events: list[dict[str, Any]]) -> dict[str, Any] | None:
         fn = call.get("function") or {}
@@ -410,7 +433,7 @@ class AssistantService:
             tool_call = {"id": action_id, "name": name, "args": args, "risk": risk, "summary": summary, "preview": preview, "requires_confirm": True}
             return self._chat_response(conversation_id, text, tool_calls=[tool_call], needs_confirm=True, action_id=action_id)
         try:
-            result = execute_tool(self.db, name, args)
+            result = self._run_tool_with_timeout(name, args)
             compact_result = _compact_tool_result(name, result)
             tool_events.append({"name": name, "args": args, "result": compact_result, "risk": risk, "status": "done"})
             self._save_message(
@@ -564,7 +587,7 @@ class AssistantService:
         if not allowed:
             return {"ok": False, "message": reason}
         try:
-            result = execute_tool(self.db, action.tool_name, args)
+            result = self._run_tool_with_timeout(action.tool_name, args)
             action.status = "done"
             action.result_json = _json_dumps(result)
             action.updated_at = datetime.datetime.utcnow()

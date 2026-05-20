@@ -95,6 +95,9 @@ assistant:
   enabled: false
   global_chat: true       # true = all channel messages enter Assistant; false = only /ai messages
   max_history_messages: 20
+  max_iterations: 4
+  tool_timeout_seconds: 120
+  verbose: false
   wake_interval_hours: 0
   require_confirm_for_download: true
   require_confirm_for_delete: true

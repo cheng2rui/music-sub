@@ -34,6 +34,9 @@ const settings = ref({
     global_chat: true,
     provider: { provider: 'openai_compatible', runtime: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60, max_context_tokens_k: 64, thinking_level: 'off' },
     max_history_messages: 20,
+    max_iterations: 4,
+    tool_timeout_seconds: 120,
+    verbose: false,
     wake_interval_hours: 0,
     require_confirm_for_download: true,
     require_confirm_for_delete: true,
@@ -865,6 +868,16 @@ onMounted(loadAll)
             <input v-model.number="settings.assistant.provider.timeout_seconds" type="number" min="10" max="300" />
           </div>
           <div class="field">
+            <label>最大迭代次数</label>
+            <input v-model.number="settings.assistant.max_iterations" type="number" min="1" max="32" />
+            <small class="text-dim">限制一次对话里模型-工具循环次数，避免失控调用。</small>
+          </div>
+          <div class="field">
+            <label>工具调用超时（秒）</label>
+            <input v-model.number="settings.assistant.tool_timeout_seconds" type="number" min="5" max="600" />
+            <small class="text-dim">单个工具超过该时间会中断并返回错误。</small>
+          </div>
+          <div class="field">
             <label>定时唤醒间隔（小时）</label>
             <input v-model.number="settings.assistant.wake_interval_hours" type="number" min="0" max="168" />
             <small class="text-dim">0 = 关闭；开启后会定期做轻量巡检，有问题时推送提醒。</small>
@@ -874,6 +887,7 @@ onMounted(loadAll)
           <AppButton variant="ghost" size="sm" :loading="testingAssistant" @click="handleTestAssistant">测试模型调用</AppButton>
         </div>
         <div class="toggle-list" style="margin-top:12px">
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.verbose" /><span>啰嗦模式：回复中附带工具调用摘要</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_download" /><span>下载前需要确认</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_delete" /><span>删除前需要确认</span></label>
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.require_confirm_for_apply_tools" /><span>中高风险工具需要确认</span></label>

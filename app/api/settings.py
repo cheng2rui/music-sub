@@ -141,6 +141,9 @@ class AssistantSettingInput(BaseModel):
     global_chat: bool = True
     provider: AssistantProviderInput = AssistantProviderInput()
     max_history_messages: int = 20
+    max_iterations: int = 4
+    tool_timeout_seconds: int = 120
+    verbose: bool = False
     wake_interval_hours: int = 0
     require_confirm_for_download: bool = True
     require_confirm_for_delete: bool = True
