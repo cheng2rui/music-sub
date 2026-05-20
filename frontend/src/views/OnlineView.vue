@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { searchOnlineMusic, downloadOnlineSong } from '@/api/index.js'
+import { searchOnlineMusic, resolveOnlineSong, downloadOnlineSong } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import { useThemeStore } from '@/stores/theme.js'
@@ -12,7 +12,9 @@ const keyword = ref('')
 const results = ref([])
 const loading = ref(false)
 const downloading = ref('')
+const resolving = ref('')
 const downloadMessage = ref(null)
+const resolveMessage = ref(null)
 const page = ref(1)
 const pageSize = ref(20)
 const searchLimit = 100
@@ -70,10 +72,31 @@ function downloadErrorHint(message = '') {
   return text || '下载失败，请稍后重试。'
 }
 
+function describeResolveResult(song, res) {
+  const candidates = res?.candidates || []
+  if (!candidates.length) return `${sourceLabels[song.source] || song.source} 没有解析出可下载候选。`
+  const details = candidates.map(c => `${(c.format || c.path_ext || '-').toUpperCase()} · ${c.host || '-'}`).join('；')
+  return `解析成功：${candidates.length} 个候选｜${details}`
+}
+
+async function handleResolve(song) {
+  resolving.value = song.source + ':' + song.song_id
+  resolveMessage.value = null
+  try {
+    const res = await resolveOnlineSong(song)
+    resolveMessage.value = { type: res.ok ? 'ok' : 'error', text: `${song.title}：${describeResolveResult(song, res)}` }
+  } catch (e) {
+    resolveMessage.value = { type: 'error', text: `${song.title}：诊断失败：${downloadErrorHint(e.message)}` }
+  } finally {
+    resolving.value = ''
+  }
+}
+
 async function handleDownload(song) {
   if (song.disabled) return
   downloading.value = song.source + ':' + song.song_id
   downloadMessage.value = null
+  resolveMessage.value = null
   try {
     const res = await downloadOnlineSong(song, true)
     if (res.ok) downloadMessage.value = { type: 'ok', text: `✅ 已下载并整理完成：${song.title}` }
@@ -105,6 +128,7 @@ async function handleDownload(song) {
     </div>
 
     <div class="results-card">
+      <div v-if="resolveMessage" :class="['download-message', resolveMessage.type]">{{ resolveMessage.text }}</div>
       <div v-if="downloadMessage" :class="['download-message', downloadMessage.type]">{{ downloadMessage.text }}</div>
       <div v-if="loading" class="empty-text">搜索中...</div>
       <div v-else-if="results.length === 0" class="empty-text">暂无结果</div>
@@ -136,13 +160,21 @@ async function handleDownload(song) {
               <td>{{ formatSize(song.size) }}</td>
               <td>{{ song.duration ? Math.floor(song.duration / 60) + ':' + String(song.duration % 60).padStart(2, '0') : '-' }}</td>
               <td>
-                <AppButton
-                  size="sm"
-                  :variant="song.disabled ? 'ghost' : 'primary'"
-                  :disabled="song.disabled"
-                  :loading="downloading === song.source + ':' + song.song_id"
-                  @click="handleDownload(song)"
-                >{{ song.url ? '下载' : '解析下载' }}</AppButton>
+                <div class="row-actions">
+                  <AppButton
+                    size="sm"
+                    variant="ghost"
+                    :loading="resolving === song.source + ':' + song.song_id"
+                    @click="handleResolve(song)"
+                  >诊断</AppButton>
+                  <AppButton
+                    size="sm"
+                    :variant="song.disabled ? 'ghost' : 'primary'"
+                    :disabled="song.disabled"
+                    :loading="downloading === song.source + ':' + song.song_id"
+                    @click="handleDownload(song)"
+                  >{{ song.url ? '下载' : '解析下载' }}</AppButton>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -189,6 +221,7 @@ async function handleDownload(song) {
 .results-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); }
 .results-table tr:hover td { background: var(--surface-hover); }
 .title-cell { font-weight: 500; }
+.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
 .pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 14px; color: var(--text-dim); font-size: 13px; }
 
 @media (max-width: 768px) {
