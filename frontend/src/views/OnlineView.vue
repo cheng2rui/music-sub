@@ -12,6 +12,9 @@ const keyword = ref('')
 const results = ref([])
 const loading = ref(false)
 const downloading = ref('')
+const page = ref(1)
+const pageSize = ref(20)
+const searchLimit = 100
 const selectedSources = ref(['qq', 'migu', 'kugou', 'netease', 'kuwo'])
 const allSources = ['qq', 'migu', 'kugou', 'netease', 'kuwo']
 
@@ -21,6 +24,19 @@ const sourceLabels = {
   kugou: '酷狗',
   netease: '网易云',
   kuwo: '酷我'
+}
+
+const totalPages = computed(() => Math.max(1, Math.ceil(results.value.length / pageSize.value)))
+const pagedResults = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return results.value.slice(start, start + pageSize.value)
+})
+const pageStart = computed(() => results.value.length ? (page.value - 1) * pageSize.value + 1 : 0)
+const pageEnd = computed(() => Math.min(page.value * pageSize.value, results.value.length))
+const maybeMore = computed(() => results.value.length >= searchLimit)
+
+function changePage(next) {
+  page.value = Math.min(Math.max(1, next), totalPages.value)
 }
 
 function formatSize(bytes) {
@@ -35,7 +51,8 @@ async function handleSearch() {
   if (!keyword.value.trim()) return
   loading.value = true
   try {
-    results.value = await searchOnlineMusic(keyword.value.trim(), selectedSources.value, 30)
+    page.value = 1
+    results.value = await searchOnlineMusic(keyword.value.trim(), selectedSources.value, searchLimit)
   } catch (e) {
     alert('搜索失败: ' + e.message)
   } finally {
@@ -78,7 +95,11 @@ async function handleDownload(song) {
     <div class="results-card">
       <div v-if="loading" class="empty-text">搜索中...</div>
       <div v-else-if="results.length === 0" class="empty-text">暂无结果</div>
-      <div v-else class="table-wrap">
+      <div v-else class="result-summary">
+        <span>显示 {{ pageStart }}-{{ pageEnd }} / 共 {{ results.length }} 条</span>
+        <span v-if="maybeMore" class="more-hint">已达到本次搜索上限，可缩小关键词继续找</span>
+      </div>
+      <div v-if="!loading && results.length" class="table-wrap">
         <table class="results-table">
           <thead>
             <tr>
@@ -93,7 +114,7 @@ async function handleDownload(song) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="song in results" :key="song.source + ':' + song.song_id + ':' + song.filename">
+            <tr v-for="song in pagedResults" :key="song.source + ':' + song.song_id + ':' + song.filename">
               <td><AppBadge :color="song.disabled ? 'dim' : 'green'">{{ sourceLabels[song.source] || song.source }}</AppBadge></td>
               <td class="title-cell">{{ song.title }}</td>
               <td>{{ song.artist || '-' }}</td>
@@ -114,12 +135,17 @@ async function handleDownload(song) {
           </tbody>
         </table>
       </div>
+      <div v-if="!loading && results.length > pageSize" class="pager">
+        <AppButton variant="ghost" size="sm" :disabled="page <= 1" @click="changePage(page - 1)">上一页</AppButton>
+        <span>第 {{ page }} / {{ totalPages }} 页</span>
+        <AppButton variant="ghost" size="sm" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</AppButton>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.online-view { display: flex; flex-direction: column; gap: 18px; }
+.online-view { height: 100%; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 24px; }
 .online-card, .results-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -133,7 +159,9 @@ async function handleDownload(song) {
 .search-row { display: flex; gap: 10px; }
 .search-row input { flex: 1; min-width: 0; }
 .empty-text { color: var(--text-dim); padding: 20px 0; text-align: center; }
-.table-wrap { overflow-x: auto; }
+.result-summary { display: flex; justify-content: space-between; gap: 12px; color: var(--text-dim); font-size: 13px; margin-bottom: 10px; flex-wrap: wrap; }
+.more-hint { color: var(--warning); }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .results-table { width: 100%; border-collapse: collapse; }
 .results-table th {
   text-align: left;
@@ -145,13 +173,18 @@ async function handleDownload(song) {
 .results-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--border); }
 .results-table tr:hover td { background: var(--surface-hover); }
 .title-cell { font-weight: 500; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 14px; color: var(--text-dim); font-size: 13px; }
 
 @media (max-width: 768px) {
-  .online-card, .results-card { padding: 14px; border-radius: 16px; }
+  .online-view { padding: 14px; padding-bottom: var(--mobile-page-bottom, 70px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .online-card, .results-card { padding: 14px; border-radius: 16px; flex-shrink: 0; }
   .source-row { gap: 8px; }
   .source-item { min-width: calc(50% - 4px); }
   .search-row { flex-direction: column; }
-  .results-table th, .results-table td { padding: 8px; font-size: 12px; }
+  .result-summary { font-size: 12px; }
+  .results-table th, .results-table td { padding: 8px; font-size: 12px; white-space: nowrap; }
+  .title-cell { min-width: 120px; max-width: 180px; white-space: normal; }
+  .pager { position: sticky; bottom: 0; background: var(--bg-elevated); padding: 10px 0 2px; }
   .results-table th:nth-child(4), .results-table td:nth-child(4),
   .results-table th:nth-child(6), .results-table td:nth-child(6),
   .results-table th:nth-child(7), .results-table td:nth-child(7) { display: none; }
