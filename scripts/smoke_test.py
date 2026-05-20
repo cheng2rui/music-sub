@@ -179,6 +179,21 @@ for d in [target.parent, target.parent.parent, backup.parent, backup.parent.pare
     ok("trash restore_many guard")
 
     if args.expect_version:
+        required_assets = [
+            "/animal-island/animal_icon.svg",
+            "/animal-island/content_bg_pc.jpg",
+            "/animal-island/menu_bg.svg",
+            "/animal-island/components/cursor-icon.png",
+            "/animal-island/nook-phone/AppIcons.svg",
+            "/animal-island/nook-phone/nook1.svg",
+            "/animal-island/nook-phone/Property-Shopping.svg",
+        ]
+        for asset_url in required_assets:
+            asset_bytes = request(args.base, asset_url, timeout=20)
+            if not asset_bytes:
+                raise RuntimeError(f"empty animal island asset: {asset_url}")
+        ok("animal island assets", f"{len(required_assets)} files")
+
         html = request(args.base, "/", timeout=20)
         match = re.search(r'/(assets/index-[^"\']+\.js)', str(html))
         if not match:

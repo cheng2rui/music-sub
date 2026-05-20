@@ -1,30 +1,29 @@
 <script setup>
 import { computed } from 'vue'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const theme = useThemeStore()
 const isIsland = computed(() => theme.current === 'island')
-const animalAsset = (name) => `/animal-island/${name}`
-const nookAsset = (name) => animalAsset(`nook-phone/${name}`)
 const groups = [
   {
     title: '管理',
     items: [
-      { to: '/subs', icon: '📡', islandIconSrc: nookAsset('Property-Chat.svg'), title: '订阅管理', subtitle: '维护订阅源、专辑与规则' },
-      { to: '/online', icon: '🎧', islandIconSrc: nookAsset('Property-Shopping.svg'), title: '在线下载', subtitle: '搜索在线资源并加入下载' },
+      { to: '/subs', icon: '📡', islandIconSrc: animalIslandIcons.chat, title: '订阅管理', subtitle: '维护订阅源、专辑与规则' },
+      { to: '/online', icon: '🎧', islandIconSrc: animalIslandIcons.shopping, title: '在线下载', subtitle: '搜索在线资源并加入下载' },
     ],
   },
   {
     title: '工具',
     items: [
-      { to: '/assistant', icon: '🤖', islandIconSrc: nookAsset('nook2.svg'), title: '智能助手', subtitle: '用自然语言处理音乐订阅' },
-      { to: '/logs', icon: '📜', islandIconSrc: nookAsset('Property-Recipes.svg'), title: '日志', subtitle: '查看运行状态与错误记录' },
+      { to: '/assistant', icon: '🤖', islandIconSrc: animalIslandIcons.nook, title: '智能助手', subtitle: '用自然语言处理音乐订阅' },
+      { to: '/logs', icon: '📜', islandIconSrc: animalIslandIcons.recipes, title: '日志', subtitle: '查看运行状态与错误记录' },
     ],
   },
   {
     title: '系统',
     items: [
-      { to: '/settings', icon: '⚙️', islandIconSrc: animalAsset('animal_icon.svg'), title: '设置', subtitle: '配置下载器、路径与系统选项' },
+      { to: '/settings', icon: '⚙️', islandIconSrc: animalIslandIcons.system, title: '设置', subtitle: '配置下载器、路径与系统选项' },
     ],
   },
 ]

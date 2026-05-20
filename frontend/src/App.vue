@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth.js'
 import { usePlayerStore } from '@/stores/player.js'
 import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
 import GlobalPlayer from '@/components/GlobalPlayer.vue'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,27 +14,24 @@ const theme = useThemeStore()
 const auth = useAuthStore()
 const player = usePlayerStore()
 
-const animalAsset = (name) => `/animal-island/${name}`
-const nookAsset = (name) => animalAsset(`nook-phone/${name}`)
-
 const navItems = [
-  { to: '/discover', icon: '🏠', islandIconSrc: nookAsset('nook1.svg'), label: '发现', short: '发现', mobile: true },
-  { to: '/subs', icon: '📡', islandIconSrc: nookAsset('Property-Chat.svg'), label: '订阅管理', short: '订阅' },
-  { to: '/search', icon: '🔍', islandIconSrc: nookAsset('Property-Camera.svg'), label: 'PT 搜索', short: '搜索', mobile: true },
-  { to: '/online', icon: '🎧', islandIconSrc: nookAsset('Property-Shopping.svg'), label: '在线下载', short: '在线' },
-  { to: '/tasks', icon: '⬇️', islandIconSrc: nookAsset('Property-Helicopter.svg'), label: '任务列表', short: '任务', mobile: true },
-  { to: '/assistant', icon: '🤖', islandIconSrc: nookAsset('nook2.svg'), label: '智能助手', short: '助手', mobile: true },
-  { to: '/library', icon: '🎶', islandIconSrc: nookAsset('AppIcons.svg'), label: '音乐库', short: '曲库', mobile: true },
-  { to: '/logs', icon: '📜', islandIconSrc: nookAsset('Property-Recipes.svg'), label: '日志', short: '日志' },
-  { to: '/settings', icon: '⚙️', islandIconSrc: animalAsset('animal_icon.svg'), label: '设置', short: '设置' },
+  { to: '/discover', icon: '🏠', islandIconSrc: animalIslandIcons.home, label: '发现', short: '发现', mobile: true },
+  { to: '/subs', icon: '📡', islandIconSrc: animalIslandIcons.chat, label: '订阅管理', short: '订阅' },
+  { to: '/search', icon: '🔍', islandIconSrc: animalIslandIcons.camera, label: 'PT 搜索', short: '搜索', mobile: true },
+  { to: '/online', icon: '🎧', islandIconSrc: animalIslandIcons.shopping, label: '在线下载', short: '在线' },
+  { to: '/tasks', icon: '⬇️', islandIconSrc: animalIslandIcons.helicopter, label: '任务列表', short: '任务', mobile: true },
+  { to: '/assistant', icon: '🤖', islandIconSrc: animalIslandIcons.nook, label: '智能助手', short: '助手', mobile: true },
+  { to: '/library', icon: '🎶', islandIconSrc: animalIslandIcons.app, label: '音乐库', short: '曲库', mobile: true },
+  { to: '/logs', icon: '📜', islandIconSrc: animalIslandIcons.recipes, label: '日志', short: '日志' },
+  { to: '/settings', icon: '⚙️', islandIconSrc: animalIslandIcons.system, label: '设置', short: '设置' },
 ]
 
 const mobileNavItems = computed(() => [
-  { to: '/discover', icon: '🏠', islandIconSrc: nookAsset('nook1.svg'), label: '发现', short: '发现' },
-  { to: '/search', icon: '🔍', islandIconSrc: nookAsset('Property-Camera.svg'), label: 'PT 搜索', short: '搜索' },
-  { to: '/library', icon: '🎶', islandIconSrc: nookAsset('AppIcons.svg'), label: '音乐库', short: '曲库' },
-  { to: '/tasks', icon: '⬇️', islandIconSrc: nookAsset('Property-Helicopter.svg'), label: '任务列表', short: '任务' },
-  { to: '/more', icon: '☰', islandIconSrc: animalAsset('animal_icon.svg'), label: '更多', short: '更多', matches: ['/more', '/subs', '/online', '/assistant', '/logs', '/settings'] },
+  { to: '/discover', icon: '🏠', islandIconSrc: animalIslandIcons.home, label: '发现', short: '发现' },
+  { to: '/search', icon: '🔍', islandIconSrc: animalIslandIcons.camera, label: 'PT 搜索', short: '搜索' },
+  { to: '/library', icon: '🎶', islandIconSrc: animalIslandIcons.app, label: '音乐库', short: '曲库' },
+  { to: '/tasks', icon: '⬇️', islandIconSrc: animalIslandIcons.helicopter, label: '任务列表', short: '任务' },
+  { to: '/more', icon: '☰', islandIconSrc: animalIslandIcons.system, label: '更多', short: '更多', matches: ['/more', '/subs', '/online', '/assistant', '/logs', '/settings'] },
 ])
 
 const pageTitle = computed(() => route.meta?.title || '音乐订阅管理')
@@ -86,7 +84,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.7.58</div>
+        <div class="version-tag">v0.7.59</div>
       </div>
     </aside>
 

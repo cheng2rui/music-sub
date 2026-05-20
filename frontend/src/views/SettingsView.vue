@@ -4,11 +4,10 @@ import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, g
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const theme = useThemeStore()
 const isIsland = computed(() => theme.current === 'island')
-const animalAsset = (name) => `/animal-island/${name}`
-const nookAsset = (name) => animalAsset(`nook-phone/${name}`)
 
 const settings = ref({
   sites: {
@@ -59,14 +58,14 @@ const assistantProviders = ref([])
 const assistantTools = ref([])
 const testingAssistant = ref(false)
 const settingsTabs = [
-  { key: 'sites', label: 'PT站', icon: '📡', islandIconSrc: nookAsset('Property-Chat.svg') },
-  { key: 'downloader', label: '下载器', icon: '⬇️', islandIconSrc: nookAsset('Property-Helicopter.svg') },
-  { key: 'paths', label: '媒体库/路径', icon: '📁', islandIconSrc: nookAsset('AppIcons.svg') },
-  { key: 'scraper', label: '刮削', icon: '🎵', islandIconSrc: nookAsset('Property-Recipes.svg') },
-  { key: 'automation', label: '自动化', icon: '⏰', islandIconSrc: nookAsset('nook1.svg') },
-  { key: 'notify', label: '通知', icon: '📢', islandIconSrc: nookAsset('Property-Camera.svg') },
-  { key: 'assistant', label: '助手', icon: '🤖', islandIconSrc: nookAsset('nook2.svg') },
-  { key: 'security', label: '安全', icon: '🔐', islandIconSrc: animalAsset('animal_icon.svg') }
+  { key: 'sites', label: 'PT站', icon: '📡', islandIconSrc: animalIslandIcons.chat },
+  { key: 'downloader', label: '下载器', icon: '⬇️', islandIconSrc: animalIslandIcons.helicopter },
+  { key: 'paths', label: '媒体库/路径', icon: '📁', islandIconSrc: animalIslandIcons.app },
+  { key: 'scraper', label: '刮削', icon: '🎵', islandIconSrc: animalIslandIcons.recipes },
+  { key: 'automation', label: '自动化', icon: '⏰', islandIconSrc: animalIslandIcons.home },
+  { key: 'notify', label: '通知', icon: '📢', islandIconSrc: animalIslandIcons.camera },
+  { key: 'assistant', label: '助手', icon: '🤖', islandIconSrc: animalIslandIcons.nook },
+  { key: 'security', label: '安全', icon: '🔐', islandIconSrc: animalIslandIcons.system }
 ]
 const activeSettingsTab = ref('sites')
 const tabMeta = (key) => settingsTabs.find(tab => tab.key === key) || {}
