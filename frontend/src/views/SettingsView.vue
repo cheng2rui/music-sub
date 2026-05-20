@@ -22,6 +22,7 @@ const settings = ref({
   scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
   notify: {
     webhook_token: '',
+    public_base_url: '',
     telegram: { enabled: false, bot_token: '', chat_id: '', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', enable_gateway: false, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
@@ -277,7 +278,9 @@ function randomSecret(bytes = 24) {
 
 const notifyWebhookToken = computed(() => settings.value.notify.webhook_token || '')
 const notifyWebhookTokenReady = computed(() => Boolean(notifyWebhookToken.value) && !notifyWebhookToken.value.includes('***'))
+const notifyPublicBaseUrl = computed(() => (settings.value.notify.public_base_url || '').replace(/\/$/, ''))
 const notifyWebhookBase = computed(() => {
+  if (notifyPublicBaseUrl.value) return `${notifyPublicBaseUrl.value}/api/notify`
   if (typeof window === 'undefined') return ''
   return `${window.location.origin}/api/notify`
 })
@@ -598,6 +601,11 @@ onMounted(loadAll)
               <label>密钥</label>
               <input v-model="settings.notify.webhook_token" type="password" placeholder="建议点击生成；不是 Telegram Bot Token / 企业微信 Token" />
               <small class="text-dim">这个密钥只属于 Music Sub，用来校验入站消息。保存设置后才会生效。</small>
+            </div>
+            <div class="field flex-1">
+              <label>公网访问地址（可选）</label>
+              <input v-model="settings.notify.public_base_url" placeholder="https://music.example.com" />
+              <small class="text-dim">用于生成 Telegram 深链按钮和 Webhook 地址；为空时使用当前浏览器地址，按钮降级为助手命令。</small>
             </div>
             <AppButton variant="ghost" size="sm" :disabled="!notifyWebhookToken" @click="copyText(notifyWebhookToken, '入站密钥')">复制密钥</AppButton>
           </div>

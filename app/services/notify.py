@@ -33,8 +33,18 @@ class SendResult:
 @dataclass
 class NotifyAction:
     label: str
-    command: str
+    command: str = ""
+    path: str = ""
     style: str = "default"
+
+
+def _public_url(path: str) -> str:
+    base = (cfg_module.config.notify.public_base_url or "").strip().rstrip("/")
+    if not base or not path:
+        return ""
+    if not base.startswith(("https://", "http://")):
+        return ""
+    return base + (path if path.startswith("/") else f"/{path}")
 
 
 def telegram_inline_keyboard(actions: list[NotifyAction] | None) -> dict[str, Any] | None:
@@ -43,6 +53,10 @@ def telegram_inline_keyboard(actions: list[NotifyAction] | None) -> dict[str, An
     row = []
     for action in actions[:6]:
         label = (action.label or action.command or "Action")[:64]
+        url = _public_url(action.path)
+        if url:
+            row.append({"text": label, "url": url})
+            continue
         command = (action.command or "")[:64]
         if not command:
             continue

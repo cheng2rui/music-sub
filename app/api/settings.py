@@ -114,6 +114,7 @@ class WeChatBotNotifyInput(NotifyEventInput):
 
 class NotifySettingInput(BaseModel):
     webhook_token: str = ""
+    public_base_url: str = ""
     telegram: TelegramNotifyInput = TelegramNotifyInput()
     wecom: WeComNotifyInput = WeComNotifyInput()
     qqbot: QQBotNotifyInput = QQBotNotifyInput()
@@ -164,6 +165,7 @@ def get_settings():
         scheduler=SchedulerSettingInput(**cfg_module.config.scheduler.model_dump()),
         notify=NotifySettingInput(
             webhook_token=cfg_module.config.notify.webhook_token,
+            public_base_url=cfg_module.config.notify.public_base_url,
             telegram=TelegramNotifyInput(**cfg_module.config.notify.telegram.model_dump()),
             wecom=WeComNotifyInput(**cfg_module.config.notify.wecom.model_dump()),
             qqbot=QQBotNotifyInput(**cfg_module.config.notify.qqbot.model_dump()),

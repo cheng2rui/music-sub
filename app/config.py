@@ -99,6 +99,7 @@ class WeChatBotNotifyConfig(NotifyChannelEvents):
 
 class NotifyConfig(BaseModel):
     webhook_token: str = ""
+    public_base_url: str = ""
     telegram: TelegramNotifyConfig = TelegramNotifyConfig()
     wecom: WeComNotifyConfig = WeComNotifyConfig()
     qqbot: QQBotNotifyConfig = QQBotNotifyConfig()
