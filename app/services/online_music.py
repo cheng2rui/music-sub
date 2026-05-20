@@ -386,29 +386,43 @@ def _nki_api_key() -> str:
     return os.environ.get("ONLINE_MUSIC_NKI_APIKEY", "")
 
 
-def _nki_pick_qq_download_url(song_mid: str, timeout: float | tuple[float, float] = (3, 10)) -> tuple[str, str, int, int, dict]:
+def _nki_pick_qq_download_url(song_mid: str, timeout: float | tuple[float, float] = (3, 8), attempts: int = 3) -> tuple[str, str, int, int, dict]:
     """Resolve QQ songmid through user-configured NKI open API.
 
     Returns best available quality as (url, ext, size, bitrate, raw_metadata).
-    The API key is loaded from config.sites.nki.api_key or ONLINE_MUSIC_NKI_APIKEY.
-    NKI is intentionally used during download resolution instead of bulk search,
-    because one request per search row can make search appear stuck when the API
-    is slow. It gets first priority on click, with a bounded timeout before the
-    built-in QQ vkey fallback is tried.
+    NKI is the best QQ resolver here, but the endpoint is occasionally unstable
+    (SSL EOF / read timeout). Use short bounded retries with fresh connections so
+    one transient failure does not surface to the user as a random download error.
     """
     api_key = _nki_api_key()
     if not api_key or not song_mid:
         return "", "", 0, 0, {}
     started = time.perf_counter()
-    try:
-        data = _SESSION.get(
-            "https://api.nki.pw/API/music_open_api.php",
-            params={"mid": song_mid, "apikey": api_key},
-            timeout=timeout,
-        ).json()
-        logger.info(f"[online:nki] resolved {song_mid} in {time.perf_counter() - started:.2f}s")
-    except Exception as e:
-        logger.warning(f"[online:nki] resolve failed for {song_mid} after {time.perf_counter() - started:.2f}s: {e}")
+    data = None
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            resp = requests.get(
+                "https://api.nki.pw/API/music_open_api.php",
+                params={"mid": song_mid, "apikey": api_key},
+                headers={
+                    "User-Agent": _SESSION.headers.get("User-Agent", "Mozilla/5.0"),
+                    "Accept": "application/json,text/plain,*/*",
+                    "Connection": "close",
+                },
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info(f"[online:nki] resolved {song_mid} in {time.perf_counter() - started:.2f}s attempt={attempt}")
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning(f"[online:nki] resolve attempt {attempt}/{attempts} failed for {song_mid}: {e}")
+            if attempt < attempts:
+                time.sleep(0.4 * attempt)
+    if data is None:
+        logger.warning(f"[online:nki] resolve failed for {song_mid} after {time.perf_counter() - started:.2f}s: {last_error}")
         return "", "", 0, 0, {}
 
     # Prefer lossless SQ, then high quality, then standard.
@@ -715,27 +729,42 @@ def download_online_song(song: dict) -> str:
                 candidate_filename = str(Path(candidate_filename).with_suffix(f".{ext}"))
             elif not current_suffix:
                 candidate_filename = f"{candidate_filename}.{ext}"
-        target = _unique_target(target_dir, candidate_filename)
 
-        logger.info(f"[online:{source}] Downloading {candidate_filename} (candidate {idx}/{len(candidates)})")
-        try:
-            with _SESSION.get(candidate_url, stream=True, timeout=60, headers=headers) as resp:
-                resp.raise_for_status()
-                with open(target, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=1024 * 256):
-                        if chunk:
-                            f.write(chunk)
-            break
-        except Exception as e:
-            last_error = e
+        for attempt in range(1, 3):
+            target = _unique_target(target_dir, candidate_filename)
+            logger.info(f"[online:{source}] Downloading {candidate_filename} (candidate {idx}/{len(candidates)}, attempt {attempt}/2)")
             try:
-                if target.exists():
-                    target.unlink()
-            except Exception:
-                pass
-            logger.warning(f"[online:{source}] download candidate {idx}/{len(candidates)} failed: {e}")
+                bytes_written = 0
+                content_type = ""
+                with _SESSION.get(candidate_url, stream=True, timeout=(10, 90), headers=headers) as resp:
+                    resp.raise_for_status()
+                    content_type = (resp.headers.get("content-type") or "").lower()
+                    if "text/html" in content_type or "application/json" in content_type:
+                        raise RuntimeError(f"下载地址返回非音频内容: {content_type}")
+                    with open(target, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=1024 * 256):
+                            if chunk:
+                                bytes_written += len(chunk)
+                                f.write(chunk)
+                if bytes_written < 4096:
+                    raise RuntimeError(f"下载内容过小: {bytes_written} bytes")
+                logger.info(f"[online:{source}] Downloaded {candidate_filename}: {bytes_written} bytes type={content_type or '-'}")
+                break
+            except Exception as e:
+                last_error = e
+                try:
+                    if target.exists():
+                        target.unlink()
+                except Exception:
+                    pass
+                logger.warning(f"[online:{source}] download candidate {idx}/{len(candidates)} attempt {attempt}/2 failed: {e}")
+                if attempt < 2:
+                    time.sleep(0.5 * attempt)
+        else:
+            continue
+        break
     else:
-        raise last_error or RuntimeError("下载失败")
+        raise RuntimeError(f"下载失败，所有候选链接均不可用: {last_error}")
 
     # Save source-provided lyrics if available. Pipeline scraping may improve/overwrite later.
     lyric_url = song.get("lyric_url") or ""
