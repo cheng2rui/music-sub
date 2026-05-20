@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import verify_token
 from app.config import config
 from app.db import get_db
-from app.models import MusicFile
+from app.models import LibraryAuditEvent, MusicFile
 
 router = APIRouter()
 
@@ -1388,7 +1388,11 @@ def _restore_one_trash_file(root: Path, trash_root: Path, trash_path_value: str,
     if backup_path:
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(restore_path), str(backup_path))
+        from app.services.library_audit import log_library_event
+        log_library_event(action="restore_conflict_backup", file_path=str(restore_path), trash_path=str(backup_path), message="恢复覆盖前备份已存在目标")
     shutil.move(str(trash_path), str(restore_path))
+    from app.services.library_audit import log_library_event
+    log_library_event(action="restore", trash_path=str(trash_path), restore_path=str(restore_path), message="从音乐库回收站恢复文件", details={"backup_path": str(backup_path) if backup_path else None})
     for parent in list(trash_path.parents):
         if parent == trash_root or parent == root or trash_root not in parent.parents:
             break
@@ -1439,6 +1443,35 @@ def restore_many_library_trash(payload: dict = Body(default={})):
         except Exception as exc:
             errors.append({"trash_path": p, "error": str(exc)[:300]})
     return {"ok": not errors, "restored": restored, "errors": errors, "total": len(paths)}
+
+
+@router.get("/audit")
+def list_library_audit(limit: int = 100, action: str = "", db: Session = Depends(get_db)):
+    """List recent library delete/trash/restore audit events."""
+    limit = max(1, min(int(limit or 100), 500))
+    q = db.query(LibraryAuditEvent)
+    if action:
+        q = q.filter(LibraryAuditEvent.action == action)
+    rows = q.order_by(LibraryAuditEvent.id.desc()).limit(limit).all()
+    items = []
+    import json
+    for r in rows:
+        try:
+            details = json.loads(r.details_json or "{}")
+        except Exception:
+            details = {}
+        items.append({
+            "id": r.id,
+            "action": r.action,
+            "status": r.status,
+            "file_path": r.file_path,
+            "trash_path": r.trash_path,
+            "restore_path": r.restore_path,
+            "message": r.message,
+            "details": details,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/tools")

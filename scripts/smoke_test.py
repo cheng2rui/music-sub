@@ -106,6 +106,11 @@ def main() -> int:
         raise RuntimeError(f"trash listing failed: {trash}")
     ok("trash listing", f"total={trash.get('total')}")
 
+    audit = request(args.base, "/api/library/audit?limit=5", token=token)
+    if "items" not in audit:
+        raise RuntimeError(f"library audit listing failed: {audit}")
+    ok("library audit", f"events={len(audit.get('items') or [])}")
+
     if args.container:
         create_cmd = """from pathlib import Path
 from app.config import config
@@ -173,6 +178,27 @@ for d in [target.parent, target.parent.parent, backup.parent, backup.parent.pare
 """
         subprocess.check_call(["docker", "exec", args.container, "python", "-c", verify_conflict_cmd], timeout=20)
         ok("trash overwrite safety", "existing target preserved in .trash/restore-conflicts")
+
+        audit_after_restore = request(args.base, "/api/library/audit?limit=10", token=token)
+        if not any("Smoke Artist" in str(x.get("trash_path") or x.get("restore_path") or x.get("file_path") or "") for x in (audit_after_restore.get("items") or [])):
+            raise RuntimeError(f"library audit did not record smoke restore operations: {audit_after_restore}")
+        cleanup_audit_cmd = """from app.db import SessionLocal
+from app.models import LibraryAuditEvent
+patterns = ['%Smoke Artist%']
+db = SessionLocal()
+try:
+    q = db.query(LibraryAuditEvent)
+    rows = q.filter(
+        (LibraryAuditEvent.file_path.like(patterns[0])) |
+        (LibraryAuditEvent.trash_path.like(patterns[0])) |
+        (LibraryAuditEvent.restore_path.like(patterns[0]))
+    ).delete(synchronize_session=False)
+    db.commit()
+finally:
+    db.close()
+"""
+        subprocess.check_call(["docker", "exec", args.container, "python", "-c", cleanup_audit_cmd], timeout=20)
+        ok("library audit restore log", "smoke events recorded and cleaned")
 
     restore_many_error = False
     try:

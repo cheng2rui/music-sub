@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, undoCompleteAlbum, getLibraryTrash, restoreLibraryTrash, restoreManyLibraryTrash } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, undoCompleteAlbum, getLibraryTrash, getLibraryAudit, restoreLibraryTrash, restoreManyLibraryTrash } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -81,6 +81,7 @@ const showHealthModal = ref(false)
 const showTrashModal = ref(false)
 const trashLoading = ref(false)
 const trashItems = ref([])
+const trashAuditItems = ref([])
 const trashQuery = ref('')
 const selectedTrashPaths = ref([])
 const trashRestoring = ref('')
@@ -247,11 +248,21 @@ async function openTrashModal() {
 async function loadTrash() {
   trashLoading.value = true
   try {
-    const data = await getLibraryTrash(300)
-    trashItems.value = data.items || []
+    const [trashData, auditData] = await Promise.all([getLibraryTrash(300), getLibraryAudit(80)])
+    trashItems.value = trashData.items || []
+    trashAuditItems.value = auditData.items || []
     selectedTrashPaths.value = selectedTrashPaths.value.filter(p => trashItems.value.some(item => item.trash_path === p))
   } catch (e) { console.error(e) }
   finally { trashLoading.value = false }
+}
+
+function auditActionLabel(action) {
+  return ({ trash: '移入回收站', delete: '永久删除', restore: '恢复', restore_conflict_backup: '覆盖备份' })[action] || action
+}
+
+function formatAuditTime(value) {
+  if (!value) return ''
+  try { return new Date(value).toLocaleString() } catch { return value }
 }
 
 async function restoreTrashItem(item) {
@@ -930,6 +941,20 @@ onMounted(() => { loadStats(); loadAlbums(0) })
             <AppButton variant="primary" size="sm" :loading="trashRestoring === item.trash_path" @click="restoreTrashItem(item)">恢复</AppButton>
           </div>
         </div>
+        <div class="trash-audit">
+          <div class="trash-audit-title">最近删除 / 恢复记录</div>
+          <div v-if="!trashAuditItems.length" class="loading-text">暂无审计记录。</div>
+          <div v-else class="trash-audit-list">
+            <div v-for="event in trashAuditItems" :key="event.id" class="trash-audit-row">
+              <AppBadge :color="event.status === 'ok' ? 'green' : 'orange'">{{ auditActionLabel(event.action) }}</AppBadge>
+              <div class="trash-audit-info">
+                <strong>{{ event.message || auditActionLabel(event.action) }}</strong>
+                <small>{{ event.file_path || event.restore_path || event.trash_path }}</small>
+              </div>
+              <small>{{ formatAuditTime(event.created_at) }}</small>
+            </div>
+          </div>
+        </div>
       </div>
     </AppModal>
 
@@ -1059,6 +1084,13 @@ button.scan-health-chip { cursor: pointer; }
 .trash-info small { color: var(--text-dim); font-size: 12px; }
 .trash-info .trash-conflict { color: var(--warning); }
 .trash-meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.trash-audit { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.trash-audit-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.trash-audit-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.trash-audit-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius-md); background: var(--surface-soft); }
+.trash-audit-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.trash-audit-info strong, .trash-audit-info small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trash-audit-info small, .trash-audit-row > small { color: var(--text-dim); font-size: 12px; }
 
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -1079,6 +1111,8 @@ button.scan-health-chip { cursor: pointer; }
   .trash-toolbar input { width: 100%; min-width: 0; }
   .trash-row { grid-template-columns: auto minmax(0, 1fr); }
   .trash-meta { grid-column: 2; }
+  .trash-audit-row { grid-template-columns: auto minmax(0, 1fr); }
+  .trash-audit-row > small { grid-column: 2; }
   .modal-cover { width: 132px; height: 132px; }
   .health-row { align-items: flex-start; flex-direction: column; }
   .health-actions { width: 100%; flex-wrap: wrap; }

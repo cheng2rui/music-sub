@@ -88,6 +88,20 @@ class NotifyEvent(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
 
 
+class LibraryAuditEvent(Base):
+    __tablename__ = "library_audit_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action = Column(String(50), nullable=False, index=True)  # trash / delete / restore / restore_conflict_backup
+    status = Column(String(50), default="ok", index=True)
+    file_path = Column(String(1000), nullable=True)
+    trash_path = Column(String(1000), nullable=True)
+    restore_path = Column(String(1000), nullable=True)
+    message = Column(String(500), nullable=True)
+    details_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+
 class MusicFile(Base):
     __tablename__ = "music_files"
 

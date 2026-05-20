@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import MusicFile
+from app.services.library_audit import log_library_event
 from app.services.library_tools.base import PreviewItem, ToolPreview
 
 logger = logging.getLogger(__name__)
@@ -177,15 +178,31 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                 if permanent:
                     fp.unlink()
                     deleted_files += 1
+                    log_library_event(
+                        db=db,
+                        action="delete",
+                        file_path=str(fp),
+                        message="永久删除音乐文件",
+                        details={"file_id": f.id, "title": f.title, "artist": f.artist, "album": f.album},
+                    )
                     on_progress(idx, f"已永久删除: {fp.name}")
                 else:
                     dest = _trash_path(fp, library_root)
                     shutil.move(str(fp), str(dest))
                     trashed_files += 1
+                    log_library_event(
+                        db=db,
+                        action="trash",
+                        file_path=str(fp),
+                        trash_path=str(dest),
+                        message="移入音乐库回收站",
+                        details={"file_id": f.id, "title": f.title, "artist": f.artist, "album": f.album},
+                    )
                     on_progress(idx, f"已移入回收站: {fp.name}")
                 file_ids_to_delete.add(f.id)
             except OSError as e:
                 failed_files += 1
+                log_library_event(db=db, action="trash" if not permanent else "delete", status="error", file_path=str(fp), message=str(e)[:500], details={"file_id": f.id})
                 on_progress(idx, f"删除失败: {fp.name}: {e}")
 
     if delete_empty_dirs:

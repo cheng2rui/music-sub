@@ -236,6 +236,7 @@ export const applyLibraryTool = (toolId, payload) => authFetch(`/api/library/too
   body: JSON.stringify(payload || {})
 }).then(r => r.json())
 export const getLibraryTrash = (limit = 200) => authFetch(`/api/library/trash?limit=${limit}`).then(r => r.json())
+export const getLibraryAudit = (limit = 100) => authFetch(`/api/library/audit?limit=${limit}`).then(r => r.json())
 export const restoreLibraryTrash = (trashPath, overwrite = false) => json(authFetch('/api/library/trash/restore', {
   method: 'POST',
   body: JSON.stringify({ trash_path: trashPath, overwrite })
