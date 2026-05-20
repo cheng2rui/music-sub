@@ -341,6 +341,7 @@ onMounted(loadAll)
         </button>
       </div>
 
+      <div class="settings-content">
       <!-- PT站配置 -->
       <div v-show="activeSettingsTab === 'sites'" class="settings-section">
         <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('sites')" alt="" /><span v-else>📡</span><span>PT站配置</span></h3>
@@ -707,6 +708,7 @@ onMounted(loadAll)
           <AppButton variant="primary" size="sm" :loading="pwdSaving" @click="handleChangePassword">修改密码</AppButton>
         </div>
       </div>
+      </div>
 
       <!-- 保存按钮 -->
       <div class="save-bar">
@@ -720,15 +722,16 @@ onMounted(loadAll)
 <style scoped>
 .animal-section-title { display: inline-flex; align-items: center; gap: 8px; }
 .animal-section-title img { width: 26px; height: 26px; object-fit: contain; filter: drop-shadow(0 2px 1px rgba(61, 52, 40, .14)); }
-.settings-view { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; height: 100%; }
+.settings-view { height: 100%; min-height: 0; padding: 24px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 16px; overflow: hidden; }
 .loading-text { color: var(--text-dim); padding: 20px 0; }
-.settings-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; margin: -2px -2px 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; align-items: center; }
+.settings-tabs { display: flex; gap: 8px; overflow-x: auto; overflow-y: visible; padding: 4px 4px 10px; margin: -4px -4px 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; align-items: center; min-height: 52px; flex-shrink: 0; }
 .settings-tabs::-webkit-scrollbar { display: none; }
-.settings-tab { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border: 1px solid var(--border); border-radius: 999px; padding: 9px 14px; color: var(--text-dim); background: var(--surface); font-size: 14px; font-weight: 600; cursor: pointer; transition: all .15s ease; white-space: nowrap; }
+.settings-tab { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border: 1px solid var(--border); border-radius: 999px; padding: 9px 14px; color: var(--text-dim); background: var(--surface); font-size: 14px; font-weight: 600; cursor: pointer; transition: all .15s ease; white-space: nowrap; overflow: visible; }
 .settings-tab:hover { color: var(--text); border-color: var(--accent); }
 .settings-tab.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
 .settings-tab-icon { font-size: 15px; }
-.settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.settings-content { min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 16px; padding-right: 4px; }
+.settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; }
 .settings-section h3 { font-size: 16px; font-weight: 600; }
 .site-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .site-card { background: var(--surface-hover); border-radius: var(--radius-md); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -775,7 +778,7 @@ onMounted(loadAll)
 .scheduler-meta { font-size: 12px; }
 .pwd-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .pwd-form input { flex: 1; min-width: 160px; }
-.save-bar { position: sticky; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--bg) 94%, transparent); padding: 16px 0; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; backdrop-filter: blur(max(14px, var(--blur-strength))); -webkit-backdrop-filter: blur(max(14px, var(--blur-strength))); }
+.save-bar { z-index: 6; background: color-mix(in srgb, var(--bg) 94%, transparent); padding: 12px 0 0; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; backdrop-filter: blur(max(14px, var(--blur-strength))); -webkit-backdrop-filter: blur(max(14px, var(--blur-strength))); flex-shrink: 0; }
 .fields-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .assistant-tools-box { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; background: var(--surface-hover); display: flex; flex-direction: column; gap: 12px; }
 .assistant-tools-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
