@@ -71,6 +71,7 @@ def _run_lightweight_migrations():
         "channels": "INTEGER",
     }.items():
         _ensure_column("music_files", column, ddl)
+    _ensure_column("subscriptions", "source_preference", "VARCHAR(50) DEFAULT 'pt'")
     _dedupe_music_files()
     _backfill_album_artist()
     _trim_notify_events()

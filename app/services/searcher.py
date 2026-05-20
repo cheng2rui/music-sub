@@ -5,6 +5,7 @@ this module are kept so subscriptions and the existing /api/search endpoint keep
 working while the rest of the app migrates to the new chain.
 """
 import logging
+import uuid
 from typing import Optional
 import app.config as cfg_module
 from app.sites.base import BaseSite, TorrentInfo
@@ -14,6 +15,8 @@ from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
 from app.services.pt_search import MusicSearchChain, SearchRequest, SearchResponse
 from app.services.subscription import get_all_subscriptions, update_last_search
+from app.services.online_music import download_online_song, search_online
+from app.services.pipeline import _process_completed_torrent
 from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client, torrent_info_hash
 from app.models import DownloadTask
@@ -52,6 +55,13 @@ TYPE_MAX_SIZE_BYTES = {
     "album": 8 * 1024 * 1024 * 1024,
     "keyword": 3 * 1024 * 1024 * 1024,
 }
+
+ONLINE_SOURCES = ["qq", "migu", "kugou", "netease", "kuwo"]
+
+
+def _source_preference(sub) -> str:
+    preference = (getattr(sub, "source_preference", None) or "pt").strip()
+    return preference if preference in {"pt", "online_first", "online_only"} else "pt"
 
 
 def _get_site_instance(name: str) -> Optional[BaseSite]:
@@ -124,6 +134,22 @@ def search_with_chain(keyword: str, sites: list[str] | None = None,
 def _split_keywords(keyword: str) -> list[str]:
     """Split a subscription keyword into non-empty lower-case terms."""
     return [part.strip().lower() for part in keyword.replace("　", " ").split() if part.strip()]
+
+
+def _normalize_match_text(value: str) -> str:
+    return " ".join(_split_keywords(value or ""))
+
+
+def _song_downloaded_for_subscription(sub, db) -> bool:
+    if sub.type != "song":
+        return False
+    keyword = _normalize_match_text(sub.keyword)
+    if not keyword:
+        return False
+    for task in db.query(DownloadTask).filter(DownloadTask.torrent_hash.like("online:%")).all():
+        if keyword == _normalize_match_text(task.torrent_name or ""):
+            return True
+    return False
 
 
 def _looks_like_video(title: str) -> bool:
@@ -224,6 +250,69 @@ def download_from_site(site_name: str, torrent_id: str) -> Optional[str]:
     return download_torrent_content(torrent_content)
 
 
+def _best_online_candidate(keyword: str, limit: int = 8) -> dict | None:
+    """Return the best downloadable online candidate for a subscription keyword."""
+    rows = search_online(keyword, sources=ONLINE_SOURCES, limit=limit)
+    for row in rows:
+        if row.get("disabled"):
+            continue
+        if row.get("url") or row.get("song_id"):
+            return row
+    return None
+
+
+def _download_online_for_subscription(sub, db) -> bool:
+    """Download and organize one online match for an online-priority subscription."""
+    candidate = _best_online_candidate(sub.keyword)
+    if not candidate:
+        logger.info(f"No downloadable online candidate for subscription: {sub.keyword}")
+        return False
+
+    title = candidate.get("title") or candidate.get("filename") or sub.keyword
+    artist = candidate.get("artist") or ""
+    task_name = f"{title} - {artist}".strip(" -")
+    source = candidate.get("source") or "online"
+    normalized_task_name = _normalize_match_text(task_name)
+
+    existing_task = db.query(DownloadTask).filter(
+        DownloadTask.torrent_hash.like("online:%")
+    ).filter(DownloadTask.torrent_name.ilike(f"%{title}%")).first()
+    if existing_task and _normalize_match_text(existing_task.torrent_name or "") == normalized_task_name:
+        logger.info(f"Online subscription result already tracked: {task_name}")
+        return True
+
+    file_path = download_online_song(candidate)
+    synthetic_hash = f"online:{uuid.uuid4().hex}"
+    task = DownloadTask(
+        subscription_id=sub.id,
+        torrent_name=task_name,
+        torrent_hash=synthetic_hash,
+        site=source,
+        size=float(candidate.get("size") or 0),
+        status="downloaded",
+        save_path=file_path,
+    )
+    db.add(task)
+    db.commit()
+
+    _process_completed_torrent({
+        "hash": synthetic_hash,
+        "name": task_name,
+        "content_path": file_path,
+        "metadata": {
+            "source": source,
+            "song_id": candidate.get("song_id") or "",
+            "title": candidate.get("title") or title,
+            "artist": artist,
+            "album": candidate.get("album") or "",
+            "duration": candidate.get("duration") or 0,
+        },
+    })
+    logger.info(f"Auto-downloaded online subscription: {task_name} ({source})")
+    notify_download_added(task_name, source)
+    return True
+
+
 def search_all_subscriptions():
     """Search all enabled subscriptions and auto-download new matches."""
     subscriptions = get_all_subscriptions(enabled_only=True)
@@ -234,6 +323,22 @@ def search_all_subscriptions():
     try:
         for sub in subscriptions:
             logger.info(f"Searching subscription [{sub.type}]: {sub.keyword}")
+            preference = _source_preference(sub)
+            if _song_downloaded_for_subscription(sub, db):
+                logger.info(f"Song subscription already downloaded online, skip: {sub.keyword}")
+                update_last_search(sub.id)
+                continue
+            if preference in {"online_first", "online_only"}:
+                try:
+                    if _download_online_for_subscription(sub, db):
+                        update_last_search(sub.id)
+                        continue
+                except Exception as e:
+                    logger.warning(f"Online subscription download failed for {sub.keyword}: {e}")
+                    if preference == "online_only":
+                        update_last_search(sub.id)
+                        continue
+
             sites = sub.sites.split(",") if sub.sites != "all" else None
             results = search_sites(sub.keyword, sites)
 

@@ -12,6 +12,7 @@ class Subscription(Base):
     type = Column(String(50), default="artist")  # artist/album/keyword
     quality = Column(String(50), default="any")  # flac/mp3/any
     sites = Column(String(255), default="all")
+    source_preference = Column(String(50), default="pt")  # pt/online_first/online_only
     enabled = Column(Boolean, default=True)
     last_search_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

@@ -9,6 +9,7 @@ class SubscriptionCreate(BaseModel):
     type: str = "artist"
     quality: str = "any"
     sites: str | list[str] = "all"
+    source_preference: str = "pt"
 
 
 class SubscriptionUpdate(BaseModel):
@@ -16,6 +17,7 @@ class SubscriptionUpdate(BaseModel):
     type: str | None = None
     quality: str | None = None
     sites: str | list[str] | None = None
+    source_preference: str | None = None
     enabled: bool | None = None
 
 
@@ -25,6 +27,7 @@ class SubscriptionResponse(BaseModel):
     type: str
     quality: str
     sites: str
+    source_preference: str = "pt"
     enabled: bool
     last_search_at: Optional[datetime] = None
     created_at: datetime

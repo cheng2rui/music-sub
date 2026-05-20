@@ -36,10 +36,10 @@ watch([filterText, filterType, pageSize], () => { page.value = 1 })
 watch(totalPages, n => { if (page.value > n) page.value = n })
 
 // New sub form
-const newSub = ref({ keyword: '', type: 'artist', quality: 'any', sites: [] })
+const newSub = ref({ keyword: '', type: 'artist', quality: 'any', sites: [], source_preference: 'pt' })
 const adding = ref(false)
 const editingSub = ref(null)
-const editForm = ref({ keyword: '', type: 'artist', quality: 'any', sites: 'all', enabled: true })
+const editForm = ref({ keyword: '', type: 'artist', quality: 'any', sites: 'all', source_preference: 'pt', enabled: true })
 const savingEdit = ref(false)
 
 const typeOptions = [
@@ -52,6 +52,11 @@ const qualityOptions = [
   { label: '任意', value: 'any' },
   { label: 'FLAC', value: 'flac' },
   { label: 'MP3', value: 'mp3' }
+]
+const sourcePreferenceOptions = [
+  { label: 'PT 优先', value: 'pt' },
+  { label: '在线优先', value: 'online_first' },
+  { label: '仅在线', value: 'online_only' },
 ]
 
 async function loadSubs() {
@@ -73,9 +78,10 @@ async function handleAdd() {
       keyword: newSub.value.keyword.trim(),
       type: newSub.value.type,
       quality: newSub.value.quality,
-      sites: newSub.value.sites
+      sites: newSub.value.sites,
+      source_preference: newSub.value.source_preference,
     })
-    newSub.value = { keyword: '', type: 'artist', quality: 'any', sites: [] }
+    newSub.value = { keyword: '', type: 'artist', quality: 'any', sites: [], source_preference: 'pt' }
     await loadSubs()
   } catch (e) {
     console.error(e)
@@ -100,6 +106,7 @@ function openEdit(sub) {
     type: sub.type,
     quality: sub.quality,
     sites: sub.sites || 'all',
+    source_preference: sub.source_preference || 'pt',
     enabled: sub.enabled,
   }
 }
@@ -113,6 +120,7 @@ async function handleSaveEdit() {
       type: editForm.value.type,
       quality: editForm.value.quality,
       sites: editForm.value.sites || 'all',
+      source_preference: editForm.value.source_preference,
       enabled: editForm.value.enabled,
     })
     editingSub.value = null
@@ -229,7 +237,13 @@ async function handleParseUrl() {
 
 async function batchSubscribe() {
   if (!parsedResult.value?.songs) return
-  const items = parsedResult.value.songs.map(song => ({ keyword: `${song.title} ${song.artist}`.trim(), type: 'song', quality: 'any', sites: 'all' }))
+  const items = parsedResult.value.songs.map(song => ({
+    keyword: `${song.title} ${song.artist}`.trim(),
+    type: 'song',
+    quality: 'any',
+    sites: 'all',
+    source_preference: 'online_first',
+  }))
   try {
     const res = await addSubsBatch(items, true)
     alert(`✅ 已添加 ${res.added || 0} 个订阅，跳过 ${res.skipped || 0} 个`)
@@ -262,6 +276,9 @@ onMounted(loadSubs)
         <select v-model="newSub.quality">
           <option v-for="o in qualityOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
+        <select v-model="newSub.source_preference">
+          <option v-for="o in sourcePreferenceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
         <AppButton variant="primary" :loading="adding" @click="handleAdd">添加</AppButton>
       </div>
     </div>
@@ -269,7 +286,7 @@ onMounted(loadSubs)
     <!-- 歌单链接解析 -->
     <div class="add-form">
       <h3 class="animal-page-title"><img v-if="isIsland" :src="animalIslandIcons.chat" alt="" /><span v-else>🔗</span><span>歌单链接解析</span></h3>
-      <p class="form-hint">粘贴 QQ音乐 或 网易云 歌单链接，自动解析歌曲列表并批量订阅</p>
+      <p class="form-hint">粘贴 QQ音乐 或 网易云 歌单链接，自动解析歌曲列表并批量订阅。歌单生成的歌曲订阅默认“在线优先”，在线失败时再回退 PT。</p>
       <div class="form-row">
         <input
           v-model="playlistUrl"
@@ -314,6 +331,10 @@ onMounted(loadSubs)
         </select>
         <label>站点</label>
         <input v-model="editForm.sites" placeholder="all 或 mteam,opencd" />
+        <label>下载规则</label>
+        <select v-model="editForm.source_preference">
+          <option v-for="o in sourcePreferenceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
         <label class="checkbox-row"><input type="checkbox" v-model="editForm.enabled" /> 启用</label>
         <div class="parse-actions">
           <AppButton variant="primary" :loading="savingEdit" @click="handleSaveEdit">保存</AppButton>
@@ -357,6 +378,7 @@ onMounted(loadSubs)
               <th>类型</th>
               <th>关键词</th>
               <th>品质</th>
+              <th>规则</th>
               <th>状态</th>
               <th>最近搜索</th>
               <th>操作</th>
@@ -368,6 +390,7 @@ onMounted(loadSubs)
               <td><AppBadge :color="typeBadgeColor(sub.type)">{{ sub.type }}</AppBadge></td>
               <td class="keyword-cell">{{ sub.keyword }}</td>
               <td>{{ sub.quality }}</td>
+              <td>{{ sourcePreferenceOptions.find(o => o.value === (sub.source_preference || 'pt'))?.label || 'PT 优先' }}</td>
               <td>
                 <AppBadge :color="sub.enabled ? 'green' : 'dim'">
                   {{ sub.enabled ? '启用' : '停用' }}
@@ -400,6 +423,7 @@ onMounted(loadSubs)
             <div class="sub-chip-row">
               <AppBadge :color="typeBadgeColor(sub.type)">{{ sub.type }}</AppBadge>
               <span class="sub-chip">{{ sub.quality }}</span>
+              <span class="sub-chip">{{ sourcePreferenceOptions.find(o => o.value === (sub.source_preference || 'pt'))?.label || 'PT 优先' }}</span>
             </div>
             <div class="sub-last-search">
               <span>最近搜索</span>

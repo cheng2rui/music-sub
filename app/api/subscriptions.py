@@ -35,12 +35,18 @@ def _normalize_sites(value) -> str:
     return str(value or "all").strip() or "all"
 
 
+def _normalize_source_preference(value) -> str:
+    value = str(value or "pt").strip()
+    return value if value in {"pt", "online_first", "online_only"} else "pt"
+
+
 @router.post("/", response_model=SubscriptionResponse)
 def create_subscription(data: SubscriptionCreate, db: Session = Depends(get_db)):
     """Create a new subscription."""
     payload = data.model_dump()
     payload["keyword"] = payload.get("keyword", "").strip()
     payload["sites"] = _normalize_sites(payload.get("sites"))
+    payload["source_preference"] = _normalize_source_preference(payload.get("source_preference"))
     if not payload["keyword"]:
         raise HTTPException(status_code=400, detail="Keyword is required")
     sub = Subscription(**payload)
@@ -68,6 +74,8 @@ def update_subscription(sub_id: int, data: SubscriptionUpdate, db: Session = Dep
         sub.quality = payload["quality"]
     if "sites" in payload and payload["sites"] is not None:
         sub.sites = _normalize_sites(payload["sites"])
+    if "source_preference" in payload and payload["source_preference"] is not None:
+        sub.source_preference = _normalize_source_preference(payload["source_preference"])
     if "enabled" in payload and payload["enabled"] is not None:
         sub.enabled = bool(payload["enabled"])
     db.commit()
@@ -83,18 +91,25 @@ def create_subscriptions_batch(data: SubscriptionBatchCreate, db: Session = Depe
         raise HTTPException(status_code=400, detail="一次最多批量添加 5000 个订阅")
     existing = set()
     if data.skip_duplicates:
-        for row in db.query(Subscription.keyword, Subscription.type, Subscription.quality, Subscription.sites).all():
-            existing.add((row.keyword.strip(), row.type, row.quality, row.sites or "all"))
+        for row in db.query(Subscription.keyword, Subscription.type, Subscription.quality, Subscription.sites, Subscription.source_preference).all():
+            existing.add((row.keyword.strip(), row.type, row.quality, row.sites or "all", row.source_preference or "pt"))
     added = 0
     skipped = 0
     for item in items:
         payload = item.model_dump()
         payload["keyword"] = payload.get("keyword", "").strip()
         payload["sites"] = _normalize_sites(payload.get("sites"))
+        payload["source_preference"] = _normalize_source_preference(payload.get("source_preference"))
         if not payload["keyword"]:
             skipped += 1
             continue
-        key = (payload["keyword"], payload.get("type") or "artist", payload.get("quality") or "any", payload["sites"])
+        key = (
+            payload["keyword"],
+            payload.get("type") or "artist",
+            payload.get("quality") or "any",
+            payload["sites"],
+            payload.get("source_preference") or "pt",
+        )
         if data.skip_duplicates and key in existing:
             skipped += 1
             continue
