@@ -31,6 +31,28 @@ class SendResult:
 
 
 @dataclass
+class NotifyAction:
+    label: str
+    command: str
+    style: str = "default"
+
+
+def telegram_inline_keyboard(actions: list[NotifyAction] | None) -> dict[str, Any] | None:
+    if not actions:
+        return None
+    row = []
+    for action in actions[:6]:
+        label = (action.label or action.command or "Action")[:64]
+        command = (action.command or "")[:64]
+        if not command:
+            continue
+        row.append({"text": label, "callback_data": f"ms_cmd:{command}"})
+    if not row:
+        return None
+    return {"inline_keyboard": [row[i:i + 2] for i in range(0, len(row), 2)]}
+
+
+@dataclass
 class IncomingMessage:
     """Normalized inbound chat message.
 
@@ -102,6 +124,8 @@ def normalize_incoming_message(channel: str, body: dict[str, Any] | Any) -> Inco
                 text = "确认"
             elif data == "ms_cancel":
                 text = "取消"
+            elif data.startswith("ms_cmd:"):
+                text = data[len("ms_cmd:"):].strip()
             return IncomingMessage(
                 channel="telegram",
                 text=text,
@@ -412,13 +436,14 @@ def send_channel(channel: str, text: str, *, target: str | None = None, group: b
     return result
 
 
-def send_all(event: str, text: str) -> list[SendResult]:
+def send_all(event: str, text: str, *, actions: list[NotifyAction] | None = None) -> list[SendResult]:
     cfg = cfg_module.config.notify
     results: list[SendResult] = []
+    tg_markup = telegram_inline_keyboard(actions)
     for name in ("telegram", "wecom", "qqbot", "wechatbot"):
         ch_cfg = getattr(cfg, name)
         if _event_enabled(ch_cfg, event):
-            results.append(send_channel(name, text))
+            results.append(send_channel(name, text, reply_markup=tg_markup if name == "telegram" else None))
     return results
 
 
