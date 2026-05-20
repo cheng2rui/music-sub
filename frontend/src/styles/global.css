@@ -20,11 +20,10 @@ body {
   overflow: hidden;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
-input, textarea, [contenteditable="true"], pre, code {
+input, textarea, [contenteditable="true"], pre, code,
+.message-content, .logs-view, .task-card, .result-card, .confirm-card {
   -webkit-user-select: text;
   user-select: text;
 }
