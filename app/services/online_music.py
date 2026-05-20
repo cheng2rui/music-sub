@@ -611,6 +611,48 @@ def _qq_pick_download_url(song_mid: str) -> tuple[str, str, int]:
     return "", "mp3", 0
 
 
+def _norm_for_rank(value: str) -> str:
+    return re.sub(r"[\s\-_/·.()（）\[\]【】《》<>]+", "", (value or "").lower())
+
+
+def _online_relevance(song: OnlineSong, keyword: str) -> int:
+    """Rank online search results by textual match before file size.
+
+    Larger/lossless live versions often have bigger files and used to float to
+    the top. For download UX, exact title/artist matches should win first; size
+    only breaks ties.
+    """
+    kw = _norm_for_rank(keyword)
+    title = _norm_for_rank(song.title)
+    artist = _norm_for_rank(song.artist)
+    album = _norm_for_rank(song.album)
+    raw_title = (song.title or "").lower()
+    terms = [_norm_for_rank(t) for t in re.split(r"\s+", keyword or "") if _norm_for_rank(t)]
+    score = 0
+    if title and title in kw:
+        score += 90
+    if artist and artist in kw:
+        score += 55
+    if album and album in kw:
+        score += 20
+    for term in terms:
+        if not term:
+            continue
+        if title == term:
+            score += 90
+        elif term in title:
+            score += 45
+        if artist == term:
+            score += 55
+        elif term in artist:
+            score += 28
+        if term in album:
+            score += 12
+    if any(mark in raw_title for mark in ("live", "remix", "demo", "伴奏", "翻唱", "cover", "dj", "3d", "环绕", "粤语", "日文", "日本")):
+        score -= 35
+    return score
+
+
 def search_online(keyword: str, sources: list[str] | None = None, limit: int = 20) -> list[dict]:
     sources = list(dict.fromkeys(sources or ["qq", "migu", "kugou", "netease"]))
     results: list[OnlineSong] = []
@@ -647,8 +689,8 @@ def search_online(keyword: str, sources: list[str] | None = None, limit: int = 2
             except Exception as e:
                 logger.warning(f"[online:{src}] search failed: {e}")
 
-    # Prefer enabled/downloadable first, then larger files.
-    results.sort(key=lambda x: (x.disabled, -(x.size or 0)))
+    # Prefer enabled/downloadable first, then textual relevance, then larger files.
+    results.sort(key=lambda x: (x.disabled, -_online_relevance(x, keyword), -(x.size or 0)))
     logger.info(f"[online] search keyword={keyword!r} sources={sources} per_source={per_source} total={len(results)} elapsed={time.perf_counter() - started:.2f}s")
     return [r.to_dict() for r in results[:limit]]
 

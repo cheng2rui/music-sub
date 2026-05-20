@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, toRefs, watch } from 'vue'
 import { searchOnlineMusic, resolveOnlineSong, downloadOnlineSong } from '@/api/index.js'
+import { useSearchCacheStore } from '@/stores/searchCache.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import { useThemeStore } from '@/stores/theme.js'
@@ -8,20 +9,25 @@ import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const theme = useThemeStore()
 const isIsland = computed(() => theme.current === 'island')
-const keyword = ref('')
-const results = ref([])
-const loading = ref(false)
-const downloading = ref('')
-const resolving = ref('')
-const downloadMessage = ref(null)
-const resolveMessage = ref(null)
-const page = ref(1)
-const pageSize = ref(20)
-const filterSource = ref('all')
-const filterFormat = ref('all')
-const onlyDownloadable = ref(false)
-const searchLimit = 100
-const selectedSources = ref(['qq', 'migu', 'kugou', 'netease', 'kuwo'])
+const cache = useSearchCacheStore()
+const {
+  keyword,
+  results,
+  loading,
+  downloading,
+  resolving,
+  downloadMessage,
+  resolveMessage,
+  page,
+  pageSize,
+  filterSource,
+  filterFormat,
+  onlyDownloadable,
+  selectedSources,
+  history,
+  downloadHistory,
+} = toRefs(cache.online)
+const searchLimit = cache.online.searchLimit || 100
 const allSources = ['qq', 'migu', 'kugou', 'netease', 'kuwo']
 
 const sourceLabels = {
@@ -69,23 +75,45 @@ function formatSize(bytes) {
 async function handleSearch() {
   if (!keyword.value.trim()) return
   loading.value = true
+  downloadMessage.value = null
+  resolveMessage.value = null
   try {
     page.value = 1
     results.value = await searchOnlineMusic(keyword.value.trim(), selectedSources.value, searchLimit)
+    cache.rememberOnlineSearch(keyword.value.trim(), {
+      sources: [...selectedSources.value],
+      resultCount: results.value.length,
+    })
   } catch (e) {
-    alert('搜索失败: ' + e.message)
+    downloadMessage.value = { type: 'error', text: '搜索失败：' + (e.message || '网络错误') }
   } finally {
     loading.value = false
   }
 }
 
-function downloadErrorHint(message = '') {
-  const text = String(message || '')
+function downloadErrorHint(errorOrMessage = '') {
+  const payload = errorOrMessage?.payload?.detail || errorOrMessage?.payload || null
+  const reason = payload?.reason || ''
+  const message = typeof errorOrMessage === 'string' ? errorOrMessage : (payload?.message || errorOrMessage?.message || '')
+  const text = `${reason} ${String(message || '')}`
   if (text.includes('qq_resolve_failed') || text.includes('没有拿到可下载链接')) return 'QQ 解析源未返回可用链接，可能是 NKI 短时不可用或该曲目需要会员权限。可以稍后重试，或换酷狗/网易云/咪咕。'
   if (text.includes('qq_download_failed') || text.includes('候选链接均不可用')) return 'QQ 链接已解析但 CDN 下载失败，通常是链接过期、区域限制或服务器返回异常内容。可以重试一次，或换源下载。'
   if (text.includes('非音频内容')) return '下载地址返回了错误页，不是真正音频文件。建议换源或稍后重试。'
   if (text.includes('内容过小')) return '下载文件过小，疑似试听片段或错误响应，已自动丢弃。'
-  return text || '下载失败，请稍后重试。'
+  if (reason || message) return `${message || '下载失败'}${reason ? `（${reason}）` : ''}`
+  return '下载失败，请稍后重试。'
+}
+
+function restoreHistory(item) {
+  keyword.value = item.keyword || ''
+  if (Array.isArray(item.sources) && item.sources.length) selectedSources.value = item.sources
+  handleSearch()
+}
+
+function formatHistoryTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 function describeResolveResult(song, res) {
@@ -115,10 +143,13 @@ async function handleDownload(song) {
   resolveMessage.value = null
   try {
     const res = await downloadOnlineSong(song, true)
-    if (res.ok) downloadMessage.value = { type: 'ok', text: `✅ 已下载并整理完成：${song.title}` }
-    else downloadMessage.value = { type: 'error', text: '下载失败' }
+    if (res.ok) {
+      downloadMessage.value = { type: 'ok', text: `✅ 已下载并整理完成：${song.title}` }
+      cache.pushOnlineDownload({ title: song.title, artist: song.artist, source: song.source, ok: true, taskId: res.task_id })
+    } else downloadMessage.value = { type: 'error', text: '下载失败' }
   } catch (e) {
-    const hint = downloadErrorHint(e.message)
+    const hint = downloadErrorHint(e)
+    cache.pushOnlineDownload({ title: song.title, artist: song.artist, source: song.source, ok: false, error: hint })
     downloadMessage.value = { type: 'error', text: `下载失败：${hint}` }
   } finally {
     downloading.value = ''
@@ -140,6 +171,12 @@ async function handleDownload(song) {
       <div class="search-row">
         <input v-model="keyword" placeholder="歌曲 / 歌手，例如：周杰伦 稻香" @keyup.enter="handleSearch" />
         <AppButton variant="primary" :loading="loading" @click="handleSearch">搜索</AppButton>
+      </div>
+      <div v-if="history.length" class="history-row">
+        <span class="history-label">最近搜索</span>
+        <button v-for="item in history.slice(0, 6)" :key="item.id" class="history-chip" @click="restoreHistory(item)">
+          {{ item.keyword }} <small>{{ item.resultCount ?? 0 }}条 · {{ formatHistoryTime(item.at) }}</small>
+        </button>
       </div>
     </div>
 
@@ -235,6 +272,10 @@ async function handleDownload(song) {
 .source-item { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 13px; }
 .search-row { display: flex; gap: 10px; }
 .search-row input { flex: 1; min-width: 0; }
+.history-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.history-label { color: var(--text-dim); font-size: 12px; }
+.history-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.history-chip small { color: var(--text-dim); }
 .empty-text { color: var(--text-dim); padding: 20px 0; text-align: center; }
 .download-message { margin-bottom: 10px; padding: 10px 12px; border-radius: var(--radius-md); font-size: 13px; line-height: 1.5; border: 1px solid var(--border); background: var(--surface-soft); color: var(--text-dim); }
 .download-message.ok { border-color: rgba(58, 196, 125, .35); color: var(--success); }

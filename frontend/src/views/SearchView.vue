@@ -1,19 +1,23 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, toRefs } from 'vue'
 import { searchMusicV2, downloadTorrent } from '@/api/index.js'
+import { useSearchCacheStore } from '@/stores/searchCache.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 
-const keyword = ref('')
-const searchType = ref('keyword')   // keyword/artist/album
-const quality = ref('any')          // any/flac/mp3
-const formatFilter = ref('all')     // all/lossless/lossy
-const sortBy = ref('score')         // score/seeders/size
-const siteFilter = ref('')
-
-const loading = ref(false)
-const downloading = ref(null)
-const lastResp = ref(null)
+const cache = useSearchCacheStore()
+const {
+  keyword,
+  searchType,
+  quality,
+  formatFilter,
+  sortBy,
+  siteFilter,
+  loading,
+  downloading,
+  lastResp,
+  history,
+} = toRefs(cache.pt)
 
 const sites = computed(() => lastResp.value?.sites || [])
 const queries = computed(() => lastResp.value?.queries || [])
@@ -40,12 +44,17 @@ const filteredResults = computed(() => {
 async function handleSearch() {
   if (!keyword.value.trim()) return
   loading.value = true
-  lastResp.value = null
   try {
     const params = { keyword: keyword.value.trim(), type: searchType.value, quality: quality.value, limit: 80 }
     if (searchType.value === 'album') params.album = keyword.value.trim()
     if (searchType.value === 'artist') params.artist = keyword.value.trim()
     lastResp.value = await searchMusicV2(params)
+    cache.rememberPtSearch(keyword.value.trim(), {
+      type: searchType.value,
+      quality: quality.value,
+      total: lastResp.value?.total || 0,
+      siteCount: lastResp.value?.sites?.length || 0,
+    })
   } catch (e) {
     console.error(e)
   } finally {
@@ -84,6 +93,19 @@ function toggleSite(name) {
   siteFilter.value = siteFilter.value === name ? '' : name
 }
 
+function restoreHistory(item) {
+  keyword.value = item.keyword || ''
+  searchType.value = item.type || 'keyword'
+  quality.value = item.quality || 'any'
+  handleSearch()
+}
+
+function formatHistoryTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 onMounted(() => {
   const pending = localStorage.getItem('music_sub_pending_search_keyword')
   if (pending) {
@@ -115,6 +137,13 @@ onMounted(() => {
         <option value="mp3">MP3</option>
       </select>
       <AppButton variant="primary" :loading="loading" @click="handleSearch">搜索</AppButton>
+    </div>
+
+    <div v-if="history.length" class="history-row">
+      <span class="history-label">最近搜索</span>
+      <button v-for="item in history.slice(0, 6)" :key="item.id" class="history-chip" @click="restoreHistory(item)">
+        {{ item.keyword }} <small>{{ item.total ?? 0 }}条 · {{ formatHistoryTime(item.at) }}</small>
+      </button>
     </div>
 
     <div v-if="sites.length" class="site-row">
@@ -228,6 +257,10 @@ onMounted(() => {
 .search-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .search-input { flex: 1; min-width: 220px; }
 .sel { padding: 6px 10px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 13px; }
+.history-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: -6px; }
+.history-label { color: var(--text-dim); font-size: 12px; }
+.history-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.history-chip small { color: var(--text-dim); }
 .site-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .site-label { color: var(--text-dim); font-size: 12px; }
 .site-chip { display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; font-size: 12px; }
