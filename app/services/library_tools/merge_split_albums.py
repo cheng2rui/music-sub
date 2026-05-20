@@ -48,7 +48,13 @@ def _target_path(db: Session, f: MusicFile, rows: list[MusicFile], options: dict
     album = f.album or Path(f.file_path).parent.name or "Unknown Album"
     root = Path(options.get("library_root") or config.paths.library)
     rel_dir = build_library_path(artist, album, config.paths.structure)
-    return _unique_path((root / rel_dir / Path(f.file_path).name).resolve())
+    desired = (root / rel_dir / Path(f.file_path).name).resolve()
+    source = Path(f.file_path).resolve()
+    # If the row is already in the canonical location, do not manufacture a
+    # conflict suffix just because the file itself exists.
+    if desired == source:
+        return desired
+    return _unique_path(desired)
 
 
 def _group_rows(files: list[MusicFile]) -> list[list[MusicFile]]:
