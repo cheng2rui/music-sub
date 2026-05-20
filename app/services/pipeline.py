@@ -11,6 +11,7 @@ from app.db import SessionLocal
 from app.models import DownloadTask, MusicFile
 from app.downloader.monitor import get_newly_completed, mark_processed
 from app.organizer.hardlinker import hardlink_to_library, get_audio_files, is_audio_file
+from app.services.album_identity import canonical_album_artist, primary_artist
 from app.scrapers.tagger import (
     tag_file,
     save_lyrics,
@@ -560,6 +561,19 @@ def _process_completed_torrent(torrent: dict):
     meta_cache[os.path.basename(source_audio_files[0])] = first_meta
     organize_artist = (first_meta.album_artist or first_meta.artist) if first_meta else ""
     organize_album = first_meta.album if first_meta else ""
+    # Album folders are owned by a stable album artist, not by each track artist.
+    # If this album already exists, reuse the first/primary singer from the existing album;
+    # otherwise take the first singer from the current metadata. This prevents
+    # albums with guest/different track artists from being split into multiple folders.
+    pre_db = SessionLocal()
+    try:
+        canonical_artist = canonical_album_artist(pre_db, organize_album, organize_artist)
+    finally:
+        pre_db.close()
+    if canonical_artist:
+        organize_artist = canonical_artist
+    if first_meta and organize_artist:
+        first_meta.album_artist = organize_artist
 
     # Step 2: Hardlink to library
     linked_files = hardlink_to_library(content_path, artist=organize_artist, album=organize_album)
@@ -602,7 +616,7 @@ def _process_completed_torrent(torrent: dict):
                 shared_album = (first_meta.album if first_meta else "") or use_hint.get("album") or ""
                 shared_artist = (
                     (first_meta.album_artist or first_meta.artist) if first_meta else ""
-                ) or use_hint.get("album_artist") or ""
+                ) or primary_artist(use_hint.get("album_artist") or use_hint.get("artist") or "")
                 audio_meta_hint = read_audio_metadata(file_path)
                 meta = _scrape_file(
                     file_path,

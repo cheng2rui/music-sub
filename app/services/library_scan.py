@@ -16,6 +16,7 @@ from app.config import config
 from app.models import MusicFile
 from app.organizer.hardlinker import AUDIO_EXTENSIONS
 from app.scrapers.tagger import read_audio_metadata, read_existing_tags, read_sidecar_lyrics, find_local_cover_data, read_embedded_cover
+from app.services.album_identity import canonical_album_artist
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +85,9 @@ def upsert_file_from_local(db: Session, file_path: str | Path, root: str | Path 
     existing.format = path.suffix.lstrip(".")
     existing.title = title
     existing.artist = tags.get("artist") or tags.get("album_artist") or path_hint.get("artist") or existing.artist
-    # Preserve manual album_artist repairs on existing rows unless the file tag explicitly has albumartist.
-    existing.album_artist = tags.get("album_artist") or existing.album_artist or path_hint.get("artist") or existing.artist
     existing.album = tags.get("album") or path_hint.get("album") or existing.album
+    candidate_album_artist = tags.get("album_artist") or existing.album_artist or path_hint.get("artist") or existing.artist
+    existing.album_artist = canonical_album_artist(db, existing.album, candidate_album_artist, current_id=existing.id) or candidate_album_artist
     existing.year = tags.get("year") or existing.year
     existing.genre = tags.get("genre") or existing.genre
     existing.track_number = tags.get("track_number") or track_from_name or existing.track_number

@@ -31,7 +31,7 @@ def _safe(text: str) -> str:
 def _vars_for(f: MusicFile) -> dict[str, Any]:
     ext = Path(f.file_path).suffix if f.file_path else ""
     return {
-        "artist": _safe(f.artist or "Unknown Artist"),
+        "artist": _safe(f.album_artist or f.artist or "Unknown Artist"),
         "album": _safe(f.album or "Unknown Album"),
         "title": _safe(f.title or Path(f.file_path).stem if f.file_path else str(f.id)),
         "track": int(f.track_number or 0),
