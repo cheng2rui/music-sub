@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.db import SessionLocal
 from app.models import DownloadTask
-from app.services.online_music import OnlineDownloadError, search_online, download_online_song
+from app.services.online_music import OnlineDownloadError, search_online, resolve_online_song, download_online_song
 from app.services.pipeline import _process_completed_torrent
 
 router = APIRouter()
@@ -22,6 +22,10 @@ class OnlineDownloadRequest(BaseModel):
     organize: bool = True
 
 
+class OnlineResolveRequest(BaseModel):
+    song: dict
+
+
 @router.post("/search")
 def search(req: OnlineSearchRequest):
     """Search online music sources for direct downloadable songs."""
@@ -29,6 +33,18 @@ def search(req: OnlineSearchRequest):
     if not keyword:
         return []
     return search_online(keyword, req.sources, req.limit)
+
+
+@router.post("/resolve")
+def resolve(req: OnlineResolveRequest):
+    """Resolve online music download candidates without downloading."""
+    try:
+        return resolve_online_song(req.song or {})
+    except OnlineDownloadError as e:
+        raise HTTPException(status_code=502, detail=e.to_detail())
+    except Exception as e:
+        source = (req.song or {}).get("source") or "online"
+        raise HTTPException(status_code=500, detail={"message": f"解析失败: {e}", "reason": "unexpected_error", "source": source})
 
 
 @router.post("/download")

@@ -714,6 +714,28 @@ def _qq_download_candidates(song: dict) -> list[tuple[str, str]]:
     return candidates
 
 
+def resolve_online_song(song: dict) -> dict:
+    """Resolve downloadable candidates without downloading the file."""
+    source = song.get("source") or "online"
+    if source == "qq":
+        candidates = _qq_download_candidates(song)
+    else:
+        url = song.get("url") or ""
+        candidates = [(url, song.get("format") or Path(song.get("filename") or "").suffix.lstrip(".") or "mp3")] if url else []
+    items = []
+    for idx, (candidate_url, ext) in enumerate(candidates, start=1):
+        parsed = urlparse(candidate_url)
+        items.append({
+            "index": idx,
+            "format": ext or "",
+            "host": parsed.netloc,
+            "scheme": parsed.scheme,
+            "path_ext": Path(parsed.path).suffix.lstrip("."),
+            "url_preview": f"{parsed.scheme}://{parsed.netloc}{parsed.path[:48]}" if parsed.scheme and parsed.netloc else "",
+        })
+    return {"ok": bool(items), "source": source, "song_id": song.get("song_id") or "", "candidate_count": len(items), "candidates": items}
+
+
 def download_online_song(song: dict) -> str:
     """Download an online song to config.paths.downloads/online and return file path."""
     url = song.get("url") or ""

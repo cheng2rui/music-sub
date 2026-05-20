@@ -2,8 +2,9 @@
 FROM node:20-alpine AS frontend-build
 
 WORKDIR /build/frontend
+ARG NPM_REGISTRY=https://registry.npmjs.org
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm install --registry=${NPM_REGISTRY}
 COPY frontend/ ./
 RUN npm run build
 
