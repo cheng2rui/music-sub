@@ -13,7 +13,7 @@ import requests
 import app.config as cfg_module
 from app.db import get_db
 from app.models import NotifyEvent
-from app.services.notify import IncomingMessage, normalize_incoming_message, send_channel, handle_incoming_message
+from app.services.notify import DEFAULT_NOTIFY_TEMPLATES, IncomingMessage, normalize_incoming_message, render_template_text, send_channel, handle_incoming_message
 
 router = APIRouter()
 
@@ -36,6 +36,25 @@ class IncomingRequest(BaseModel):
     raw: dict[str, Any] = {}
 
 
+class TemplatePreviewRequest(BaseModel):
+    templates: dict[str, str] = {}
+
+
+TEMPLATE_SAMPLE_CONTEXTS: dict[str, dict[str, Any]] = {
+    "download_added": {"name": "周杰伦 - 七里香", "site": "QQ音乐"},
+    "download_complete": {"name": "周杰伦 - 七里香", "file_count": 12},
+    "scrape_complete": {"name": "周杰伦 - 七里香", "scraped": 12, "total": 12},
+    "error": {"context": "在线下载", "error": "解析音源失败，请稍后重试"},
+    "cleanup_candidates": {
+        "candidate_count": 3,
+        "qb_and_db_count": 2,
+        "db_only_count": 1,
+        "total_size": 734003200,
+        "total_amount_left": 10485760,
+        "total_size_mb": 700.0,
+        "total_amount_left_mb": 10.0,
+    },
+}
 
 
 def _telegram_webhook_url() -> str:
@@ -79,6 +98,33 @@ def send(req: SendRequest):
 def test_channel(channel: str):
     result = send_channel(channel, "🎵 Music Sub 通知渠道测试成功")
     return result.__dict__
+
+
+@router.post("/templates/preview")
+def preview_templates(req: TemplatePreviewRequest):
+    """Preview notification templates with representative sample variables."""
+    items = []
+    templates = req.templates or {}
+    for key, default_template in DEFAULT_NOTIFY_TEMPLATES.items():
+        template = templates.get(key) or default_template
+        ctx = TEMPLATE_SAMPLE_CONTEXTS.get(key) or {}
+        try:
+            rendered = render_template_text(template, ctx)
+            ok = True
+            error = ""
+        except Exception as exc:
+            rendered = render_template_text(default_template, ctx)
+            ok = False
+            error = str(exc)
+        items.append({
+            "key": key,
+            "ok": ok,
+            "template": template,
+            "rendered": rendered,
+            "context": ctx,
+            "error": error,
+        })
+    return {"items": items}
 
 
 @router.get("/events")

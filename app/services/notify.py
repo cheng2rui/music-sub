@@ -227,15 +227,20 @@ class _SafeTemplateDict(dict):
         return "{" + key + "}"
 
 
+def render_template_text(template: str, context: dict[str, Any]) -> str:
+    """Render one template string with safe `{variable}` substitution."""
+    return (template or "").format_map(_SafeTemplateDict(**(context or {})))
+
+
 def render_notify_template(event: str, **context: Any) -> str:
     """Render a notification template with safe `{variable}` substitution."""
     template = (cfg_module.config.notify.templates or {}).get(event) or DEFAULT_NOTIFY_TEMPLATES.get(event) or "{message}"
     try:
-        return template.format_map(_SafeTemplateDict(**context))
+        return render_template_text(template, context)
     except Exception as exc:
         logger.warning("render notify template failed for %s: %s", event, exc)
         fallback = DEFAULT_NOTIFY_TEMPLATES.get(event) or "{message}"
-        return fallback.format_map(_SafeTemplateDict(**context))
+        return render_template_text(fallback, context)
 
 
 _wecom_token_cache: dict[str, Any] = {"key": "", "token": "", "expires_at": 0.0}

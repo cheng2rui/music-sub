@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
-import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getNotifyStatus, getNotifyEvents, getTelegramWebhook, setTelegramWebhook, deleteTelegramWebhook, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
+import { getSettings, updateSettings, testQb, testTelegram, testNotifyChannel, getNotifyStatus, getNotifyEvents, previewNotifyTemplates, getTelegramWebhook, setTelegramWebhook, deleteTelegramWebhook, getQqbotGatewayStatus, restartQqbotGateway, getWechatClawStatus, refreshWechatClawQrcode, restartWechatClaw, logoutWechatClaw, testSite, getScheduler, runScheduler, changePasswordApi, getAssistantProviders, getAssistantTools, testAssistantProvider } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import { useThemeStore } from '@/stores/theme.js'
@@ -54,6 +54,8 @@ const testingNotify = ref('')
 const notifyStatus = ref(null)
 const notifyRuntimeEvents = ref([])
 const refreshingNotifyRuntime = ref(false)
+const notifyTemplatePreview = ref([])
+const previewingNotifyTemplates = ref(false)
 const restartingQqGateway = ref(false)
 const qqGatewayStatus = ref(null)
 const wechatClawStatus = ref(null)
@@ -338,6 +340,19 @@ function resetNotifyTemplate(key) {
 
 function resetAllNotifyTemplates() {
   settings.value.notify.templates = Object.fromEntries(notifyTemplateDefs.map(t => [t.key, t.defaultText]))
+}
+
+async function handlePreviewNotifyTemplates() {
+  previewingNotifyTemplates.value = true
+  try {
+    const res = await previewNotifyTemplates(settings.value.notify.templates || {})
+    notifyTemplatePreview.value = res.items || []
+  } catch (e) { alert('模板预览失败: ' + e.message) }
+  finally { previewingNotifyTemplates.value = false }
+}
+
+function templatePreviewFor(key) {
+  return notifyTemplatePreview.value.find(x => x.key === key)
 }
 
 async function handleRunScheduler(id) {
@@ -670,7 +685,10 @@ onMounted(loadAll)
         <details class="notify-template-panel">
           <summary>通知模板</summary>
           <div class="text-dim template-help">参考 MoviePilot 的模板思路：每类通知可自定义文案，使用变量占位符；未配置时使用默认模板。</div>
-          <div class="template-actions"><AppButton variant="ghost" size="sm" @click="resetAllNotifyTemplates">填充默认模板</AppButton></div>
+          <div class="template-actions">
+            <AppButton variant="ghost" size="sm" @click="resetAllNotifyTemplates">填充默认模板</AppButton>
+            <AppButton variant="ghost" size="sm" :loading="previewingNotifyTemplates" @click="handlePreviewNotifyTemplates">预览渲染</AppButton>
+          </div>
           <div class="notify-template-list">
             <div v-for="tpl in notifyTemplateDefs" :key="tpl.key" class="notify-template-card">
               <div class="notify-template-head">
@@ -679,6 +697,11 @@ onMounted(loadAll)
                 <AppButton variant="ghost" size="sm" @click="resetNotifyTemplate(tpl.key)">恢复默认</AppButton>
               </div>
               <textarea v-model="settings.notify.templates[tpl.key]" :placeholder="tpl.defaultText" rows="4"></textarea>
+              <div v-if="templatePreviewFor(tpl.key)" class="template-preview" :class="{ error: !templatePreviewFor(tpl.key).ok }">
+                <strong>{{ templatePreviewFor(tpl.key).ok ? '预览' : '预览失败，已回退默认' }}</strong>
+                <pre>{{ templatePreviewFor(tpl.key).rendered }}</pre>
+                <small v-if="templatePreviewFor(tpl.key).error">{{ templatePreviewFor(tpl.key).error }}</small>
+              </div>
             </div>
           </div>
         </details>
@@ -971,6 +994,10 @@ onMounted(loadAll)
 .notify-template-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; margin-bottom: 8px; }
 .notify-template-head small { color: var(--text-dim); grid-column: 1 / -1; }
 .notify-template-card textarea { width: 100%; min-height: 96px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; }
+.template-preview { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); padding: 8px; }
+.template-preview.error { border-color: color-mix(in srgb, #ef4444 35%, var(--border)); }
+.template-preview pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.45; color: var(--text); }
+.template-preview small { color: var(--danger, #ef4444); }
 .notify-runtime-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .notify-runtime-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .notify-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }

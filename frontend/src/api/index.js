@@ -261,6 +261,10 @@ export const testTelegram = () => authFetch('/api/settings/test_telegram', { met
 export const testNotifyChannel = (channel) => authFetch(`/api/notify/test/${channel}`, { method: 'POST' }).then(r => r.json())
 export const getNotifyStatus = () => authFetch('/api/notify/status').then(r => r.json())
 export const getNotifyEvents = (limit = 30) => authFetch(`/api/notify/events?limit=${limit}`).then(r => r.json())
+export const previewNotifyTemplates = (templates = {}) => authFetch('/api/notify/templates/preview', {
+  method: 'POST',
+  body: JSON.stringify({ templates })
+}).then(r => r.json())
 export const getTelegramWebhook = () => authFetch('/api/notify/telegram/webhook').then(r => r.json())
 export const setTelegramWebhook = (baseUrl, dropPendingUpdates = false) => authFetch('/api/notify/telegram/webhook', {
   method: 'POST',
