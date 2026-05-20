@@ -33,19 +33,37 @@ def _album_key(f: MusicFile) -> str:
     return norm_text(f.album or "") or f"__unknown_album__:{f.id}"
 
 
+def _prefer_cjk(values: list[str]) -> str:
+    import re
+    cjk_re = re.compile(r"[\u4e00-\u9fff]")
+    cleaned = [str(v or "").strip() for v in values if str(v or "").strip()]
+    cjk = [v for v in cleaned if cjk_re.search(v)]
+    return (sorted(cjk, key=len)[0] if cjk else (cleaned[0] if cleaned else ""))
+
+
 def _target_artist(db: Session, rows: list[MusicFile], options: dict[str, Any]) -> str:
     forced = str(options.get("album_artist") or "").strip()
     if forced:
         return primary_artist(forced) or forced
+    preferred = _prefer_cjk([r.album_artist or r.artist or "" for r in rows])
+    if preferred:
+        return primary_artist(preferred) or preferred
     first = sorted(rows, key=lambda r: (r.track_number is None, r.track_number or 9999, r.id))[0]
     return canonical_album_artist(db, first.album, first.album_artist or first.artist, current_id=first.id) or primary_artist(first.album_artist or first.artist) or "Unknown Artist"
+
+
+def _target_album(rows: list[MusicFile], options: dict[str, Any]) -> str:
+    forced = str(options.get("album") or "").strip()
+    if forced:
+        return forced
+    return _prefer_cjk([r.album or "" for r in rows]) or "Unknown Album"
 
 
 def _target_path(db: Session, f: MusicFile, rows: list[MusicFile], options: dict[str, Any]) -> Path | None:
     if not f.file_path:
         return None
     artist = _target_artist(db, rows, options)
-    album = f.album or Path(f.file_path).parent.name or "Unknown Album"
+    album = _target_album(rows, options) or f.album or Path(f.file_path).parent.name or "Unknown Album"
     root = Path(options.get("library_root") or config.paths.library)
     rel_dir = build_library_path(artist, album, config.paths.structure)
     desired = (root / rel_dir / Path(f.file_path).name).resolve()
@@ -79,7 +97,7 @@ def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> Too
                 file_path=f.file_path,
                 label=Path(f.file_path).name if f.file_path else f.title or str(f.id),
                 before={"file_path": f.file_path, "album_artist": f.album_artist, "artist": f.artist, "album": f.album},
-                after={"file_path": str(target) if target else "", "album_artist": target_artist},
+                after={"file_path": str(target) if target else "", "album_artist": target_artist, "album": _target_album(rows, options)},
                 would_change=bool(target and not same),
                 reason="合并到主歌手专辑文件夹" if target and not same else "",
             ))
@@ -152,6 +170,10 @@ def apply(db: Session, files: list[MusicFile], options: dict[str, Any], on_progr
                         message="合并同名专辑分裂文件夹",
                         details={"file_id": f.id, "album": f.album, "album_artist": target_artist},
                     )
+                target_album = _target_album(rows, options)
+                if target_album and f.album != target_album:
+                    f.album = target_album
+                    updated += 1
                 if f.album_artist != target_artist:
                     f.album_artist = target_artist
                     updated += 1

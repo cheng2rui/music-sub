@@ -1,6 +1,7 @@
 """Library API routes."""
 import datetime
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,11 +15,42 @@ from app.config import config
 from app.db import get_db
 from app.models import LibraryAuditEvent, MusicFile
 from app.services.album_identity import primary_artist
+from app.scrapers.matcher import text_score
 
 router = APIRouter()
 
 UNKNOWN_ALBUM = "单曲/未知专辑"
 UNKNOWN_ARTIST = "Unknown Artist"
+_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
+_ROMAN_TEXT_RE = re.compile(r"[A-Za-z]")
+
+
+def _has_cjk_text(value: str | None) -> bool:
+    return bool(_CJK_TEXT_RE.search(value or ""))
+
+
+def _looks_romanized(value: str | None) -> bool:
+    text = value or ""
+    return bool(_ROMAN_TEXT_RE.search(text)) and not _has_cjk_text(text)
+
+
+def _prefer_display_name(values: list[str]) -> str:
+    """Prefer Chinese display identity over romanized aliases for repair suggestions."""
+    cleaned = [str(v or "").strip() for v in values if str(v or "").strip()]
+    if not cleaned:
+        return ""
+    cjk = [v for v in cleaned if _has_cjk_text(v)]
+    if cjk:
+        cjk.sort(key=lambda x: (len(x), cleaned.index(x)))
+        return cjk[0]
+    return cleaned[0]
+
+
+def _similar_album_key(album: str | None) -> str:
+    album = _display_album(album)
+    if _has_cjk_text(album):
+        return "cjk:" + re.sub(r"\s+", "", album.lower())
+    return "roman:" + re.sub(r"[\s\-_/·.()（）\[\]【】《》<>]+", "", album.lower())
 
 
 def _display_album(album: str | None) -> str:
@@ -419,15 +451,16 @@ def _album_artist_conflict_items(files: list[MusicFile], limit: int) -> tuple[in
 
 
 def _split_album_folder_items(files: list[MusicFile], limit: int) -> tuple[int, list[dict]]:
-    """Find same album names spread across multiple artist folders/album artists."""
-    groups: dict[str, dict] = {}
+    """Find album folders split by artist or Chinese/romanized album aliases."""
+    raw_groups: dict[str, dict] = {}
     for f in files:
         album = _display_album(f.album)
-        key = _norm_text(album)
+        key = _similar_album_key(album)
         if not key:
             continue
-        bucket = groups.setdefault(key, {"album": album, "files": [], "folders": set(), "artists": set()})
+        bucket = raw_groups.setdefault(key, {"album": album, "files": [], "folders": set(), "artists": set(), "albums": set()})
         bucket["files"].append(f)
+        bucket["albums"].add(album)
         if f.file_path:
             try:
                 p = Path(f.file_path).resolve()
@@ -437,32 +470,82 @@ def _split_album_folder_items(files: list[MusicFile], limit: int) -> tuple[int, 
         aa = (f.album_artist or f.artist or "").strip()
         if aa:
             bucket["artists"].add(aa)
+
+    # Merge romanized groups into nearby CJK album groups when track titles/artists
+    # overlap. This catches historical `魔杰座` + `Capricorn` style splits.
+    groups = list(raw_groups.values())
+    cjk_groups = [g for g in groups if any(_has_cjk_text(a) for a in g["albums"])]
+    merged: list[dict] = []
+    consumed: set[int] = set()
+    for idx, group in enumerate(groups):
+        if idx in consumed:
+            continue
+        target = group
+        if not any(_has_cjk_text(a) for a in group["albums"]):
+            best_idx = -1
+            best_score = 0.0
+            titles = [r.title or Path(r.file_path or "").stem for r in group["files"]]
+            artists = [r.album_artist or r.artist or "" for r in group["files"]]
+            for c_idx, cjk in enumerate(cjk_groups):
+                overlap_titles = max((text_score(t, ct.title or Path(ct.file_path or "").stem) for t in titles for ct in cjk["files"]), default=0.0)
+                overlap_artists = max((text_score(a, ca.album_artist or ca.artist) for a in artists for ca in cjk["files"]), default=0.0)
+                duration_hits = 0
+                duration_pairs = 0
+                for r in group["files"]:
+                    for cr in cjk["files"]:
+                        if r.track_number and cr.track_number and r.track_number != cr.track_number:
+                            continue
+                        if r.duration and cr.duration:
+                            duration_pairs += 1
+                            if abs(float(r.duration) - float(cr.duration)) <= 5:
+                                duration_hits += 1
+                duration_score = (duration_hits / duration_pairs) if duration_pairs else 0.0
+                score = max(overlap_titles * 0.7 + overlap_artists * 0.3, duration_score * 0.75 + overlap_artists * 0.25)
+                if score > best_score:
+                    best_score, best_idx = score, c_idx
+            if best_idx >= 0 and best_score >= 0.62:
+                target = cjk_groups[best_idx]
+        if target is not group:
+            target["files"].extend(group["files"])
+            target["folders"].update(group["folders"])
+            target["artists"].update(group["artists"])
+            target["albums"].update(group["albums"])
+            consumed.add(idx)
+        else:
+            merged.append(group)
+
     items = []
     total_tracks = 0
-    for bucket in groups.values():
-        folders = sorted(bucket["folders"])
-        artists = sorted(bucket["artists"])
-        if len(folders) <= 1 and len(artists) <= 1:
-            continue
-        rows = sorted(bucket["files"], key=lambda r: (r.track_number is None, r.track_number or 9999, r.id))
+    seen_ids: set[int] = set()
+    for bucket in merged:
+        rows = sorted({r.id: r for r in bucket["files"]}.values(), key=lambda r: (r.track_number is None, r.track_number or 9999, r.id))
         if len(rows) < 2:
             continue
+        folders = sorted(bucket["folders"])
+        artists = sorted(bucket["artists"])
+        albums = sorted(bucket["albums"])
+        if len(folders) <= 1 and len(artists) <= 1 and len(albums) <= 1:
+            continue
         sample = rows[0]
-        suggested = primary_artist(sample.album_artist or sample.artist) or _library_path_album_artist(sample.file_path) or _display_album_artist(sample)
+        suggested_artist = _prefer_display_name(artists) or primary_artist(sample.album_artist or sample.artist) or _library_path_album_artist(sample.file_path) or _display_album_artist(sample)
+        suggested_album = _prefer_display_name(albums) or bucket["album"]
         total_tracks += len(rows)
+        seen_ids.update(r.id for r in rows)
         items.append({
-            "artist": suggested or UNKNOWN_ARTIST,
-            "album": bucket["album"],
+            "artist": suggested_artist or UNKNOWN_ARTIST,
+            "album": suggested_album,
             "track_count": len(rows),
             "sample_track_id": sample.id,
             "sample_path": sample.file_path,
             "has_cover": _has_cover(sample.file_path),
             "file_ids": [r.id for r in rows],
             "artists": artists,
+            "albums": albums,
             "folders": folders,
-            "suggested_album_artist": suggested,
+            "suggested_album_artist": suggested_artist,
+            "suggested_album": suggested_album,
         })
-    items.sort(key=lambda x: (len(x.get("folders") or []), x["track_count"]), reverse=True)
+    items.sort(key=lambda x: (len(x.get("folders") or []), len(x.get("albums") or []), x["track_count"]), reverse=True)
     return total_tracks, items[:limit]
 
 
