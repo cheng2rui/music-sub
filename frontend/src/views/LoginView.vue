@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
 import AppButton from '@/components/AppButton.vue'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -36,7 +37,7 @@ async function handleLogin() {
 <template>
   <div class="login-page">
     <div class="login-card">
-      <div class="login-logo"><img v-if="isIsland" src="/animal-island/nook-phone/nook1.svg" alt="" /><span v-else>🎵</span></div>
+      <div class="login-logo"><img v-if="isIsland" :src="animalIslandIcons.home" alt="" /><span v-else>🎵</span></div>
       <h1 class="login-title">音乐订阅管理</h1>
       <form @submit.prevent="handleLogin" class="login-form">
         <div class="form-group">

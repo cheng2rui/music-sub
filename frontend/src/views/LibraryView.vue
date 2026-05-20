@@ -9,6 +9,7 @@ import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
 import { usePlayerStore } from '@/stores/player.js'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const router = useRouter()
 const theme = useThemeStore()
@@ -599,8 +600,8 @@ onMounted(() => { loadStats(); loadAlbums(0) })
         <option value="year">年份</option>
       </select>
       <div class="view-toggles">
-        <button :class="['view-btn', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'"><img v-if="isIsland" src="/animal-island/nook-phone/AppIcons.svg" alt="" class="animal-view-icon" /><span v-else>▦</span></button>
-        <button :class="['view-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'"><img v-if="isIsland" src="/animal-island/nook-phone/Property-Recipes.svg" alt="" class="animal-view-icon" /><span v-else>☰</span></button>
+        <button :class="['view-btn', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'"><img v-if="isIsland" :src="animalIslandIcons.app" alt="" class="animal-view-icon" /><span v-else>▦</span></button>
+        <button :class="['view-btn', { active: viewMode === 'list' }]" @click="viewMode = 'list'"><img v-if="isIsland" :src="animalIslandIcons.recipes" alt="" class="animal-view-icon" /><span v-else>☰</span></button>
       </div>
       <AppButton variant="primary" size="sm" :loading="scanning" @click="runLibraryScan">
         扫描资料库

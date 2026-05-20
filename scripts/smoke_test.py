@@ -200,9 +200,23 @@ for d in [target.parent, target.parent.parent, backup.parent, backup.parent.pare
             raise RuntimeError("frontend index asset not found in /")
         asset_path = "/" + match.group(1)
         asset = request(args.base, asset_path, timeout=20)
-        if args.expect_version not in str(asset):
+        asset_text = str(asset)
+        if args.expect_version not in asset_text:
             raise RuntimeError(f"frontend asset {asset_path} does not contain version {args.expect_version}")
         ok("frontend asset version", asset_path)
+
+        frontend_paths = sorted(set(
+            re.findall(r'/(assets/[^"\']+\.(?:js|css))', str(html)) + [asset_path.lstrip("/")]
+        ))
+        island_ref_asset = ""
+        for rel_path in frontend_paths:
+            frontend_text = str(request(args.base, "/" + rel_path, timeout=20))
+            if "/animal-island/" in frontend_text:
+                island_ref_asset = "/" + rel_path
+                break
+        if not island_ref_asset:
+            raise RuntimeError("frontend JS/CSS assets do not reference animal island assets")
+        ok("frontend island references", island_ref_asset)
 
     if args.container and args.expect_version:
         try:

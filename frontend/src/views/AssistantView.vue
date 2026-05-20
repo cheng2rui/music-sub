@@ -13,6 +13,8 @@ import {
 } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
+import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const theme = useThemeStore()
 const isIsland = computed(() => theme.current === 'island')
@@ -300,7 +302,7 @@ onMounted(async () => {
         <button v-for="conv in conversations" :key="conv.id" class="conversation-item" :class="{ active: conv.id === currentId }" @click="selectConversation(conv.id)">
           <span>{{ conv.title || '新对话' }}</span>
           <small>{{ new Date(conv.updated_at).toLocaleString() }}</small>
-          <i @click.stop="removeConversation(conv)"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-remove-icon" /><span v-else>×</span></i>
+          <i @click.stop="removeConversation(conv)"><img v-if="isIsland" :src="animalIslandIcons.close" alt="" class="animal-remove-icon" /><span v-else>×</span></i>
         </button>
       </div>
       <details class="tool-catalog">

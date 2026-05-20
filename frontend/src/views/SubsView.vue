@@ -5,6 +5,7 @@ import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const theme = useThemeStore()
 const isIsland = computed(() => theme.current === 'island')
@@ -179,7 +180,7 @@ onMounted(loadSubs)
 
     <!-- 歌单链接解析 -->
     <div class="add-form">
-      <h3 class="animal-page-title"><img v-if="isIsland" src="/animal-island/nook-phone/Property-Chat.svg" alt="" /><span v-else>🔗</span><span>歌单链接解析</span></h3>
+      <h3 class="animal-page-title"><img v-if="isIsland" :src="animalIslandIcons.chat" alt="" /><span v-else>🔗</span><span>歌单链接解析</span></h3>
       <p class="form-hint">粘贴 QQ音乐 或 网易云 歌单链接，自动解析歌曲列表并批量订阅</p>
       <div class="form-row">
         <input

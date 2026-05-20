@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const props = defineProps({
   title: String
@@ -24,7 +25,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
       <div class="modal-box">
         <div class="modal-header">
           <h3 v-if="title">{{ title }}</h3>
-          <button class="modal-close" @click="$emit('close')"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>✕</span></button>
+          <button class="modal-close" @click="$emit('close')"><img v-if="isIsland" :src="animalIslandIcons.close" alt="" class="animal-close-icon" /><span v-else>✕</span></button>
         </div>
         <div class="modal-body">
           <slot />

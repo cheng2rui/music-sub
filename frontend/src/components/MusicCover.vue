@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 defineProps({
   src: { type: String, default: '' },
@@ -19,7 +20,7 @@ function onError() { hasError.value = true }
   <div class="cover-wrap" @mouseenter="hovered = true" @mouseleave="hovered = false">
     <img v-if="src && !hasError" :src="src" class="cover-img" @error="onError" />
     <div v-else class="cover-placeholder">
-      <img v-if="isIsland" src="/animal-island/nook-phone/AppIcons.svg" alt="" class="animal-cover-icon" />
+      <img v-if="isIsland" :src="animalIslandIcons.app" alt="" class="animal-cover-icon" />
       <span v-else>🎵</span>
     </div>
     <div v-if="showPlay && hovered" class="cover-play-overlay">

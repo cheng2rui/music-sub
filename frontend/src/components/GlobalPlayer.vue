@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { getAlbumCover, getFile } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 import { useThemeStore } from '@/stores/theme.js'
+import { animalIslandIcons } from '@/utils/animalIsland.js'
 
 const player = usePlayerStore()
 const theme = useThemeStore()
@@ -343,13 +344,13 @@ function formatDuration(seconds) {
       @click="toggleQueuePanel"
     >
       <span class="panel-icon" aria-hidden="true">
-        <img v-if="isIsland" src="/animal-island/nook-phone/Property-Recipes.svg" alt="" class="animal-player-icon" />
+        <img v-if="isIsland" :src="animalIslandIcons.recipes" alt="" class="animal-player-icon" />
         <span v-else>☰</span>
       </span>
       <span class="panel-label">{{ queueLabel }}</span>
     </button>
 
-    <button class="player-close" title="关闭播放器" @click="player.close"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>×</span></button>
+    <button class="player-close" title="关闭播放器" @click="player.close"><img v-if="isIsland" :src="animalIslandIcons.close" alt="" class="animal-close-icon" /><span v-else>×</span></button>
 
     <div v-show="!player.isCollapsed" class="mobile-progress" aria-hidden="true">
       <div :style="{ width: seekPercent + '%' }"></div>
@@ -360,7 +361,7 @@ function formatDuration(seconds) {
         <div class="now-cover-wrap">
           <img v-if="coverUrl" :src="coverUrl" class="now-cover" />
           <div v-else class="now-cover placeholder">
-            <img v-if="isIsland" src="/animal-island/nook-phone/AppIcons.svg" alt="" class="animal-now-icon" />
+            <img v-if="isIsland" :src="animalIslandIcons.app" alt="" class="animal-now-icon" />
             <span v-else>♪</span>
           </div>
         </div>
@@ -370,7 +371,7 @@ function formatDuration(seconds) {
               <strong>{{ detailTrack.title || title }}</strong>
               <span>{{ [detailTrack.artist, detailTrack.album].filter(Boolean).join(' · ') || subtitle || '未知来源' }}</span>
             </div>
-            <button class="queue-close" @click="isNowOpen = false"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>×</span></button>
+            <button class="queue-close" @click="isNowOpen = false"><img v-if="isIsland" :src="animalIslandIcons.close" alt="" class="animal-close-icon" /><span v-else>×</span></button>
           </div>
           <div class="now-meta">
             <span>{{ formatDuration(detailTrack.duration) }}</span>
@@ -401,7 +402,7 @@ function formatDuration(seconds) {
           <strong>播放队列</strong>
           <span>{{ player.queueSize }} 首</span>
         </div>
-        <button class="queue-close" @click="player.closeQueue"><img v-if="isIsland" src="/animal-island/animal_icon.svg" alt="" class="animal-close-icon" /><span v-else>×</span></button>
+        <button class="queue-close" @click="player.closeQueue"><img v-if="isIsland" :src="animalIslandIcons.close" alt="" class="animal-close-icon" /><span v-else>×</span></button>
       </div>
       <div class="queue-list">
         <button
