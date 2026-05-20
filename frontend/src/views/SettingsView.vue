@@ -175,7 +175,8 @@ async function loadTelegramWebhook(showAlert = false) {
 }
 
 async function handleSetTelegramWebhook() {
-  const base = (telegramWebhookBaseUrl.value || window.location.origin || '').trim().replace(/\/$/, '')
+  ensureWebhookToken()
+  const base = (telegramWebhookBaseUrl.value || settings.value.notify.public_base_url || window.location.origin || '').trim().replace(/\/$/, '')
   if (!base.startsWith('https://')) return alert('Telegram Webhook 需要公网 HTTPS 地址，例如 https://music.example.com')
   telegramWebhookBusy.value = 'set'
   try {
@@ -300,7 +301,15 @@ const telegramRecommendedWebhookUrl = computed(() => {
 })
 const wecomNativeCallbackUrl = computed(() => `${notifyWebhookBase.value}/webhook/wecom`)
 
-function generateWebhookToken() {
+function ensureWebhookToken() {
+  if (!settings.value.notify.webhook_token || settings.value.notify.webhook_token.includes('***')) {
+    settings.value.notify.webhook_token = randomSecret(24)
+  }
+  return settings.value.notify.webhook_token
+}
+
+function regenerateWebhookToken() {
+  if (!confirm('确认重新生成内部入站密钥？已配置的外部 webhook 地址会失效，需要重新设置。')) return
   settings.value.notify.webhook_token = randomSecret(24)
 }
 
@@ -591,25 +600,30 @@ onMounted(loadAll)
         <div class="notify-webhook-panel">
           <div class="notify-webhook-head">
             <div>
-              <strong>入站 Webhook 密钥</strong>
-              <div class="text-dim">用于保护 Music Sub 的外部消息入口。外部系统调用 /api/notify/webhook/... 或 /api/notify/incoming 时必须带 <code>?token=密钥</code>。</div>
+              <strong>通讯入口</strong>
+              <div class="text-dim">像 MoviePilot / OpenClaw 一样，通常只需要配置下面各通讯软件参数。Music Sub 会自动生成内部入站密钥并拼接回调地址。</div>
             </div>
-            <AppButton variant="ghost" size="sm" @click="generateWebhookToken">生成密钥</AppButton>
+            <AppBadge :color="notifyWebhookTokenReady ? 'green' : 'orange'">{{ notifyWebhookTokenReady ? '内部密钥已就绪' : '保存时自动生成' }}</AppBadge>
           </div>
           <div class="fields-row">
             <div class="field flex-1">
-              <label>密钥</label>
-              <input v-model="settings.notify.webhook_token" type="password" placeholder="建议点击生成；不是 Telegram Bot Token / 企业微信 Token" />
-              <small class="text-dim">这个密钥只属于 Music Sub，用来校验入站消息。保存设置后才会生效。</small>
-            </div>
-            <div class="field flex-1">
               <label>公网访问地址（可选）</label>
               <input v-model="settings.notify.public_base_url" placeholder="https://music.example.com" />
-              <small class="text-dim">用于生成 Telegram 深链按钮和 Webhook 地址；为空时使用当前浏览器地址，按钮降级为助手命令。</small>
+              <small class="text-dim">用于 Telegram Webhook 和通知深链按钮。没有公网地址也能发送通知；入站消息需要公网 HTTPS。</small>
             </div>
-            <AppButton variant="ghost" size="sm" :disabled="!notifyWebhookToken" @click="copyText(notifyWebhookToken, '入站密钥')">复制密钥</AppButton>
           </div>
-          <div class="webhook-url-list">
+          <details class="webhook-advanced">
+            <summary>高级：查看/重置自动生成的入站密钥和回调地址</summary>
+            <div class="fields-row">
+              <div class="field flex-1">
+                <label>内部入站密钥</label>
+                <input v-model="settings.notify.webhook_token" type="password" placeholder="保存设置时自动生成" />
+                <small class="text-dim">一般不用管。只有自建 webhook 转发器或需要排障时才复制它。</small>
+              </div>
+              <AppButton variant="ghost" size="sm" @click="ensureWebhookToken(); copyText(notifyWebhookToken, '入站密钥')">复制密钥</AppButton>
+              <AppButton variant="ghost" size="sm" @click="regenerateWebhookToken">重新生成</AppButton>
+            </div>
+            <div class="webhook-url-list">
             <div v-for="item in notifyWebhookUrls" :key="item.key" class="webhook-url-row">
               <div class="webhook-url-main">
                 <strong>{{ item.label }}</strong>
@@ -618,7 +632,8 @@ onMounted(loadAll)
               </div>
               <AppButton variant="ghost" size="sm" :disabled="!notifyWebhookToken" @click="copyText(item.url, item.label + '地址')">复制地址</AppButton>
             </div>
-          </div>
+            </div>
+          </details>
           <div class="webhook-help-grid">
             <div class="webhook-help-card">
               <strong>标准 JSON 示例</strong>
@@ -631,7 +646,7 @@ onMounted(loadAll)
               <small>企业微信后台配置的是这个地址；它使用下方“回调 Token / EncodingAESKey / Corp ID”验签解密，不使用上面的入站密钥。</small>
             </div>
           </div>
-          <div v-if="!notifyWebhookTokenReady" class="webhook-warning">提示：当前密钥为空或为已脱敏显示。复制真实入站地址前，建议点击“生成密钥”并保存设置。</div>
+          <div v-if="!notifyWebhookTokenReady" class="webhook-warning">提示：当前显示的是脱敏密钥。需要设置 webhook 时，点“设置 Webhook”会使用服务端保存的真实密钥；如需手动复制，请先重新生成并保存。</div>
         </div>
 
         <div class="notify-runtime-panel">
@@ -902,6 +917,9 @@ onMounted(loadAll)
 .notify-webhook-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-hover); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .notify-webhook-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .notify-webhook-head code { font-size: 12px; color: var(--accent); }
+.webhook-advanced { border: 1px dashed var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); }
+.webhook-advanced summary { cursor: pointer; color: var(--text-dim); font-weight: 700; }
+.webhook-advanced .fields-row, .webhook-advanced .webhook-url-list { margin-top: 10px; }
 .webhook-url-list { display: flex; flex-direction: column; gap: 8px; }
 .webhook-url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 10px; }
 .webhook-url-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }

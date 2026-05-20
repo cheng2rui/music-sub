@@ -1,5 +1,6 @@
 """Configuration loader."""
 import os
+import secrets
 from pathlib import Path
 from typing import Optional
 import yaml
@@ -158,6 +159,9 @@ def load_config(path: str = None) -> AppConfig:
     for name, site_data in data.get("sites", {}).items():
         sites[name] = SiteConfig(**(site_data or {}))
     data["sites"] = sites
+    data.setdefault("notify", {})
+    if not data["notify"].get("webhook_token"):
+        data["notify"]["webhook_token"] = secrets.token_urlsafe(24)
     return AppConfig(**data)
 
 
