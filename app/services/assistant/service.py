@@ -239,11 +239,85 @@ class AssistantService:
             data["error"] = {"code": error_code or "assistant_error", "message": message}
         return data
 
+
+    def _shortcut_response(self, message: str, conversation_id: int | None = None) -> dict[str, Any] | None:
+        """Fast deterministic replies for notification buttons / common shortcuts.
+
+        These commands come from Telegram notification buttons and should not need
+        a model round-trip. They intentionally stay read-only except for asking
+        the user to run an existing guarded flow.
+        """
+        text = (message or "").strip().lower()
+        aliases = {
+            "查看任务": "tasks", "任务": "tasks", "打开任务": "tasks", "下载任务": "tasks",
+            "打开音乐库": "library", "音乐库": "library", "查看音乐库": "library",
+            "打开治理": "health", "治理": "health", "音乐库治理": "health",
+            "清理扫描": "cleanup", "执行清理扫描": "cleanup",
+        }
+        kind = aliases.get(text)
+        if not kind:
+            return None
+        conv = self.db.query(AssistantConversation).filter(AssistantConversation.id == conversation_id).first() if conversation_id else None
+        if not conv:
+            conv = self.create_conversation((message or "快捷指令")[:40])
+        self._save_message(conv.id, "user", message)
+
+        if kind == "tasks":
+            result = execute_tool(self.db, "list_tasks", {"limit": 8})
+            items = result.get("items") or []
+            if not items:
+                reply = "当前没有下载任务。"
+            else:
+                lines = ["最近下载任务："]
+                for item in items[:8]:
+                    lines.append(f"#{item.get('id')} · {item.get('status') or '-'} · {item.get('name') or '-'}")
+                reply = "\n".join(lines)
+        elif kind == "library":
+            result = execute_tool(self.db, "get_library_stats", {})
+            reply = (
+                "音乐库概览：\n"
+                f"曲目：{result.get('tracks', 0)}\n"
+                f"专辑：{result.get('albums', 0)}\n"
+                f"总时长：{result.get('total_hours', 0)} 小时\n"
+                f"格式：{', '.join(f'{k}:{v}' for k, v in (result.get('formats') or {}).items()) or '-'}"
+            )
+        elif kind == "health":
+            result = execute_tool(self.db, "query_library_health", {"kind": "", "limit": 5})
+            totals = result.get("totals") or {}
+            if not totals:
+                reply = "音乐库治理状态正常，暂未发现明显问题。"
+            else:
+                labels = {
+                    "missing_cover": "缺封面", "missing_lyrics": "缺歌词", "missing_duration": "缺时长",
+                    "unknown_artist": "未知艺人", "unscraped": "未刮削", "cue_candidates": "CUE候选",
+                    "album_artist_conflicts": "专辑艺人冲突", "split_album_folders": "同专辑分裂",
+                }
+                lines = ["音乐库治理概览："]
+                for key, val in totals.items():
+                    if val:
+                        lines.append(f"{labels.get(key, key)}：{val}")
+                reply = "\n".join(lines) if len(lines) > 1 else "音乐库治理状态正常。"
+        else:  # cleanup
+            result = execute_tool(self.db, "list_tasks", {"limit": 8})
+            items = result.get("items") or []
+            reply = "清理扫描入口在任务页。最近任务："
+            if items:
+                reply += "\n" + "\n".join(f"#{i.get('id')} · {i.get('status')} · {i.get('name')}" for i in items[:5])
+            else:
+                reply += "暂无任务。"
+            reply += "\n\n如果要执行清理，请到 Web 端任务页确认；涉及删除/清理的动作仍需要显式确认。"
+
+        self._save_message(conv.id, "assistant", reply)
+        return self._chat_response(conv.id, reply, tool_calls=[{"name": f"shortcut:{kind}", "status": "done", "risk": "low"}])
+
     def chat(self, message: str, conversation_id: int | None = None) -> dict[str, Any]:
         cfg = cfg_module.config.assistant
         message = (message or "").strip()
         if not message:
             return self._chat_response(conversation_id or 0, "请输入要发送给助手的内容。", ok=False, error_code="empty_message")
+        shortcut = self._shortcut_response(message, conversation_id)
+        if shortcut:
+            return shortcut
         if not cfg.enabled:
             return self._chat_response(conversation_id or 0, "智能助手未启用，请先到设置里开启 Assistant。", ok=False, error_code="assistant_disabled")
         conv = self.db.query(AssistantConversation).filter(AssistantConversation.id == conversation_id).first() if conversation_id else None
