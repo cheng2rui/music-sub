@@ -31,6 +31,7 @@ const settings = ref({
   },
   assistant: {
     enabled: false,
+    global_chat: true,
     provider: { provider: 'openai_compatible', runtime: 'openai_compatible', base_url: '', api_key: '', model: '', temperature: 0.2, timeout_seconds: 60 },
     max_history_messages: 20,
     require_confirm_for_download: true,
@@ -798,6 +799,11 @@ onMounted(loadAll)
       <div v-show="activeSettingsTab === 'assistant'" class="settings-section">
         <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('assistant')" alt="" /><span v-else>🤖</span><span>智能助手</span></h3>
         <label class="toggle-item" style="margin-bottom:12px"><input type="checkbox" v-model="settings.assistant.enabled" /><span>启用智能助手</span></label>
+        <div class="gateway-row" style="margin-bottom:12px">
+          <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.global_chat" /><span>全局接管通知消息</span></label>
+          <AppBadge :color="settings.assistant.global_chat ? 'green' : 'orange'">{{ settings.assistant.global_chat ? '普通消息进助手' : '仅 /ai 唤醒' }}</AppBadge>
+          <small class="text-dim">MoviePilot 风格：关闭后，Telegram/QQ/微信里只有以 <code>/ai</code> 开头的消息会进入智能助手；通知和按钮不受影响。</small>
+        </div>
         <div class="fields-grid">
           <div class="field">
             <label>Provider</label>

@@ -568,6 +568,27 @@ def _looks_cancel(text: str) -> bool:
     return normalized in {"取消", "不要", "停止", "算了", "否", "no", "n", "cancel"}
 
 
+def _strip_ai_prefix(text: str) -> tuple[str, bool]:
+    stripped = (text or "").strip()
+    lower = stripped.lower()
+    if lower == "/ai":
+        return "", True
+    if lower.startswith("/ai ") or lower.startswith("/ai\n"):
+        return stripped[3:].strip(), True
+    return stripped, False
+
+
+def _is_shortcut_text(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized in {
+        "查看任务", "任务", "打开任务", "下载任务", "任务状态",
+        "打开音乐库", "音乐库", "查看音乐库", "曲库", "曲库状态", "音乐库状态",
+        "帮我看看曲库状态", "看看曲库状态",
+        "打开治理", "治理", "音乐库治理", "曲库治理",
+        "清理扫描", "执行清理扫描",
+    }
+
+
 def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str, Any]:
     """Forward a normalized inbound chat message to Music Sub Assistant and reply on the same channel.
 
@@ -586,6 +607,9 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
     log_notify_event(channel=channel, direction="inbound", text=text, user_id=user_id, target=target, status="ok" if text else "ignored", message="inbound message", raw={"incoming": incoming.meta(), "raw": incoming.raw}, db=db)
     if not text:
         return {"ok": False, "message": "empty text"}
+    text, explicit_ai = _strip_ai_prefix(text)
+    if explicit_ai and not text:
+        return {"ok": False, "message": "empty /ai message"}
     ch_cfg = getattr(cfg_module.config.notify, "wechatbot" if channel in {"wechatbot", "weichatbot"} else channel, None)
     if not ch_cfg or not getattr(ch_cfg, "assistant_chat", True):
         return {"ok": False, "message": "assistant chat disabled for channel"}
@@ -594,6 +618,16 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
     conv = _get_or_create_notify_conversation(db, channel, user_id, target)
     pending = _latest_pending_action(db, conv.id)
     reply_markup = None
+    assistant_cfg = cfg_module.config.assistant
+    if (
+        not pending
+        and not explicit_ai
+        and not getattr(assistant_cfg, "global_chat", True)
+        and not _is_shortcut_text(text)
+    ):
+        # MoviePilot-style non-global mode: ordinary chat is ignored unless the
+        # user explicitly invokes /ai.  Do not send noisy fallback messages.
+        return {"ok": True, "conversation_id": conv.id, "message": "ignored: /ai required", "ignored": True}
 
     stop_typing = _start_telegram_typing(target=target or user_id or None) if channel == "telegram" else None
     try:

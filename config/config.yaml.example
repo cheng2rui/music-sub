@@ -90,3 +90,23 @@ auth:
   username: "888"
   # password_hash is SHA-256 of the password. Default password: 888
   password_hash: "5e968ce47ce4a17e3823c29332a39d049a8d0afb08d157eb6224625f92671a51"
+
+assistant:
+  enabled: false
+  global_chat: true       # true = all channel messages enter Assistant; false = only /ai messages
+  max_history_messages: 20
+  require_confirm_for_download: true
+  require_confirm_for_delete: true
+  require_confirm_for_apply_tools: true
+  allow_online_download: false
+  allow_library_write: true
+  allow_task_delete: false
+  enabled_tools: []       # empty = all tools
+  provider:
+    provider: openai_compatible
+    runtime: openai_compatible
+    base_url: ""
+    api_key: ""
+    model: ""
+    temperature: 0.2
+    timeout_seconds: 60

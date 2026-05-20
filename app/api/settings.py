@@ -136,6 +136,7 @@ class AssistantProviderInput(BaseModel):
 
 class AssistantSettingInput(BaseModel):
     enabled: bool = False
+    global_chat: bool = True
     provider: AssistantProviderInput = AssistantProviderInput()
     max_history_messages: int = 20
     require_confirm_for_download: bool = True

@@ -128,6 +128,9 @@ class AssistantProviderConfig(BaseModel):
 
 class AssistantConfig(BaseModel):
     enabled: bool = False
+    # MoviePilot-style trigger: true = all channel text enters Assistant;
+    # false = only explicit /ai messages enter Assistant.
+    global_chat: bool = True
     provider: AssistantProviderConfig = AssistantProviderConfig()
     max_history_messages: int = 20
     require_confirm_for_download: bool = True
