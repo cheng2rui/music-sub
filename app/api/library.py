@@ -40,6 +40,7 @@ def _album_artist_group():
 def _file_dict(f: MusicFile) -> dict:
     return {
         "id": f.id,
+        "task_id": f.task_id,
         "file_path": f.file_path,
         "artist": f.artist or "",
         "album_artist": _display_album_artist(f),
