@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from sqlalchemy.orm import Session
@@ -321,6 +322,24 @@ def _send_telegram_chat_action(target: str | None = None, action: str = "typing"
         pass
 
 
+def _start_telegram_typing(target: str | None = None, *, interval: float = 4.5, max_seconds: int = 300) -> Callable[[], None]:
+    """Continuously renew Telegram typing status until stopped."""
+    stop_event = threading.Event()
+    chat_id = target or cfg_module.config.notify.telegram.chat_id
+    if not chat_id:
+        return stop_event.set
+
+    def worker() -> None:
+        deadline = time.time() + max_seconds
+        while not stop_event.is_set() and time.time() < deadline:
+            _send_telegram_chat_action(target=chat_id)
+            stop_event.wait(interval)
+
+    thread = threading.Thread(target=worker, name=f"telegram-typing-{chat_id}", daemon=True)
+    thread.start()
+    return stop_event.set
+
+
 def _send_telegram(text: str, target: str | None = None, reply_markup: dict[str, Any] | None = None) -> SendResult:
     tg = cfg_module.config.notify.telegram
     chat_id = target or tg.chat_id
@@ -576,30 +595,33 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
     pending = _latest_pending_action(db, conv.id)
     reply_markup = None
 
-    if pending and _looks_cancel(text):
-        res = service.cancel_action(pending.action_id)
-        reply = res.get("message") or "已取消。"
-    elif pending and _looks_confirm(text):
-        res = service.confirm_action(pending.action_id)
-        reply = res.get("message") or ("已执行。" if res.get("ok") else "执行失败。")
-    else:
-        if channel == "telegram":
-            _send_telegram_chat_action(target=target or user_id or None)
-        res = service.chat(text, conv.id)
-        reply = res.get("message") or "助手没有返回内容。"
-        if res.get("needs_confirm") and res.get("action_id"):
-            if channel == "telegram":
-                reply += "\n\n点击按钮确认，或直接回复“确认”/“取消”。"
-                reply_markup = {"inline_keyboard": [[
-                    {"text": "✅ 确认执行", "callback_data": "ms_confirm"},
-                    {"text": "❌ 取消", "callback_data": "ms_cancel"},
-                ]]}
-            else:
-                reply += "\n\n回复“确认”执行，或回复“取消”放弃。"
+    stop_typing = _start_telegram_typing(target=target or user_id or None) if channel == "telegram" else None
+    try:
+        if pending and _looks_cancel(text):
+            res = service.cancel_action(pending.action_id)
+            reply = res.get("message") or "已取消。"
+        elif pending and _looks_confirm(text):
+            res = service.confirm_action(pending.action_id)
+            reply = res.get("message") or ("已执行。" if res.get("ok") else "执行失败。")
+        else:
+            res = service.chat(text, conv.id)
+            reply = res.get("message") or "助手没有返回内容。"
+            if res.get("needs_confirm") and res.get("action_id"):
+                if channel == "telegram":
+                    reply += "\n\n点击按钮确认，或直接回复“确认”/“取消”。"
+                    reply_markup = {"inline_keyboard": [[
+                        {"text": "✅ 确认执行", "callback_data": "ms_confirm"},
+                        {"text": "❌ 取消", "callback_data": "ms_cancel"},
+                    ]]}
+                else:
+                    reply += "\n\n回复“确认”执行，或回复“取消”放弃。"
 
-    # Prefer explicit target; otherwise reply to inbound user id.
-    send_res = send_channel(channel, reply, target=target or user_id or None, group=group, msg_id=msg_id, reply_markup=reply_markup)
-    return {"ok": bool(res.get("ok", True)), "conversation_id": conv.id, "incoming": incoming.meta(), "assistant": res, "send": send_res.__dict__}
+        # Prefer explicit target; otherwise reply to inbound user id.
+        send_res = send_channel(channel, reply, target=target or user_id or None, group=group, msg_id=msg_id, reply_markup=reply_markup)
+        return {"ok": bool(res.get("ok", True)), "conversation_id": conv.id, "incoming": incoming.meta(), "assistant": res, "send": send_res.__dict__}
+    finally:
+        if stop_typing:
+            stop_typing()
 
 
 def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: str = "", target: str = "", group: bool | None = None, msg_id: str | None = None) -> dict[str, Any]:

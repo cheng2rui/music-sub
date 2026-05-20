@@ -196,6 +196,11 @@ def notify_status(db: Session = Depends(get_db)):
         by_channel["telegram"]["polling"] = telegram_polling_status()
     except Exception as exc:
         by_channel["telegram"]["polling"] = {"error": str(exc)}
+    try:
+        from app.services.incoming_queue import incoming_queue_status
+        by_channel["telegram"]["queue"] = incoming_queue_status()
+    except Exception as exc:
+        by_channel["telegram"]["queue"] = {"error": str(exc)}
     return {"channels": by_channel}
 
 
@@ -371,4 +376,7 @@ async def provider_webhook(channel: str, request: Request, token: str = Query(de
         body = dict(form)
 
     incoming = normalize_incoming_message(channel, body)
+    if (channel or "").lower() == "telegram":
+        from app.services.incoming_queue import enqueue_incoming_message
+        return enqueue_incoming_message(incoming)
     return handle_incoming_message(db, incoming)

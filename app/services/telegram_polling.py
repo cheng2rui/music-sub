@@ -14,7 +14,8 @@ import requests
 
 import app.config as cfg_module
 from app.db import SessionLocal
-from app.services.notify import handle_incoming_message, log_notify_event, normalize_incoming_message
+from app.services.incoming_queue import enqueue_incoming_message
+from app.services.notify import log_notify_event, normalize_incoming_message
 
 logger = logging.getLogger(__name__)
 
@@ -88,16 +89,16 @@ def _poll_loop() -> None:
                     try:
                         incoming = normalize_incoming_message("telegram", update)
                         _status["last_message_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-                        handle_incoming_message(db, incoming)
+                        enqueue_incoming_message(incoming)
                     except Exception as exc:
-                        logger.exception("Telegram polling inbound handling failed")
+                        logger.exception("Telegram polling inbound enqueue failed")
                         _status["last_error"] = _redact_error(exc)[:300]
                         try:
                             log_notify_event(
                                 channel="telegram",
                                 direction="inbound",
                                 status="error",
-                                message=f"polling inbound failed: {str(exc)[:200]}",
+                                message=f"polling inbound enqueue failed: {str(exc)[:200]}",
                                 raw=update,
                                 db=db,
                             )
