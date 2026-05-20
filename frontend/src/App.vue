@@ -84,7 +84,7 @@ function handleLogout() {
           <span>已登录</span>
           <button @click="handleLogout" class="btn-logout">退出</button>
         </div>
-        <div class="version-tag">v0.7.96</div>
+        <div class="version-tag">v0.7.97</div>
       </div>
     </aside>
 
@@ -269,26 +269,45 @@ function handleLogout() {
 
 @media (max-width: 768px) {
   .app-layout {
-    --mobile-tab-height: 54px;
-    --mobile-page-bottom: calc(var(--mobile-tab-height) + 14px + env(safe-area-inset-bottom));
-    --mobile-player-bottom: calc(var(--mobile-tab-height) + 10px + env(safe-area-inset-bottom));
+    --mobile-tab-height: 58px;
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 18px + env(safe-area-inset-bottom));
+    --mobile-player-bottom: calc(var(--mobile-tab-height) + 12px + env(safe-area-inset-bottom));
+    --mobile-topbar-height: calc(50px + env(safe-area-inset-top));
     display: block;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background:
+      radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 42%),
+      var(--bg);
   }
   .app-layout.has-player {
-    --mobile-page-bottom: calc(var(--mobile-tab-height) + 86px + env(safe-area-inset-bottom));
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 90px + env(safe-area-inset-bottom));
   }
   .sidebar { display: none; }
   .main-wrapper { height: 100%; }
   .topbar {
-    height: 50px;
-    min-height: 50px;
-    padding: 0 max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left));
-    background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-    backdrop-filter: blur(max(16px, var(--blur-strength))) saturate(1.25);
-    -webkit-backdrop-filter: blur(max(16px, var(--blur-strength))) saturate(1.25);
+    height: var(--mobile-topbar-height);
+    min-height: var(--mobile-topbar-height);
+    padding: env(safe-area-inset-top) max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left));
+    background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    box-shadow: 0 8px 24px color-mix(in srgb, #000 16%, transparent);
+    backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.35);
+    -webkit-backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.35);
   }
-  .page-title { font-size: 16px; }
-  .main-content { overflow: hidden; }
+  .page-title {
+    min-width: 0;
+    max-width: 58vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
+  }
+  .topbar-right { gap: 8px; }
+  .main-content {
+    height: calc(100dvh - var(--mobile-topbar-height));
+    overflow: hidden;
+  }
   .mobile-theme, .mobile-logout { display: flex; }
   .bottom-tabs {
     display: flex;
@@ -297,20 +316,21 @@ function handleLogout() {
     left: 0;
     right: 0;
     height: calc(var(--mobile-tab-height) + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
-    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
     align-items: stretch;
     z-index: 100;
-    padding: 5px max(8px, env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-    gap: 5px;
+    padding: 7px max(10px, env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    gap: 6px;
     overflow: hidden;
-    backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.25);
-    -webkit-backdrop-filter: blur(max(18px, var(--blur-strength))) saturate(1.25);
+    box-shadow: 0 -10px 30px color-mix(in srgb, #000 18%, transparent);
+    backdrop-filter: blur(max(22px, var(--blur-strength))) saturate(1.35);
+    -webkit-backdrop-filter: blur(max(22px, var(--blur-strength))) saturate(1.35);
   }
   .bottom-tab {
     min-width: 0;
     height: 44px;
-    border-radius: 16px;
+    border-radius: 18px;
     color: var(--text-dim);
     display: inline-flex;
     flex: 1 1 0;
@@ -318,7 +338,7 @@ function handleLogout() {
     align-items: center;
     justify-content: center;
     gap: 3px;
-    transition: color .15s, background .15s, transform .15s;
+    transition: color .15s, background .15s, transform .15s, box-shadow .15s;
     -webkit-tap-highlight-color: transparent;
   }
   .tab-icon {
@@ -337,7 +357,8 @@ function handleLogout() {
   .bottom-tab.router-link-active,
   .bottom-tab.is-active {
     color: var(--text);
-    background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent), 0 8px 18px color-mix(in srgb, var(--accent) 12%, transparent);
   }
   .bottom-tab.router-link-active .tab-icon,
   .bottom-tab.is-active .tab-icon {
@@ -348,11 +369,12 @@ function handleLogout() {
 
 @media (max-width: 430px) {
   .app-layout {
-    --mobile-tab-height: 50px;
-    --mobile-page-bottom: calc(var(--mobile-tab-height) + 12px + env(safe-area-inset-bottom));
+    --mobile-tab-height: 54px;
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 14px + env(safe-area-inset-bottom));
+    --mobile-player-bottom: calc(var(--mobile-tab-height) + 10px + env(safe-area-inset-bottom));
   }
   .app-layout.has-player {
-    --mobile-page-bottom: calc(var(--mobile-tab-height) + 82px + env(safe-area-inset-bottom));
+    --mobile-page-bottom: calc(var(--mobile-tab-height) + 84px + env(safe-area-inset-bottom));
   }
   .bottom-tabs {
     padding-left: max(6px, env(safe-area-inset-left));
