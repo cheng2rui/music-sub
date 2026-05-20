@@ -37,6 +37,10 @@ def _truncate_text(text: str, limit: int = 8000) -> str:
     return (text or "")[:limit] + "...（已截断）"
 
 
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text or "") // 3)
+
+
 def _compact_tool_result(tool_name: str, result: Any) -> Any:
     """Keep full tool results in DB, but feed only compact data back to the LLM.
 
@@ -188,11 +192,21 @@ class AssistantService:
 
     def _history_for_llm(self, conversation_id: int) -> list[dict[str, Any]]:
         cfg = cfg_module.config.assistant
+        provider_cfg = cfg.provider
         rows = self.get_messages(conversation_id)[-(cfg.max_history_messages or 20):]
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        max_tokens = max(4, int(getattr(provider_cfg, "max_context_tokens_k", 64) or 64)) * 1024
+        # Rough but practical estimate: CJK/English mixed text averages ~3 chars/token.
+        # Reserve room for tool schemas and model output so history does not crowd them out.
+        history_budget = max(2048, int(max_tokens * 0.55))
+        system_msg = {"role": "system", "content": SYSTEM_PROMPT}
+        system_tokens = _estimate_tokens(SYSTEM_PROMPT)
+        selected: list[dict[str, Any]] = []
+        used = system_tokens
+
+        rendered_rows: list[dict[str, Any]] = []
         for row in rows:
             if row.role in {"user", "assistant"}:
-                messages.append({"role": row.role, "content": row.content or ""})
+                rendered_rows.append({"role": row.role, "content": row.content or ""})
             elif row.role == "tool":
                 # Persisted tool messages are replayed as plain assistant context instead
                 # of protocol-level `tool` messages. OpenAI/Anthropic both require a
@@ -200,8 +214,16 @@ class AssistantService:
                 # page reload or a later user turn we only need the data as context.
                 raw_result = _safe_json_loads(row.tool_result_json) if row.tool_result_json else {}
                 result = _json_dumps(_compact_tool_result(row.tool_name or "", raw_result)) if raw_result else (row.content or "{}")
-                messages.append({"role": "assistant", "content": f"[工具结果 {row.tool_name or ''}]\n{_truncate_text(result)}"})
-        return messages
+                rendered_rows.append({"role": "assistant", "content": f"[工具结果 {row.tool_name or ''}]\n{_truncate_text(result)}"})
+
+        for msg in reversed(rendered_rows):
+            cost = _estimate_tokens(msg.get("content") or "")
+            if selected and used + cost > history_budget:
+                break
+            selected.append(msg)
+            used += cost
+        selected.reverse()
+        return [system_msg, *selected]
 
     def _llm_client(self) -> AssistantLLMClient:
         cfg = cfg_module.config.assistant.provider

@@ -78,6 +78,7 @@ def _worker_loop(key: str) -> None:
                 break
             wait_ms = int((time.time() - item.queued_at) * 1000)
             db = SessionLocal()
+            started_at = time.time()
             try:
                 with _lock:
                     _status.setdefault(key, {}).update({
@@ -87,12 +88,16 @@ def _worker_loop(key: str) -> None:
                         "last_started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                         "last_wait_ms": wait_ms,
                     })
-                handle_incoming_message(db, item.incoming)
+                result = handle_incoming_message(db, item.incoming)
+                duration_ms = int((time.time() - started_at) * 1000)
                 with _lock:
                     _status.setdefault(key, {}).update({
                         "processing": False,
                         "queued": q.qsize(),
                         "last_finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        "last_duration_ms": duration_ms,
+                        "last_result_ok": bool((result or {}).get("ok", True)),
+                        "last_ignored": bool((result or {}).get("ignored")),
                         "last_error": "",
                     })
             except Exception as exc:
