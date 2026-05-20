@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { searchOnlineMusic, resolveOnlineSong, downloadOnlineSong } from '@/api/index.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -17,6 +17,9 @@ const downloadMessage = ref(null)
 const resolveMessage = ref(null)
 const page = ref(1)
 const pageSize = ref(20)
+const filterSource = ref('all')
+const filterFormat = ref('all')
+const onlyDownloadable = ref(false)
 const searchLimit = 100
 const selectedSources = ref(['qq', 'migu', 'kugou', 'netease', 'kuwo'])
 const allSources = ['qq', 'migu', 'kugou', 'netease', 'kuwo']
@@ -29,14 +32,27 @@ const sourceLabels = {
   kuwo: '酷我'
 }
 
-const totalPages = computed(() => Math.max(1, Math.ceil(results.value.length / pageSize.value)))
+const formatOptions = computed(() => {
+  const values = [...new Set(results.value.map(r => String(r.format || '').toLowerCase()).filter(Boolean))]
+  return values.sort()
+})
+const filteredResults = computed(() => results.value.filter(song => {
+  if (filterSource.value !== 'all' && song.source !== filterSource.value) return false
+  if (filterFormat.value !== 'all' && String(song.format || '').toLowerCase() !== filterFormat.value) return false
+  if (onlyDownloadable.value && song.disabled) return false
+  return true
+}))
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredResults.value.length / pageSize.value)))
 const pagedResults = computed(() => {
   const start = (page.value - 1) * pageSize.value
-  return results.value.slice(start, start + pageSize.value)
+  return filteredResults.value.slice(start, start + pageSize.value)
 })
-const pageStart = computed(() => results.value.length ? (page.value - 1) * pageSize.value + 1 : 0)
-const pageEnd = computed(() => Math.min(page.value * pageSize.value, results.value.length))
+const pageStart = computed(() => filteredResults.value.length ? (page.value - 1) * pageSize.value + 1 : 0)
+const pageEnd = computed(() => Math.min(page.value * pageSize.value, filteredResults.value.length))
 const maybeMore = computed(() => results.value.length >= searchLimit)
+
+watch([filterSource, filterFormat, onlyDownloadable], () => { page.value = 1 })
+watch(totalPages, (n) => { if (page.value > n) page.value = n })
 
 function changePage(next) {
   page.value = Math.min(Math.max(1, next), totalPages.value)
@@ -133,10 +149,26 @@ async function handleDownload(song) {
       <div v-if="loading" class="empty-text">搜索中...</div>
       <div v-else-if="results.length === 0" class="empty-text">暂无结果</div>
       <div v-else class="result-summary">
-        <span>显示 {{ pageStart }}-{{ pageEnd }} / 共 {{ results.length }} 条</span>
+        <span>显示 {{ pageStart }}-{{ pageEnd }} / 筛选后 {{ filteredResults.length }} 条（总 {{ results.length }} 条）</span>
         <span v-if="maybeMore" class="more-hint">已达到本次搜索上限，可缩小关键词继续找</span>
       </div>
-      <div v-if="!loading && results.length" class="table-wrap">
+      <div v-if="!loading && results.length" class="filter-row">
+        <label>来源
+          <select v-model="filterSource">
+            <option value="all">全部</option>
+            <option v-for="s in allSources" :key="s" :value="s">{{ sourceLabels[s] }}</option>
+          </select>
+        </label>
+        <label>格式
+          <select v-model="filterFormat">
+            <option value="all">全部</option>
+            <option v-for="fmt in formatOptions" :key="fmt" :value="fmt">{{ fmt.toUpperCase() }}</option>
+          </select>
+        </label>
+        <label class="inline-check"><input type="checkbox" v-model="onlyDownloadable" /> 仅可下载</label>
+      </div>
+      <div v-if="!loading && results.length && !filteredResults.length" class="empty-text">当前筛选没有匹配结果。</div>
+      <div v-if="!loading && filteredResults.length" class="table-wrap">
         <table class="results-table">
           <thead>
             <tr>
@@ -180,7 +212,7 @@ async function handleDownload(song) {
           </tbody>
         </table>
       </div>
-      <div v-if="!loading && results.length > pageSize" class="pager">
+      <div v-if="!loading && filteredResults.length > pageSize" class="pager">
         <AppButton variant="ghost" size="sm" :disabled="page <= 1" @click="changePage(page - 1)">上一页</AppButton>
         <span>第 {{ page }} / {{ totalPages }} 页</span>
         <AppButton variant="ghost" size="sm" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</AppButton>
@@ -209,6 +241,10 @@ async function handleDownload(song) {
 .download-message.error { border-color: rgba(255, 193, 7, .35); color: var(--warning); }
 .result-summary { display: flex; justify-content: space-between; gap: 12px; color: var(--text-dim); font-size: 13px; margin-bottom: 10px; flex-wrap: wrap; }
 .more-hint { color: var(--warning); }
+.filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; color: var(--text-dim); font-size: 13px; }
+.filter-row label { display: inline-flex; align-items: center; gap: 6px; }
+.filter-row select { min-width: 96px; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-md); padding: 6px 8px; }
+.inline-check input { margin: 0; }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .results-table { width: 100%; border-collapse: collapse; }
 .results-table th {
@@ -230,7 +266,9 @@ async function handleDownload(song) {
   .source-row { gap: 8px; }
   .source-item { min-width: calc(50% - 4px); }
   .search-row { flex-direction: column; }
-  .result-summary { font-size: 12px; }
+  .result-summary, .filter-row { font-size: 12px; }
+  .filter-row { align-items: stretch; }
+  .filter-row label { flex: 1 1 120px; justify-content: space-between; }
   .results-table th, .results-table td { padding: 8px; font-size: 12px; white-space: nowrap; }
   .title-cell { min-width: 120px; max-width: 180px; white-space: normal; }
   .pager { position: sticky; bottom: 0; background: var(--bg-elevated); padding: 10px 0 2px; }
