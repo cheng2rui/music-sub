@@ -89,6 +89,11 @@ def main() -> int:
             raise RuntimeError(f"candidate confidence fields missing: {c}")
     ok("album-complete dry-run", f"existing={complete.get('existing')} candidates={len(candidates)}")
 
+    undo_probe = request(args.base, "/api/library/album-complete/undo", method="POST", token=token, data={"file_ids": [999999999], "dry_run": True})
+    if not undo_probe.get("ok") or undo_probe.get("matched") != 0:
+        raise RuntimeError(f"album complete undo dry-run probe failed: {undo_probe}")
+    ok("album-complete undo dry-run", "no-match safe")
+
     notify = request(args.base, "/api/notify/status", token=token)
     channels = sorted((notify.get("channels") or {}).keys())
     for expected in ["telegram", "wecom", "qqbot", "wechatbot"]:

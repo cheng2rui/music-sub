@@ -221,6 +221,10 @@ export const completeAlbum = (payload = {}) => authFetch('/api/library/album-com
   method: 'POST',
   body: JSON.stringify(payload)
 }).then(r => r.json())
+export const undoCompleteAlbum = (payload = {}) => authFetch('/api/library/album-complete/undo', {
+  method: 'POST',
+  body: JSON.stringify(payload)
+}).then(r => r.json())
 
 export const listLibraryTools = () => authFetch('/api/library/tools').then(r => r.json())
 export const previewLibraryTool = (toolId, payload) => authFetch(`/api/library/tools/${toolId}/preview`, {

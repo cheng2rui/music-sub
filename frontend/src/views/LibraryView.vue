@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, getLibraryTrash, restoreLibraryTrash, restoreManyLibraryTrash } from '@/api/index.js'
+import { getLibraryStats, getLibraryAlbums, getLibraryHealth, rescanLibraryMetadata, scanLibrary, rescrapeAlbums, getLibraryJob, getLibraryFiles, getAlbumTracks, getAlbumCover, getFile, rescrapeLibrary, updateFile, applyLibraryTool, completeAlbum, undoCompleteAlbum, getLibraryTrash, restoreLibraryTrash, restoreManyLibraryTrash } from '@/api/index.js'
 import LibraryToolsModal from '@/components/LibraryToolsModal.vue'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -71,6 +71,8 @@ const completingAlbum = ref(false)
 const completeAlbumMessage = ref('')
 const completeCandidates = ref([])
 const selectedCompleteIds = ref([])
+const lastCompleteUndo = ref(null)
+const undoingComplete = ref(false)
 const scanning = ref(false)
 const scanJob = ref(null)
 let scanPollTimer = null
@@ -415,6 +417,7 @@ async function completeSelectedAlbum() {
   completeAlbumMessage.value = ''
   completeCandidates.value = []
   selectedCompleteIds.value = []
+  lastCompleteUndo.value = null
   try {
     const preview = await completeAlbum({ artist, album, dry_run: true, limit: 40 })
     const candidates = preview.candidates || []
@@ -441,7 +444,10 @@ async function downloadSelectedCompleteCandidates() {
   try {
     const selectedCandidates = completeCandidates.value.filter(c => selectedCompleteIds.value.includes(c.candidate_id))
     const res = await completeAlbum({ artist, album, dry_run: false, limit: 40, candidate_ids: selectedCompleteIds.value, selected_candidates: selectedCandidates })
-    completeAlbumMessage.value = `已下载 ${res.downloaded?.length || 0} 首，失败 ${res.errors?.length || 0} 首`
+    const taskIds = (res.downloaded || []).map(x => x.task_id).filter(Boolean)
+    const fileIds = (res.downloaded || []).flatMap(x => x.file_ids || []).filter(Boolean)
+    lastCompleteUndo.value = taskIds.length || fileIds.length ? { task_ids: taskIds, file_ids: fileIds, count: res.downloaded?.length || 0 } : null
+    completeAlbumMessage.value = `已下载 ${res.downloaded?.length || 0} 首，失败 ${res.errors?.length || 0} 首${lastCompleteUndo.value ? '；如结果不对可立即撤销' : ''}`
     completeCandidates.value = []
     selectedCompleteIds.value = []
     await openAlbumModal(artist, album)
@@ -450,6 +456,24 @@ async function downloadSelectedCompleteCandidates() {
     completeAlbumMessage.value = e.message || '补齐失败'
   } finally {
     completingAlbum.value = false
+  }
+}
+
+async function undoLastCompleteDownload() {
+  if (!lastCompleteUndo.value) return
+  if (!confirm(`确认撤销刚才补齐下载的 ${lastCompleteUndo.value.count} 首？文件会移入音乐库 .trash 回收站，不会永久删除。`)) return
+  undoingComplete.value = true
+  try {
+    const res = await undoCompleteAlbum(lastCompleteUndo.value)
+    const trashed = res.result?.trashed_files || 0
+    completeAlbumMessage.value = `已撤销补齐：${trashed} 个文件已移入回收站`
+    lastCompleteUndo.value = null
+    if (selectedAlbum.value) await openAlbumModal(selectedAlbum.value.artist, selectedAlbum.value.album)
+    await loadStats()
+  } catch (e) {
+    completeAlbumMessage.value = e.message || '撤销补齐失败'
+  } finally {
+    undoingComplete.value = false
   }
 }
 
@@ -702,7 +726,10 @@ onMounted(() => { loadStats(); loadAlbums(0) })
           <AppButton variant="ghost" size="sm" :loading="scraping" @click="rescrapeAlbum">重新刮削</AppButton>
           <AppButton variant="ghost" size="sm" @click="openToolbox({ album_artist: selectedAlbum?.artist, album_name: selectedAlbum?.album })">工具箱</AppButton>
         </div>
-        <div v-if="completeAlbumMessage" class="album-complete-message">{{ completeAlbumMessage }}</div>
+        <div v-if="completeAlbumMessage" class="album-complete-message">
+          <span>{{ completeAlbumMessage }}</span>
+          <AppButton v-if="lastCompleteUndo" variant="ghost" size="sm" :loading="undoingComplete" @click="undoLastCompleteDownload">撤销刚才补齐</AppButton>
+        </div>
         <div v-if="completeCandidates.length" class="complete-candidates">
           <label v-for="c in completeCandidates" :key="c.candidate_id" class="complete-candidate-row">
             <input type="checkbox" :value="c.candidate_id" v-model="selectedCompleteIds" />
@@ -959,7 +986,7 @@ button.scan-health-chip { cursor: pointer; }
 .modal-meta { font-size: 14px; color: var(--text-dim); }
 .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .album-page-info { color: var(--text-dim); font-size: 12px; }
-.album-complete-message { padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-dim); font-size: 12px; }
+.album-complete-message { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-dim); font-size: 12px; flex-wrap: wrap; }
 .complete-candidates { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); max-height: 260px; overflow: auto; }
 .complete-candidate-row { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; align-items: start; padding: 8px; border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
 .complete-candidate-row:hover { background: var(--surface-hover); }

@@ -1232,11 +1232,67 @@ def complete_album(payload: dict = Body(default={}), db: Session = Depends(get_d
                     "duration": song.get("duration") or 0,
                 },
             })
-            downloaded.append({"title": song.get("title"), "artist": song.get("artist"), "format": song.get("format"), "source": song.get("source"), "file_path": file_path})
+            added_rows = db.query(MusicFile).filter(MusicFile.task_id == task_id).all()
+            downloaded.append({
+                "title": song.get("title"),
+                "artist": song.get("artist"),
+                "format": song.get("format"),
+                "source": song.get("source"),
+                "file_path": file_path,
+                "task_id": task_id,
+                "file_ids": [r.id for r in added_rows],
+                "library_paths": [r.file_path for r in added_rows],
+            })
         except Exception as exc:
             db.rollback()
             errors.append({"title": song.get("title"), "error": str(exc)[:300]})
     return {"ok": True, "dry_run": False, "existing": len(existing), "candidates": items, "downloaded": downloaded, "errors": errors}
+
+
+@router.post("/album-complete/undo")
+def undo_complete_album(payload: dict = Body(default={}), db: Session = Depends(get_db)):
+    """Undo album-complete downloads by moving added library files to trash.
+
+    Accepts task_ids returned by /album-complete, or explicit file_ids/file_paths.
+    This is intentionally conservative: it only touches MusicFile rows that match
+    those identifiers and uses the existing trash mode instead of permanent delete.
+    """
+    task_ids = [int(x) for x in (payload.get("task_ids") or []) if str(x).strip().isdigit()]
+    file_ids = [int(x) for x in (payload.get("file_ids") or []) if str(x).strip().isdigit()]
+    file_paths = [str(x) for x in (payload.get("file_paths") or []) if x]
+    dry_run = _bool_value(payload.get("dry_run"), False)
+    if not task_ids and not file_ids and not file_paths:
+        raise HTTPException(status_code=400, detail="task_ids, file_ids or file_paths are required")
+
+    q = db.query(MusicFile)
+    filters = []
+    if task_ids:
+        filters.append(MusicFile.task_id.in_(task_ids))
+    if file_ids:
+        filters.append(MusicFile.id.in_(file_ids))
+    if file_paths:
+        filters.append(MusicFile.file_path.in_(file_paths))
+    from sqlalchemy import or_
+    files = q.filter(or_(*filters)).all()
+    if not files:
+        return {"ok": True, "dry_run": dry_run, "matched": 0, "preview": [], "result": None, "reason": "没有匹配到可撤销的入库文件"}
+
+    from app.services.library_tools import delete_files as delete_files_tool
+    options = {"delete_files": True, "delete_empty_dirs": True, "delete_missing_db_rows": True, "mode": "trash"}
+    if dry_run:
+        preview = delete_files_tool.preview(db, files, options)
+        return {"ok": True, "dry_run": True, "matched": len(files), "preview": [item.to_dict() for item in preview.items], "summary": preview.summary}
+
+    progress = []
+    result = delete_files_tool.apply(db, files, options, lambda idx, msg: progress.append({"idx": idx, "message": msg}))
+    if task_ids:
+        from app.models import DownloadTask
+        try:
+            db.query(DownloadTask).filter(DownloadTask.id.in_(task_ids)).update({"status": "undone"}, synchronize_session=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+    return {"ok": True, "dry_run": False, "matched": len(files), "result": result, "progress": progress}
 
 
 @router.get("/trash")
