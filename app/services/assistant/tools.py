@@ -13,6 +13,7 @@ from app.version import APP_VERSION
 from app.models import DownloadTask, MusicFile, Subscription
 from app.services.searcher import search_with_chain, fetch_torrent_info_hash, download_torrent_content
 from app.services.online_music import search_online, download_online_song as _download_online_song
+from app.services.candidates import build_online_candidate, build_pt_candidate, legacy_online_item, legacy_pt_item
 from app.services.pipeline import _process_completed_torrent
 from app.downloader.qbittorrent import qb_client
 
@@ -116,41 +117,29 @@ def search_pt(db: Session, keyword: str, sites: list[str] | None = None, limit: 
     if not keyword:
         raise ToolError("缺少 keyword")
     resp = search_with_chain(keyword, sites=sites or None, limit=max(1, min(int(limit or 10), 30)))
+    candidates = [
+        build_pt_candidate(item, rank=index + 1)
+        for index, item in enumerate(resp.results[:max(1, min(int(limit or 10), 30))])
+    ]
     return {
         "queries": [q.keyword for q in resp.queries],
         "sites": [s.__dict__ for s in resp.sites],
-        "items": [
-            {
-                "site": item.torrent.site,
-                "torrent_id": item.torrent.torrent_id,
-                "title": item.torrent.title,
-                "size_gb": _size_gb(item.torrent.size),
-                "seeders": item.torrent.seeders,
-                "leechers": item.torrent.leechers,
-                "free": item.torrent.free,
-                "score": item.score,
-                "quality": item.quality,
-                "format": item.media_format,
-                "reasons": item.reasons,
-                "download_args": {
-                    "site": item.torrent.site,
-                    "torrent_id": item.torrent.torrent_id,
-                    "title": item.torrent.title,
-                },
-            }
-            for item in resp.results[:max(1, min(int(limit or 10), 30))]
-        ],
-        "instruction": "如果用户要下载某个结果，调用 download_torrent，并原样传入该结果的 download_args。",
+        "candidates": candidates,
+        "items": [legacy_pt_item(candidate) for candidate in candidates],
+        "instruction": "如果用户要下载某个结果，优先使用 candidates 里的 download_tool/download_args；旧格式 items 也保持兼容。",
     }
 
 
 def search_online_tool(db: Session, keyword: str, sources: list[str] | None = None, limit: int = 10, **kwargs) -> dict:
     if not keyword:
         raise ToolError("缺少 keyword")
-    items = search_online(keyword, sources=sources, limit=max(1, min(int(limit or 10), 20)))
-    for item in items:
-        item["download_args"] = {"song": item, "organize": True}
-    return {"items": items, "instruction": "如果用户要下载某个结果，调用 download_online_song，并原样传入该结果的 download_args。"}
+    rows = search_online(keyword, sources=sources, limit=max(1, min(int(limit or 10), 20)))
+    candidates = [build_online_candidate(item, rank=index + 1) for index, item in enumerate(rows)]
+    return {
+        "candidates": candidates,
+        "items": [legacy_online_item(candidate) for candidate in candidates],
+        "instruction": "如果用户要下载某个结果，优先使用 candidates 里的 download_tool/download_args；旧格式 items 也保持兼容。",
+    }
 
 
 def search_download_candidates(db: Session, keyword: str, sites: list[str] | None = None, sources: list[str] | None = None, limit: int = 8, **kwargs) -> dict:
@@ -176,12 +165,14 @@ def search_download_candidates(db: Session, keyword: str, sites: list[str] | Non
         online_error = "智能助手设置已关闭在线音乐候选。"
     return {
         "keyword": keyword,
-        "pt": {"items": pt.get("items") or [], "error": pt_error},
-        "online": {"items": online.get("items") or [], "error": online_error},
+        "candidates": (pt.get("candidates") or []) + (online.get("candidates") or []),
+        "pt": {"items": pt.get("items") or [], "candidates": pt.get("candidates") or [], "error": pt_error},
+        "online": {"items": online.get("items") or [], "candidates": online.get("candidates") or [], "error": online_error},
         "instruction": (
-            "下载决策：专辑、合集、整轨、CUE、PT/做种/无损包优先使用 pt.items 的 download_args 调用 download_torrent；"
-            "只有在线候选开关开启且 online.items 有结果时，单曲/快速下载才可考虑 online.items 的 download_args 调用 download_online_song。"
-            "如果用户明确说直接下载，选择最匹配候选继续调用对应下载工具；否则推荐 1-3 个候选让用户选。"
+            "下载决策：优先使用顶层 candidates 的 source_type/source/download_tool/download_args 做统一判断；"
+            "专辑、合集、整轨、CUE、PT/做种/无损包优先选择 source_type=pt；"
+            "单曲、快速下载、在线音源、用户没要求 PT 时可选择 source_type=online。"
+            "如果用户明确说直接下载，选择最匹配候选继续调用对应 download_tool；否则推荐 1-3 个候选让用户选。"
         ),
     }
 

@@ -54,18 +54,25 @@ def _compact_tool_result(tool_name: str, result: Any) -> Any:
         return {
             "queries": result.get("queries") or [],
             "sites": result.get("sites") or [],
+            "candidates": (result.get("candidates") or [])[:8],
             "items": (result.get("items") or [])[:8],
             "instruction": result.get("instruction") or "",
         }
     if tool_name == "search_online":
-        return {"items": (result.get("items") or [])[:6], "instruction": result.get("instruction") or ""}
+        return {
+            "candidates": (result.get("candidates") or [])[:6],
+            "items": (result.get("items") or [])[:6],
+            "instruction": result.get("instruction") or "",
+        }
     if tool_name == "search_download_candidates":
-        pt_items = ((result or {}).get("pt") or {}).get("items") or []
-        online_items = ((result or {}).get("online") or {}).get("items") or []
+        candidates = (result or {}).get("candidates") or []
+        pt_candidates = ((result or {}).get("pt") or {}).get("candidates") or []
+        online_candidates = ((result or {}).get("online") or {}).get("candidates") or []
         return {
             "keyword": (result or {}).get("keyword"),
-            "pt": {"items": pt_items[:5], "total": len(pt_items), "error": ((result or {}).get("pt") or {}).get("error")},
-            "online": {"items": online_items[:5], "total": len(online_items), "error": ((result or {}).get("online") or {}).get("error")},
+            "candidates": candidates[:8],
+            "pt": {"candidates": pt_candidates[:5], "total": len(pt_candidates), "error": ((result or {}).get("pt") or {}).get("error")},
+            "online": {"candidates": online_candidates[:5], "total": len(online_candidates), "error": ((result or {}).get("online") or {}).get("error")},
             "instruction": (result or {}).get("instruction") or "",
         }
     if tool_name in {"list_tasks", "list_subscriptions", "search_library"}:
