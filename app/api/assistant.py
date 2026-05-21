@@ -33,6 +33,18 @@ class AssistantProviderTestRequest(BaseModel):
     provider: dict = {}
 
 
+class AssistantActionPrepareRequest(BaseModel):
+    conversation_id: int | None = None
+    tool_name: str
+    args: dict[str, Any] = {}
+
+
+class AssistantResultActionPrepareRequest(BaseModel):
+    message_id: int
+    item_index: int
+    action_key: str = "download"
+
+
 def _conversation_row(row) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -139,6 +151,26 @@ def chat(req: AssistantChatRequest, db: Session = Depends(get_db)):
         logger.exception("assistant chat route failed")
         message = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
         return {"ok": False, "conversation_id": req.conversation_id or 0, "message": f"助手接口异常：{message}", "tool_calls": [], "needs_confirm": False, "error": {"code": "api_error", "message": message}}
+
+
+@router.post("/actions/prepare")
+def prepare_action(req: AssistantActionPrepareRequest, db: Session = Depends(get_db)):
+    try:
+        return AssistantService(db).prepare_action(req.tool_name, req.args, req.conversation_id)
+    except Exception as e:
+        logger.exception("assistant prepare action route failed")
+        message = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
+        return {"ok": False, "conversation_id": req.conversation_id or 0, "message": message, "tool_calls": [], "needs_confirm": False, "error": {"code": "api_error", "message": message}}
+
+
+@router.post("/actions/prepare-from-result")
+def prepare_action_from_result(req: AssistantResultActionPrepareRequest, db: Session = Depends(get_db)):
+    try:
+        return AssistantService(db).prepare_action_from_result(req.message_id, req.item_index, req.action_key)
+    except Exception as e:
+        logger.exception("assistant prepare action from result route failed")
+        message = _sanitize_error(e, cfg_module.config.assistant.provider.api_key)
+        return {"ok": False, "conversation_id": 0, "message": message, "tool_calls": [], "needs_confirm": False, "error": {"code": "api_error", "message": message}}
 
 
 @router.post("/actions/{action_id}/confirm")

@@ -3,7 +3,7 @@ import datetime
 import os
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.db import DB_PATH, get_db
 from app.models import DownloadTask, MusicFile
@@ -116,13 +116,12 @@ def _qb_info_to_response(torrent_hash: str, qb_info: dict) -> dict:
     }
 
 
-@router.get("/", response_model=list[DownloadTaskResponse])
-def list_tasks(status: str = "", db: Session = Depends(get_db)):
-    """List download tasks, optionally filtered by status, enriched with qBittorrent state."""
+def _list_enriched_tasks(db: Session, *, status: str = "") -> list[dict]:
+    """List DB tasks plus qB-only tasks, enriched with qBittorrent state."""
     q = db.query(DownloadTask).order_by(DownloadTask.created_at.desc())
     if status:
         q = q.filter(DownloadTask.status == status)
-    tasks = q.limit(100).all()
+    tasks = q.all()
     qb_states = qb_client.get_torrents_by_hash([
         t.torrent_hash for t in tasks
         if _is_qb_backed(t)
@@ -140,11 +139,14 @@ def list_tasks(status: str = "", db: Session = Depends(get_db)):
     try:
         cfg = __import__("app.config", fromlist=["config"]).config.qbittorrent
         torrents = qb_client.client.torrents_info(category=cfg.category)
+        external_hashes = []
         for torrent in torrents:
             torrent_hash = (torrent.hash or "").lower()
-            if not torrent_hash or torrent_hash in known_hashes:
-                continue
-            info = qb_client.get_torrents_by_hash([torrent_hash]).get(torrent_hash)
+            if torrent_hash and torrent_hash not in known_hashes:
+                external_hashes.append(torrent_hash)
+        external_states = qb_client.get_torrents_by_hash(external_hashes) if external_hashes else {}
+        for torrent_hash in external_hashes:
+            info = external_states.get(torrent_hash)
             if info:
                 result.append(_qb_info_to_response(torrent_hash, info))
     except Exception as e:
@@ -163,6 +165,90 @@ def list_tasks(status: str = "", db: Session = Depends(get_db)):
     if status:
         result = [t for t in result if t.get("status") == status]
     return sorted(result, key=lambda t: (not t.get("external_qb"), t.get("created_at") or datetime.datetime.fromtimestamp(0)), reverse=True)
+
+
+def _match_keyword(task: dict, keyword: str) -> bool:
+    if not keyword:
+        return True
+    haystack = " ".join(str(task.get(k) or "") for k in ("torrent_name", "torrent_hash", "site", "qb_state", "tracker_msg", "content_path", "save_path", "category", "tags")).lower()
+    return keyword.lower() in haystack
+
+
+@router.get("/", response_model=list[DownloadTaskResponse])
+def list_tasks(status: str = "", db: Session = Depends(get_db)):
+    """List recent download tasks for backward-compatible clients."""
+    return _list_enriched_tasks(db, status=status)[:100]
+
+
+@router.get("/page")
+def list_tasks_page(
+    status: str = "",
+    site: str = "",
+    source: str = "all",
+    keyword: str = "",
+    sort: str = "created_desc",
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """List download tasks with pagination and UI-friendly filters."""
+    rows = _list_enriched_tasks(db, status=status)
+    source = (source or "all").strip().lower()
+    site = (site or "").strip().lower()
+    keyword = (keyword or "").strip()
+
+    if source == "internal":
+        rows = [t for t in rows if not t.get("external_qb")]
+    elif source == "external_qb":
+        rows = [t for t in rows if t.get("external_qb")]
+    elif source == "qb":
+        rows = [t for t in rows if t.get("external_qb") or (t.get("torrent_hash") and not str(t.get("torrent_hash")).startswith(("online:", "SIMULATED_")))]
+    elif source == "online":
+        rows = [t for t in rows if str(t.get("torrent_hash") or "").startswith("online:")]
+
+    if site:
+        rows = [t for t in rows if str(t.get("site") or "").lower() == site]
+    if keyword:
+        rows = [t for t in rows if _match_keyword(t, keyword)]
+
+    reverse = True
+    key_name = sort
+    if sort.endswith("_asc"):
+        reverse = False
+        key_name = sort[:-4]
+    elif sort.endswith("_desc"):
+        key_name = sort[:-5]
+
+    def sort_key(task: dict):
+        if key_name == "name":
+            return str(task.get("torrent_name") or "").lower()
+        if key_name == "size":
+            return float(task.get("size") or 0)
+        if key_name == "progress":
+            return float(task.get("progress") or 0)
+        if key_name == "status":
+            return str(task.get("status") or "")
+        if key_name == "completed":
+            return task.get("completed_at") or datetime.datetime.fromtimestamp(0)
+        return task.get("created_at") or datetime.datetime.fromtimestamp(0)
+
+    rows = sorted(rows, key=sort_key, reverse=reverse)
+    total = len(rows)
+    items = rows[offset:offset + limit]
+    status_counts: dict[str, int] = {}
+    site_counts: dict[str, int] = {}
+    for row in rows:
+        status_counts[row.get("status") or ""] = status_counts.get(row.get("status") or "", 0) + 1
+        site_counts[row.get("site") or ""] = site_counts.get(row.get("site") or "", 0) + 1
+    return {
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+        "status_counts": status_counts,
+        "site_counts": site_counts,
+    }
 
 
 @router.post("/check")

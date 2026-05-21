@@ -36,7 +36,7 @@ def search_torrents_v2(req: SearchRequest):
     """Run the new MusicSearchChain and return structured results + per-site status.
 
     Front-ends can use this to render scored cards, format/quality badges,
-    and per-site search progress (similar to MoviePilot's resource search UI).
+    and per-site search progress.
     """
     response = search_with_chain(
         req.keyword,

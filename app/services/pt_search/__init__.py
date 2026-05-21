@@ -1,6 +1,6 @@
 """MusicSub PT search chain.
 
-灵感来自 MoviePilot 的搜索链：QueryPlanner -> SiteExecutor -> Normalizer -> Ranker。
+PT 搜索链：QueryPlanner -> SiteExecutor -> Normalizer -> Ranker。
 模块对外暴露轻量接口，旧的 ``app.services.searcher`` 仍然可以继续工作。
 """
 

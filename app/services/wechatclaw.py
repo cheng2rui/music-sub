@@ -1,6 +1,6 @@
 """WeChat Claw / iLink client and polling manager.
 
-A compact Music Sub adaptation of MoviePilot's WechatClawBot: QR login state,
+A compact Music Sub WeChat Claw/iLink adapter: QR login state,
 long polling, text send, and inbound messages bridged into Assistant.
 """
 from __future__ import annotations

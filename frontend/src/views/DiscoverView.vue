@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getPersonalized, getLibraryStats, getTasks, getLibraryHealth, getNotifyStatus, getNotifyEvents, getScheduler, getLibraryAlbums, listLibraryJobs } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
@@ -41,7 +41,10 @@ const featuredSong = computed(() => recommend.value[0] || null)
 const recommendedSongs = computed(() => recommend.value.slice(0, 12))
 const recentTasks = computed(() => tasks.value.slice(0, 4))
 const activeTaskCount = computed(() => tasks.value.filter(t => ['downloading', 'organized', 'downloaded'].includes(t.status)).length)
-const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && ['recommend', 'tasks', 'albums', 'events'].includes(m.key)))
+const masonryModuleKeys = ['recommend', 'tasks', 'albums', 'events']
+const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && masonryModuleKeys.includes(m.key)))
+const draggedModuleKey = ref('')
+const discoverAvailableHeight = ref(560)
 const libraryTotal = computed(() => libraryStats.value.total_files || libraryStats.value.tracks || 0)
 const scrapedRate = computed(() => {
   const total = libraryTotal.value
@@ -97,7 +100,7 @@ async function loadAll() {
   loading.value = true
   try {
     const [rec, stats, taskList, healthRes, notifyRes, eventsRes, schedulerRes, albumsRes, jobsRes] = await Promise.allSettled([
-      getPersonalized(),
+      getPersonalized({ limit: 24, seed: Date.now() }),
       getLibraryStats(),
       getTasks(),
       getLibraryHealth({ limit: 1 }),
@@ -127,8 +130,19 @@ function loadHomeModules() {
   try {
     const stored = JSON.parse(localStorage.getItem(HOME_MODULE_STORAGE_KEY) || '[]')
     if (Array.isArray(stored)) {
-      const storedMap = new Map(stored.map(item => [item.key, item.enabled]))
-      return defaultHomeModules.map(item => ({ ...item, enabled: storedMap.has(item.key) ? !!storedMap.get(item.key) : item.enabled }))
+      const defaults = new Map(defaultHomeModules.map(item => [item.key, item]))
+      const seen = new Set()
+      const ordered = []
+      for (const item of stored) {
+        const source = defaults.get(item.key)
+        if (!source) continue
+        seen.add(item.key)
+        ordered.push({ ...source, enabled: item.enabled !== undefined ? !!item.enabled : source.enabled })
+      }
+      for (const item of defaultHomeModules) {
+        if (!seen.has(item.key)) ordered.push({ ...item })
+      }
+      return ordered
     }
   } catch (e) {
     console.warn('Failed to load discover module settings', e)
@@ -136,13 +150,52 @@ function loadHomeModules() {
   return defaultHomeModules.map(item => ({ ...item }))
 }
 
-function saveHomeModules() {
+function persistHomeModules() {
   localStorage.setItem(HOME_MODULE_STORAGE_KEY, JSON.stringify(homeModules.value.map(({ key, enabled }) => ({ key, enabled }))))
+}
+
+function saveHomeModules() {
+  persistHomeModules()
   showHomeSettings.value = false
 }
 
 function resetHomeModules() {
   homeModules.value = defaultHomeModules.map(item => ({ ...item }))
+}
+
+function moveHomeModule(fromKey, toKey) {
+  if (!fromKey || !toKey || fromKey === toKey) return
+  const fromIndex = homeModules.value.findIndex(item => item.key === fromKey)
+  const toIndex = homeModules.value.findIndex(item => item.key === toKey)
+  if (fromIndex < 0 || toIndex < 0) return
+  const next = [...homeModules.value]
+  const [item] = next.splice(fromIndex, 1)
+  next.splice(toIndex, 0, item)
+  homeModules.value = next
+  persistHomeModules()
+}
+
+function onModuleDragStart(event, key) {
+  draggedModuleKey.value = key
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', key)
+}
+
+function onModuleDrop(event, key) {
+  const source = event.dataTransfer.getData('text/plain') || draggedModuleKey.value
+  moveHomeModule(source, key)
+  draggedModuleKey.value = ''
+}
+
+function onModuleDragEnd() {
+  draggedModuleKey.value = ''
+}
+
+function updateDiscoverAvailableHeight() {
+  const viewport = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720
+  const el = document.querySelector('.discover')
+  const top = el?.getBoundingClientRect?.().top || 0
+  discoverAvailableHeight.value = Math.max(420, Math.floor(viewport - top - 28))
 }
 
 function isHomeModuleEnabled(key) {
@@ -231,7 +284,17 @@ function playLocalSong(item) {
   else player.playTrack(normalizePlayable(item))
 }
 
-onMounted(loadAll)
+onMounted(() => {
+  loadAll()
+  nextTick(updateDiscoverAvailableHeight)
+  window.addEventListener('resize', updateDiscoverAvailableHeight)
+  window.visualViewport?.addEventListener('resize', updateDiscoverAvailableHeight)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateDiscoverAvailableHeight)
+  window.visualViewport?.removeEventListener('resize', updateDiscoverAvailableHeight)
+})
 </script>
 
 <template>
@@ -311,98 +374,119 @@ onMounted(loadAll)
       </article>
     </section>
 
-    <div v-if="visibleMasonryModules.length" class="dashboard-grid" :class="{ single: visibleMasonryModules.length === 1 }">
-      <section v-if="isHomeModuleEnabled('recommend')" class="panel panel-wide">
-        <div class="section-header">
-          <div>
-            <h2>今日推荐</h2>
-            <p>纯本地推荐：最近入库、高频艺人和随机发现。</p>
-          </div>
-          <AppButton variant="ghost" size="sm" :loading="loading" @click="loadAll">换一批</AppButton>
-        </div>
-        <div v-if="loading" class="loading-text">加载中...</div>
-        <div v-else-if="recommendedSongs.length === 0" class="empty-state">本地音乐库为空，暂无推荐</div>
-        <div v-else class="song-card-grid">
-          <article v-for="item in recommendedSongs" :key="item.file_id || item.title + item.artist" class="song-card" @click="playLocalSong(item)">
-            <MusicCover :src="item.cover" class="song-cover" show-play />
-            <div class="song-card-info">
-              <div class="song-card-title">{{ item.title }}</div>
-              <div class="song-card-sub">{{ item.artist }}</div>
-              <div v-if="item.album" class="song-card-album">{{ item.album }}</div>
-              <div v-if="item.reason" class="song-reason">{{ item.reason }}</div>
-            </div>
-            <div class="song-card-meta">
-              <span>{{ item.format || 'LOCAL' }}</span>
-              <small>{{ formatDuration(item.duration) }}</small>
-            </div>
-          </article>
-        </div>
-      </section>
+    <div
+      v-if="visibleMasonryModules.length"
+      class="dashboard-masonry"
+      :style="{ '--discover-available-height': `${discoverAvailableHeight}px` }"
+    >
+      <section
+        v-for="module in visibleMasonryModules"
+        :key="module.key"
+        :class="['panel', 'masonry-panel', `module-${module.key}`, { dragging: draggedModuleKey === module.key }]"
+        @dragover.prevent
+        @drop.prevent="onModuleDrop($event, module.key)"
+      >
+        <span
+          class="drag-handle"
+          title="拖动调整顺序"
+          aria-label="拖动调整顺序"
+          role="button"
+          draggable="true"
+          @dragstart.stop="onModuleDragStart($event, module.key)"
+          @dragend.stop="onModuleDragEnd"
+        >⋮⋮</span>
 
-      <section v-if="isHomeModuleEnabled('tasks')" class="panel">
-        <div class="section-header compact">
-          <div>
-            <h2>最近任务</h2>
-            <p>下载与入库进度速览。</p>
-          </div>
-          <AppButton variant="ghost" size="sm" @click="go('/tasks')">查看</AppButton>
-        </div>
-        <div v-if="recentTasks.length === 0" class="empty-state">暂无近期任务</div>
-        <div v-else class="task-list">
-          <article v-for="task in recentTasks" :key="task.id" class="mini-task">
-            <div class="mini-task-head">
-              <strong :title="task.torrent_name">{{ task.torrent_name }}</strong>
-              <AppBadge :color="statusLabel(task.status).color">{{ statusLabel(task.status).label }}</AppBadge>
-            </div>
-            <small>{{ task.site || (task.external_qb ? 'qB' : '-') }} · {{ formatDate(task.created_at) }}</small>
-          </article>
-        </div>
-      </section>
-
-      <section v-if="isHomeModuleEnabled('albums')" class="panel">
-        <div class="section-header compact">
-          <div>
-            <h2>最近入库</h2>
-            <p>最近更新的专辑。</p>
-          </div>
-          <AppButton variant="ghost" size="sm" @click="go('/library')">曲库</AppButton>
-        </div>
-        <div v-if="recentAlbums.length === 0" class="empty-state">暂无最近入库</div>
-        <div v-else class="album-mini-list">
-          <article v-for="album in recentAlbums" :key="`${album.album_artist || album.artist}-${album.album}`" class="mini-album" @click="openAlbum(album)">
-            <MusicCover :src="album.cover" class="mini-album-cover" />
+        <template v-if="module.key === 'recommend'">
+          <div class="section-header">
             <div>
-              <strong>{{ album.album || '未知专辑' }}</strong>
-              <small>{{ album.album_artist || album.artist || '未知艺人' }} · {{ album.track_count || album.count || 0 }} 首</small>
+              <h2>今日推荐</h2>
+              <p>纯本地推荐：最近入库、高频艺人和随机发现。</p>
             </div>
-          </article>
-        </div>
-      </section>
-
-      <section v-if="isHomeModuleEnabled('events')" class="panel">
-        <div class="section-header compact">
-          <div>
-            <h2>最近事件</h2>
-            <p>下载、刮削、通知和错误记录。</p>
+            <AppButton variant="ghost" size="sm" :loading="loading" @click="loadAll">换一批</AppButton>
           </div>
-          <AppButton variant="ghost" size="sm" @click="go('/settings')">通知</AppButton>
-        </div>
-        <div v-if="notifyEvents.length === 0" class="empty-state">暂无事件记录</div>
-        <div v-else class="event-list">
-          <article v-for="ev in notifyEvents.slice(0, 8)" :key="ev.id" :class="['event-row', eventTone(ev)]">
-            <div class="event-dot"></div>
-            <div class="event-main">
-              <div class="event-head">
-                <strong>{{ eventLabel(ev) }}</strong>
-                <small>{{ formatDate(ev.created_at) }}</small>
+          <div v-if="loading" class="loading-text">加载中...</div>
+          <div v-else-if="recommendedSongs.length === 0" class="empty-state">本地音乐库为空，暂无推荐</div>
+          <div v-else class="song-card-grid">
+            <article v-for="item in recommendedSongs" :key="item.file_id || item.title + item.artist" class="song-card" @click="playLocalSong(item)">
+              <MusicCover :src="item.cover" class="song-cover" show-play />
+              <div class="song-card-info">
+                <div class="song-card-title">{{ item.title }}</div>
+                <div class="song-card-sub">{{ item.artist }}</div>
+                <div v-if="item.album" class="song-card-album">{{ item.album }}</div>
+                <div v-if="item.reason" class="song-reason">{{ item.reason }}</div>
               </div>
-              <p>{{ eventPreview(ev) }}</p>
-              <small class="event-meta">{{ ev.channel }} · {{ ev.direction }} · {{ ev.status }}</small>
-            </div>
-          </article>
-        </div>
-      </section>
+              <div class="song-card-meta">
+                <span>{{ item.format || 'LOCAL' }}</span>
+                <small>{{ formatDuration(item.duration) }}</small>
+              </div>
+            </article>
+          </div>
+        </template>
 
+        <template v-else-if="module.key === 'tasks'">
+          <div class="section-header compact">
+            <div>
+              <h2>最近任务</h2>
+              <p>下载与入库进度速览。</p>
+            </div>
+            <AppButton variant="ghost" size="sm" @click="go('/tasks')">查看</AppButton>
+          </div>
+          <div v-if="recentTasks.length === 0" class="empty-state">暂无近期任务</div>
+          <div v-else class="task-list">
+            <article v-for="task in recentTasks" :key="task.id" class="mini-task">
+              <div class="mini-task-head">
+                <strong :title="task.torrent_name">{{ task.torrent_name }}</strong>
+                <AppBadge :color="statusLabel(task.status).color">{{ statusLabel(task.status).label }}</AppBadge>
+              </div>
+              <small>{{ task.site || (task.external_qb ? 'qB' : '-') }} · {{ formatDate(task.created_at) }}</small>
+            </article>
+          </div>
+        </template>
+
+        <template v-else-if="module.key === 'albums'">
+          <div class="section-header compact">
+            <div>
+              <h2>最近入库</h2>
+              <p>最近更新的专辑。</p>
+            </div>
+            <AppButton variant="ghost" size="sm" @click="go('/library')">曲库</AppButton>
+          </div>
+          <div v-if="recentAlbums.length === 0" class="empty-state">暂无最近入库</div>
+          <div v-else class="album-mini-list">
+            <article v-for="album in recentAlbums" :key="`${album.album_artist || album.artist}-${album.album}`" class="mini-album" @click="openAlbum(album)">
+              <MusicCover :src="album.cover" class="mini-album-cover" />
+              <div>
+                <strong>{{ album.album || '未知专辑' }}</strong>
+                <small>{{ album.album_artist || album.artist || '未知艺人' }} · {{ album.track_count || album.count || 0 }} 首</small>
+              </div>
+            </article>
+          </div>
+        </template>
+
+        <template v-else-if="module.key === 'events'">
+          <div class="section-header compact">
+            <div>
+              <h2>最近事件</h2>
+              <p>下载、刮削、通知和错误记录。</p>
+            </div>
+            <AppButton variant="ghost" size="sm" @click="go('/settings')">通知</AppButton>
+          </div>
+          <div v-if="notifyEvents.length === 0" class="empty-state">暂无事件记录</div>
+          <div v-else class="event-list">
+            <article v-for="ev in notifyEvents.slice(0, 8)" :key="ev.id" :class="['event-row', eventTone(ev)]">
+              <div class="event-dot"></div>
+              <div class="event-main">
+                <div class="event-head">
+                  <strong>{{ eventLabel(ev) }}</strong>
+                  <small>{{ formatDate(ev.created_at) }}</small>
+                </div>
+                <p>{{ eventPreview(ev) }}</p>
+                <small class="event-meta">{{ ev.channel }} · {{ ev.direction }} · {{ ev.status }}</small>
+              </div>
+            </article>
+          </div>
+        </template>
+      </section>
     </div>
 
     <AppModal v-if="showHomeSettings" title="编辑首页" @close="showHomeSettings = false">
@@ -487,8 +571,14 @@ onMounted(loadAll)
 .quick-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-md); background: var(--accent-soft); font-size: 20px; }
 .quick-card h3 { margin: 0 0 4px; font-size: 14px; }
 .quick-card p { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.35; }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 16px; align-items: start; }
-.dashboard-grid.single { grid-template-columns: 1fr; }
+.dashboard-masonry { column-count: 2; column-gap: 16px; column-fill: balance; min-height: min(var(--discover-available-height), 900px); }
+.masonry-panel { position: relative; display: inline-block; break-inside: avoid; page-break-inside: avoid; margin: 0 0 16px; vertical-align: top; transition: transform .15s ease, opacity .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.masonry-panel.dragging { opacity: .55; transform: scale(.995); border-color: var(--accent); box-shadow: 0 18px 42px color-mix(in srgb, var(--accent) 18%, transparent); }
+.module-recommend { width: 100%; }
+.drag-handle { position: absolute; top: 10px; right: 10px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-muted); cursor: grab; opacity: 0; transition: opacity .15s ease, background .15s ease, border-color .15s ease; }
+.masonry-panel:hover .drag-handle, .drag-handle:focus-visible { opacity: 1; }
+.drag-handle:hover { background: var(--surface-hover); border-color: var(--border); color: var(--text); }
+.drag-handle:active { cursor: grabbing; }
 .panel { width: 100%; padding: 16px; min-width: 0; }
 .panel-wide { min-width: 0; }
 .section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -524,7 +614,7 @@ onMounted(loadAll)
 .home-settings-actions { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 1180px) {
   .hero-card { grid-template-columns: 1fr; }
-  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-masonry { column-count: 1; min-height: 0; }
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .system-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .health-chip-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -545,6 +635,8 @@ onMounted(loadAll)
   .quick-grid { grid-template-columns: 1fr; gap: 10px; }
   .quick-card { padding: 12px; }
   .panel { padding: 12px; border-radius: var(--radius-lg); }
+  .masonry-panel { margin-bottom: 12px; }
+  .drag-handle { opacity: .7; top: 8px; right: 8px; }
   .section-header { align-items: flex-start; margin-bottom: 10px; }
   .section-header h2 { font-size: 18px; }
   .section-header p { font-size: 12px; }

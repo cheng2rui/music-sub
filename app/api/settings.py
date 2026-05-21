@@ -39,6 +39,7 @@ class QBSettingInput(BaseModel):
     category: str = "music"
     save_path: str = "/downloads/music"
     tag: str = "music-sub"
+    monitor_tagged_torrents: bool = True
 
 
 class PathsSettingInput(BaseModel):
@@ -118,6 +119,8 @@ class NotifySettingInput(BaseModel):
     webhook_token: str = ""
     public_base_url: str = ""
     templates: dict[str, str] = {}
+    download_complete_batch_delay_seconds: int = 20
+    scrape_complete_batch_delay_seconds: int = 20
     telegram: TelegramNotifyInput = TelegramNotifyInput()
     wecom: WeComNotifyInput = WeComNotifyInput()
     qqbot: QQBotNotifyInput = QQBotNotifyInput()
@@ -143,6 +146,7 @@ class AssistantSettingInput(BaseModel):
     max_history_messages: int = 20
     max_iterations: int = 4
     tool_timeout_seconds: int = 120
+    incoming_queue_idle_timeout_seconds: int = 300
     verbose: bool = False
     wake_interval_hours: int = 0
     require_confirm_for_download: bool = True
@@ -178,6 +182,8 @@ def get_settings():
             webhook_token=cfg_module.config.notify.webhook_token,
             public_base_url=cfg_module.config.notify.public_base_url,
             templates=cfg_module.config.notify.templates,
+            download_complete_batch_delay_seconds=cfg_module.config.notify.download_complete_batch_delay_seconds,
+            scrape_complete_batch_delay_seconds=cfg_module.config.notify.scrape_complete_batch_delay_seconds,
             telegram=TelegramNotifyInput(**cfg_module.config.notify.telegram.model_dump()),
             wecom=WeComNotifyInput(**cfg_module.config.notify.wecom.model_dump()),
             qqbot=QQBotNotifyInput(**cfg_module.config.notify.qqbot.model_dump()),

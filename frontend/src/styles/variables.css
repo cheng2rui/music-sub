@@ -1,5 +1,5 @@
 /*
- * Theme tokens inspired by MoviePilot's Vuetify theme model.
+ * Theme tokens for Music Sub UI.
  * Keep this framework-neutral: components consume CSS variables only.
  */
 
@@ -70,7 +70,7 @@
   --radius-xl: 22px;
 }
 
-/* ===== MoviePilot purple ===== */
+/* ===== Purple theme ===== */
 [data-theme="purple"] {
   color-scheme: dark;
   --bg: #28243d;
@@ -533,7 +533,7 @@
   box-shadow: 0 8px 24px rgba(114, 93, 66, 0.18);
 }
 
-/* Glass themes: consistent blur surface like MoviePilot transparent theme */
+/* Glass themes: consistent blur surface for transparent themes */
 [data-theme="dark-glass"] .sidebar,
 [data-theme="dark-glass"] .topbar,
 [data-theme="dark-glass"] .bottom-tabs,

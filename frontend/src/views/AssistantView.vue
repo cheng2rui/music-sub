@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   getAssistantCapabilities,
-  getAssistantActivity,
   getAssistantConversations,
   getAssistantMessages,
   sendAssistantMessage,
+  prepareAssistantAction,
+  prepareAssistantResultAction,
   confirmAssistantAction,
   cancelAssistantAction,
   createAssistantConversation,
@@ -26,22 +27,27 @@ const loading = ref(false)
 const caps = ref(null)
 const errorText = ref('')
 const pendingAction = ref(null)
-const activity = ref([])
 const retryDraft = ref('')
+const messagesEl = ref(null)
+const quickPrompts = [
+  { label: '失败任务', text: '/tasks failed' },
+  { label: '曲库健康', text: '/health' },
+  { label: '缺歌词', text: '/health missing_lyrics' },
+  { label: '搜索 FLAC', text: '搜索 周杰伦 FLAC，PT 和在线都看一下' },
+  { label: '最近日志', text: '读取最近日志，帮我看有没有错误' },
+]
 
 const enabled = computed(() => caps.value?.enabled)
-const groupedTools = computed(() => {
-  const groups = {}
-  for (const tool of caps.value?.tool_catalog || []) {
-    const group = tool.group || '其他'
-    groups[group] = groups[group] || []
-    groups[group].push(tool)
-  }
-  return groups
-})
+const currentConversation = computed(() => conversations.value.find(c => c.id === currentId.value))
 
 function showError(error, fallback = '操作失败') {
   errorText.value = error?.message || fallback
+}
+
+async function scrollToBottom() {
+  await nextTick()
+  const el = messagesEl.value
+  if (el) el.scrollTop = el.scrollHeight
 }
 
 async function loadCaps() {
@@ -66,13 +72,6 @@ async function loadMessages() {
   }
   try { messages.value = await getAssistantMessages(currentId.value) }
   catch (e) { showError(e, '加载消息失败') }
-}
-
-async function loadActivity() {
-  try {
-    const data = await getAssistantActivity(30)
-    activity.value = data.items || []
-  } catch (e) { console.warn('load assistant activity failed', e) }
 }
 
 async function newConversation() {
@@ -106,6 +105,7 @@ async function selectConversation(id) {
 
 function pushLocal(role, content, extra = {}) {
   messages.value.push({ id: `local-${Date.now()}-${Math.random()}`, role, content, created_at: new Date().toISOString(), ...extra })
+  scrollToBottom()
 }
 
 async function sendMessage(textOverride = '') {
@@ -125,7 +125,6 @@ async function sendMessage(textOverride = '') {
     retryDraft.value = ''
     await loadConversations()
     await loadMessages()
-    await loadActivity()
   } catch (e) {
     input.value = text
     if (e?.payload?.conversation_id) {
@@ -134,7 +133,6 @@ async function sendMessage(textOverride = '') {
       pendingAction.value = null
       await loadConversations()
       await loadMessages()
-      await loadActivity()
     }
     showError(e, '发送失败')
   } finally {
@@ -147,6 +145,17 @@ function retryLastMessage() {
   sendMessage(text)
 }
 
+function useQuickPrompt(text) {
+  if (loading.value || !enabled.value) return
+  input.value = text
+  scrollToBottom()
+}
+
+function sendQuickPrompt(text) {
+  if (loading.value || !enabled.value) return
+  sendMessage(text)
+}
+
 async function handleConfirm() {
   if (!pendingAction.value?.id) return
   loading.value = true
@@ -155,7 +164,6 @@ async function handleConfirm() {
     pushLocal('assistant', res.message || (res.ok ? '已执行。' : '执行失败。'))
     pendingAction.value = null
     await loadMessages()
-    await loadActivity()
   } catch (e) {
     showError(e, '确认失败')
   } finally {
@@ -170,7 +178,6 @@ async function handleCancel() {
     await cancelAssistantAction(pendingAction.value.id)
     pendingAction.value = null
     await loadMessages()
-    await loadActivity()
   } catch (e) { showError(e, '取消失败') }
   finally { loading.value = false }
 }
@@ -196,8 +203,8 @@ function formatSizeGb(value) {
 
 function toolItems(message) {
   const parsed = parseToolResult(message)
+  if (Array.isArray(parsed?.candidates)) return parsed.candidates
   if (Array.isArray(parsed?.items)) return parsed.items
-  if (message.tool_name === 'complete_album' && Array.isArray(parsed?.candidates)) return parsed.candidates
   if (message.tool_name === 'complete_album' && Array.isArray(parsed?.downloaded)) return parsed.downloaded
   return []
 }
@@ -225,46 +232,78 @@ function cardMeta(item) {
   return parts.join(' · ')
 }
 
+function cardBadges(item) {
+  const badges = []
+  if (item.site || item.source) badges.push({ text: item.site || item.source, color: 'blue' })
+  if (item.score !== undefined) badges.push({ text: `评分 ${item.score}`, color: 'green' })
+  if (item.status) badges.push({ text: item.status, color: item.status === 'failed' ? 'red' : 'dim' })
+  if (item.source_type) badges.push({ text: item.source_type, color: item.source_type === 'pt' ? 'purple' : 'orange' })
+  return badges
+}
+
 function itemActions(message, item) {
+  if (item.download_tool && item.download_args) {
+    return [
+      { key: 'result-action', label: item.download_tool === 'download_torrent' ? '下载 PT' : '下载', variant: 'primary', actionKey: 'download' },
+      { key: 'result-action', label: '订阅关键词', variant: 'ghost', actionKey: 'subscribe-keyword' }
+    ]
+  }
   if (message.tool_name === 'search_online') {
     return [
-      { key: 'download-online', label: item.url ? '下载' : '解析下载', variant: 'primary' },
-      { key: 'subscribe-song', label: '订阅歌曲', variant: 'ghost' },
-      { key: 'search-pt', label: '搜 PT', variant: 'ghost' }
+      { key: 'result-action', label: item.url ? '下载' : '解析下载', variant: 'primary', actionKey: 'download' },
+      { key: 'result-action', label: '订阅歌曲', variant: 'ghost', actionKey: 'subscribe-song' },
+      { key: 'result-action', label: '搜 PT', variant: 'ghost', actionKey: 'search-pt' }
     ]
   }
   if (message.tool_name === 'search_pt') {
     return [
-      { key: 'download-pt', label: '下载', variant: 'primary' },
-      { key: 'subscribe-keyword', label: '订阅关键词', variant: 'ghost' }
+      { key: 'result-action', label: '下载', variant: 'primary', actionKey: 'download' },
+      { key: 'result-action', label: '订阅关键词', variant: 'ghost', actionKey: 'subscribe-keyword' }
     ]
   }
   if (message.tool_name === 'search_library') {
     return [
-      { key: 'complete-album-preview', label: '预览补齐', variant: 'ghost' },
-      { key: 'rescrape-album', label: '重刮专辑', variant: 'ghost' }
+      { key: 'result-action', label: '预览补齐', variant: 'ghost', actionKey: 'complete-album-preview' },
+      { key: 'result-action', label: '重刮专辑', variant: 'ghost', actionKey: 'rescrape-album' }
     ]
   }
   if (message.tool_name === 'complete_album') {
     return [
-      { key: 'download-online', label: item.url ? '下载此曲' : '解析下载', variant: 'primary' }
+      { key: 'result-action', label: item.url ? '下载此曲' : '解析下载', variant: 'primary', actionKey: 'download' }
     ]
   }
   if (message.tool_name === 'query_library_health') {
     return [
-      { key: 'rescrape-album', label: '重刮专辑', variant: 'ghost' }
+      { key: 'result-action', label: '重刮专辑', variant: 'ghost', actionKey: 'rescrape-album' }
     ]
   }
   return []
 }
 
-function sendItemAction(message, item, idx, action) {
+async function sendItemAction(message, item, idx, action) {
   const title = cardTitle(item)
   const artist = item.artist || item.album_artist || ''
   const payload = JSON.stringify(item.download_args || item, null, 2)
+  if ((action.key === 'result-action' && Number.isInteger(Number(message.id))) || (action.key === 'direct-tool' && action.toolName)) {
+    loading.value = true
+    errorText.value = ''
+    try {
+      const res = action.key === 'result-action'
+        ? await prepareAssistantResultAction(Number(message.id), idx, action.actionKey || 'download')
+        : await prepareAssistantAction(action.toolName, action.args || {}, currentId.value)
+      currentId.value = res.conversation_id || currentId.value
+      if (res.message) pushLocal('assistant', res.message)
+      pendingAction.value = res.needs_confirm ? { id: res.action_id, calls: res.tool_calls || [] } : null
+      await loadConversations()
+      await loadMessages()
+    } catch (e) {
+      showError(e, '创建操作失败')
+    } finally {
+      loading.value = false
+    }
+    return
+  }
   const prompts = {
-    'download-online': `下载这个在线音乐结果（来自 ${message.tool_name} 第 ${idx + 1} 个）：\n${payload}`,
-    'download-pt': `下载这个 PT 搜索结果（来自 ${message.tool_name} 第 ${idx + 1} 个）：\n${payload}`,
     'subscribe-song': `创建歌曲订阅：${[title, artist].filter(Boolean).join(' ')}，质量优先 FLAC。`,
     'subscribe-keyword': `创建关键词订阅：${title}，质量优先 FLAC。`,
     'search-pt': `搜索 PT 资源：${[title, artist].filter(Boolean).join(' ')}，质量优先 FLAC。`,
@@ -276,14 +315,14 @@ function sendItemAction(message, item, idx, action) {
 }
 
 function previewDetails(call) { return call.preview?.details || [] }
-function riskColor(risk) { return risk === 'high' ? 'red' : risk === 'medium' ? 'orange' : 'green' }
-function activityTime(item) { return item.updated_at || item.created_at ? new Date(item.updated_at || item.created_at).toLocaleString() : '-' }
-function activityStatusColor(status) { return status === 'failed' ? 'red' : status === 'pending' ? 'orange' : status === 'cancelled' ? 'dim' : 'green' }
+
+watch(messages, () => scrollToBottom(), { deep: true })
 
 onMounted(async () => {
   await loadCaps()
   await loadConversations()
   await loadActivity()
+  await scrollToBottom()
 })
 </script>
 
@@ -305,35 +344,17 @@ onMounted(async () => {
           <i @click.stop="removeConversation(conv)"><img v-if="isIsland" :src="animalIslandIcons.close" alt="" class="animal-remove-icon" /><span v-else>×</span></i>
         </button>
       </div>
-      <details class="tool-catalog">
-        <summary>工具能力</summary>
-        <div v-for="(items, group) in groupedTools" :key="group" class="tool-group">
-          <strong>{{ group }}</strong>
-          <div v-for="tool in items" :key="tool.name" class="tool-chip" :class="{ disabled: !tool.enabled }">
-            <span>{{ tool.name }}</span>
-            <AppBadge :color="tool.enabled ? riskColor(tool.risk) : 'dim'">{{ tool.enabled ? tool.risk : 'off' }}</AppBadge>
-          </div>
-        </div>
-      </details>
-      <details class="activity-panel" open>
-        <summary>活动记录</summary>
-        <div v-if="!activity.length" class="activity-empty">暂无活动</div>
-        <div v-for="item in activity.slice(0, 12)" :key="`${item.type}-${item.id}`" class="activity-item">
-          <div class="activity-main">
-            <span>{{ item.tool_name }}</span>
-            <AppBadge :color="activityStatusColor(item.status)">{{ item.status }}</AppBadge>
-          </div>
-          <div class="activity-summary">{{ item.summary }}</div>
-          <div class="activity-time">{{ activityTime(item) }}</div>
-        </div>
-      </details>
     </aside>
 
     <section class="chat-panel">
       <div class="chat-toolbar">
         <div>
-          <h2>Music Sub Copilot</h2>
-          <p>可以问：帮我搜周杰伦 FLAC、最近任务状态、库里有没有稻香、列出订阅。</p>
+          <div class="eyebrow">Music Sub Copilot</div>
+          <h2>{{ currentConversation?.title || '音乐管理助手' }}</h2>
+          <p>搜索、下载、订阅、治理和日志排查都可以直接在这里完成。</p>
+          <div class="quick-prompts">
+            <button v-for="prompt in quickPrompts" :key="prompt.label" type="button" :disabled="loading || !enabled" @click="sendQuickPrompt(prompt.text)">{{ prompt.label }}</button>
+          </div>
         </div>
         <div class="chat-toolbar-actions">
           <AppButton class="mobile-new-chat" size="sm" variant="ghost" :disabled="loading" @click="newConversation">新对话</AppButton>
@@ -346,8 +367,15 @@ onMounted(async () => {
         <AppButton v-if="retryDraft" size="sm" variant="ghost" :disabled="loading" @click="retryLastMessage">重试</AppButton>
       </div>
 
-      <div class="messages">
-        <div v-if="messages.length === 0" class="empty-text">暂无消息，试试“搜索周杰伦 FLAC，优先猫站”。</div>
+      <div ref="messagesEl" class="messages">
+        <div v-if="messages.length === 0" class="empty-state">
+          <div class="empty-icon">🎧</div>
+          <h3>从一个音乐任务开始</h3>
+          <p>你可以直接搜索资源、查看任务、做曲库治理，也可以用下面的快捷入口。</p>
+          <div class="empty-prompts">
+            <button v-for="prompt in quickPrompts" :key="prompt.label" type="button" :disabled="loading || !enabled" @click="useQuickPrompt(prompt.text)">{{ prompt.text }}</button>
+          </div>
+        </div>
         <div v-for="msg in messages" :key="msg.id" class="message" :class="msg.role">
           <div class="message-role">{{ roleLabel(msg.role) }}</div>
           <div class="message-content">
@@ -360,7 +388,12 @@ onMounted(async () => {
                 <div v-for="(item, idx) in toolItems(msg).slice(0, 8)" :key="idx" class="result-card">
                   <div class="result-rank">#{{ idx + 1 }}</div>
                   <div class="result-main">
-                    <div class="result-title">{{ cardTitle(item) }}</div>
+                    <div class="result-title-row">
+                      <div class="result-title">{{ cardTitle(item) }}</div>
+                      <div v-if="cardBadges(item).length" class="result-badges">
+                        <AppBadge v-for="badge in cardBadges(item)" :key="`${badge.text}-${badge.color}`" :color="badge.color">{{ badge.text }}</AppBadge>
+                      </div>
+                    </div>
                     <div v-if="cardSubtitle(item)" class="result-subtitle">{{ cardSubtitle(item) }}</div>
                     <div v-if="cardMeta(item)" class="result-meta">{{ cardMeta(item) }}</div>
                     <div v-if="item.reasons?.length" class="result-reasons">{{ item.reasons.join('、') }}</div>
@@ -411,8 +444,13 @@ onMounted(async () => {
       </div>
 
       <div class="composer">
-        <textarea v-model="input" placeholder="输入你的音乐管理需求..." :disabled="loading || !enabled" @keydown.enter.exact.prevent="sendMessage" />
-        <AppButton variant="primary" :loading="loading" :disabled="loading || !enabled || !input.trim()" @click="sendMessage()">发送</AppButton>
+        <div class="composer-box">
+          <textarea v-model="input" placeholder="输入你的音乐管理需求... Shift+Enter 换行，Enter 发送" :disabled="loading || !enabled" @keydown.enter.exact.prevent="sendMessage" />
+          <div class="composer-footer">
+            <div class="composer-hint">{{ loading ? '正在执行，请稍候…' : 'Enter 发送 · Shift+Enter 换行' }}</div>
+            <AppButton variant="primary" :loading="loading" :disabled="loading || !enabled || !input.trim()" @click="sendMessage()">发送</AppButton>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -432,42 +470,43 @@ onMounted(async () => {
 .conversation-item span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 18px; }
 .conversation-item small { color: var(--text-dim); font-size: 11px; }
 .conversation-item i { position: absolute; right: 8px; top: 8px; font-style: normal; color: var(--text-dim); }
-.tool-catalog, .activity-panel { border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-dim); font-size: 12px; }
-.tool-catalog summary, .activity-panel summary { cursor: pointer; color: var(--text); font-weight: 650; }
-.tool-group { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.tool-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 6px 8px; background: var(--surface); }
-.tool-chip.disabled { opacity: .55; }
-.tool-chip span { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-.activity-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; background: var(--surface); margin-top: 8px; }
-.activity-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.activity-main span { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-.activity-summary { color: var(--text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.activity-time, .activity-empty { color: var(--text-muted); margin-top: 4px; font-size: 11px; }
 .chat-panel { display: flex; flex-direction: column; overflow: hidden; }
 .chat-toolbar { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
 .chat-toolbar h2 { margin: 0; font-size: 20px; }
 .chat-toolbar p { margin: 4px 0 0; color: var(--text-dim); font-size: 13px; }
+.quick-prompts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.quick-prompts button, .empty-prompts button { border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--text); border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; transition: .15s ease; }
+.quick-prompts button:hover:not(:disabled), .empty-prompts button:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-1px); }
+.quick-prompts button:disabled, .empty-prompts button:disabled { opacity: .5; cursor: not-allowed; }
 .chat-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .mobile-new-chat { display: none; }
-.messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
 .message { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; }
 .message-role { color: var(--text-dim); font-size: 12px; padding-top: 8px; }
-.message-content { white-space: pre-wrap; line-height: 1.55; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; overflow-x: auto; }
-.message.user .message-content { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.message-content { white-space: pre-wrap; line-height: 1.55; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; overflow-x: auto; box-shadow: 0 8px 24px color-mix(in srgb, #000 5%, transparent); }
+.message.user .message-content { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
 .message.tool .message-content { font-size: 12px; color: var(--text-dim); }
 .tool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .tool-name { color: var(--accent); font-weight: 700; }
 .tool-summary { color: var(--text-dim); }
 .result-cards { display: grid; gap: 8px; margin: 8px 0; }
-.result-card { display: grid; grid-template-columns: 38px 1fr; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--bg); }
-.result-rank { color: var(--accent); font-weight: 700; }
-.result-title { color: var(--text); font-weight: 650; }
+.result-card { display: grid; grid-template-columns: 38px 1fr; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: linear-gradient(135deg, color-mix(in srgb, var(--surface) 88%, var(--accent)), var(--bg)); transition: .15s ease; }
+.result-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); transform: translateY(-1px); }
+.result-rank { color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }
+.result-title-row { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.result-title { color: var(--text); font-weight: 700; word-break: break-word; }
+.result-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; flex-shrink: 0; }
 .result-subtitle, .result-meta, .result-reasons { margin-top: 3px; color: var(--text-dim); font-size: 12px; }
 .result-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .raw-json { margin-top: 8px; color: var(--text-dim); }
 .raw-json summary { cursor: pointer; }
 pre { margin: 6px 0 0; white-space: pre-wrap; }
-.empty-text { color: var(--text-dim); text-align: center; padding: 40px; }
+.empty-state { color: var(--text-dim); text-align: center; padding: 44px 20px; border: 1px dashed var(--border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.empty-icon { font-size: 42px; margin-bottom: 8px; }
+.empty-state h3 { color: var(--text); margin: 0 0 6px; }
+.empty-state p { margin: 0 auto 14px; max-width: 520px; line-height: 1.5; }
+.empty-prompts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .error-text { margin: 12px 18px 0; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); border-radius: var(--radius-md); padding: 8px 10px; background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .loading-row .message-content { color: var(--text-dim); }
 .confirm-card { margin: 0 18px 12px; padding: 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger) 8%, transparent); }
@@ -479,8 +518,12 @@ pre { margin: 6px 0 0; white-space: pre-wrap; }
 .confirm-detail span { display: block; color: var(--text-dim); font-size: 11px; }
 .confirm-detail strong { display: block; color: var(--text); margin-top: 2px; word-break: break-word; }
 .confirm-actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; }
-.composer { border-top: 1px solid var(--border); padding: 14px; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
-.composer textarea { resize: none; min-height: 46px; max-height: 120px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); color: var(--text); padding: 10px 12px; outline: none; }
+.composer { border-top: 1px solid var(--border); padding: 14px; background: color-mix(in srgb, var(--bg-elevated) 80%, transparent); }
+.composer-box { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); padding: 8px; transition: .15s ease; }
+.composer-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.composer textarea { resize: none; width: 100%; min-height: 54px; max-height: 140px; border: 0; background: transparent; color: var(--text); padding: 4px 4px 8px; outline: none; box-sizing: border-box; }
+.composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.composer-hint { color: var(--text-muted); font-size: 11px; }
 @media (max-width: 900px) {
   .assistant-view { grid-template-columns: 1fr; padding: 12px; min-height: 0; }
   .conversation-panel { display: none; }
@@ -488,6 +531,8 @@ pre { margin: 6px 0 0; white-space: pre-wrap; }
   .chat-toolbar { padding: 12px; align-items: flex-start; }
   .chat-toolbar h2 { font-size: 17px; }
   .chat-toolbar p { font-size: 12px; line-height: 1.4; }
+  .quick-prompts { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .quick-prompts button { flex-shrink: 0; }
   .chat-toolbar-actions { flex-direction: column; align-items: flex-end; }
   .mobile-new-chat { display: inline-flex; }
   .messages { padding: 12px; gap: 10px; }
@@ -499,8 +544,12 @@ pre { margin: 6px 0 0; white-space: pre-wrap; }
   .confirm-grid { grid-template-columns: 1fr; }
   .confirm-actions { justify-content: stretch; }
   .confirm-actions button { flex: 1; }
-  .composer { padding: 10px; grid-template-columns: 1fr; }
+  .composer { padding: 10px; }
   .composer textarea { min-height: 74px; }
+  .composer-footer { align-items: stretch; }
+  .composer-hint { display: none; }
+  .result-title-row { flex-direction: column; gap: 6px; }
+  .result-badges { justify-content: flex-start; }
 }
 
 @media (max-width: 430px) {

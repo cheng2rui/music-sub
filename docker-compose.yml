@@ -1,7 +1,8 @@
 services:
   music-sub:
-    image: music-sub:0.7.111
-    build: .
+    image: ghcr.io/cheng2rui/music-sub:0.8.0
+    # For local development builds, uncomment:
+    # build: .
     container_name: music-sub
     ports:
       - "8400:8400"
@@ -23,11 +24,13 @@ services:
       - 223.5.5.5
       - 119.29.29.29
       - 8.8.8.8
-    depends_on:
-      - qbittorrent
+    # If you already have a qBittorrent container/NAS app, point
+    # qbittorrent.host in config/config.yaml to that instance and do not start
+    # the optional bundled service below.
     restart: unless-stopped
 
   qbittorrent:
+    profiles: ["bundled-qb"]
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: music-sub-qb
     ports:

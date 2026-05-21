@@ -1,60 +1,132 @@
 # 🎵 Music Sub
 
-PT 站音乐订阅 + qBittorrent 下载 + 硬链接整理 + 自动刮削，一站式自托管。
+自托管音乐订阅、下载、整理和刮削系统。  
+面向 PT 音乐站、qBittorrent、NAS / Docker 场景，把“找资源 → 下载 → 入库 → 元数据治理 → 通知/助手”串成一条自动化流水线。
 
-> 自动追踪 PT 站新种 → 推送到 qBittorrent → 完成后硬链接到音乐库 → 调用 QQ 音乐 / 网易云 / MusicBrainz 写标签 / 歌词 / 封面 / NFO。
+> 当前版本：**v0.8.0**
 
-## ✨ 功能
+## 核心能力
 
-- **多 PT 站搜索 / 订阅**：M-Team（API）、Open.CD、PTClub、Dis.Music
-- **智能订阅**：按艺人/歌曲/专辑/关键词分类搜索 + 品质过滤（FLAC/MP3）
-- **下载器集成**：qBittorrent Web API（添加 / 监控 / 打 tag）
-- **硬链接整理**：按 `{artist}/{album}` 模板组织音乐库，节省磁盘
-- **元数据刮削链**：QQ 音乐 → 网易云 → MusicBrainz，逐级回退
-- **音频标签写入**：title / artist / album / year / 封面 / 歌词
-- **专辑级 NFO**：Kodi / Jellyfin 兼容，含每条 track
-- **手动标签编辑**：刮削结果不对时可手动修正
-- **批量重新刮削**：专辑级/单曲/未完成批量三种模式
-- **Web UI**：Vue3 SPA（Spotify 风格）—— 发现 / 订阅 / 搜索 / 任务 / 音乐库 / 设置 / 日志
-- **主题系统**：暗色 / 亮色 / 暗色透明 / 亮色透明（毛玻璃效果 + 专辑封面背景）
-- **音乐库浏览**：专辑封面网格 + 曲目详情弹窗 + 模糊搜索
-- **通知推送**：Telegram Bot（下载/刮削/错误事件）
-- **下载任务管理**：任务状态/进度/qB 状态展示，支持暂停、继续、删除任务
-- **定时任务可视化**：状态/下次运行/上次结果 + 手动触发
-- **登录认证**：JWT + 设置页改密码
-- **日志系统**：实时查看 + 级别过滤 + 清空
+- **PT 搜索与订阅**：支持 M-Team、Open.CD、PTClub、Dis.Music；支持艺人 / 专辑 / 歌曲 / 关键词订阅。
+- **统一搜索候选**：PT 与在线音乐源合并候选，按质量、相关性、来源展示下载决策。
+- **qBittorrent 集成**：添加任务、监控完成、暂停/恢复/删除、外部 qB 任务接管。
+- **手动标签导入**：在 qB 给任务打 `music-sub` 标签，完成后自动整理入库；处理后打 `已整理`，兼容旧 `music-sub-done`。
+- **音乐库整理**：硬链接优先，跨盘自动复制；按 `{artist}/{album}` 结构组织。
+- **元数据刮削**：QQ 音乐、网易云、MusicBrainz 多源回退；写入标签、歌词、封面、NFO。
+- **音乐库治理**：缺封面、缺歌词、CUE 候选、专辑分裂、专辑艺人冲突等健康检查与批量处理。
+- **智能助手**：Web / Telegram / QQBot / 企业微信 / 微信 Claw 入站；可查询曲库、搜索资源、诊断日志、准备下载动作。
+- **通知系统**：Telegram / 企业微信 / QQBot / 微信 Claw；下载完成与刮削完成支持延迟聚合、专辑图和歌曲清单。
+- **移动端 PWA**：移动端底部导航、图标、可复制文本和适配优化。
+- **Dashboard 发现页**：本地推荐、系统状态、曲库健康、最近任务/入库/事件；卡片可拖动排序，自适应瀑布流排版。
 
-## 🚀 快速开始
+## v0.8.0 亮点
 
-### Docker Compose（推荐）
+### 1. 通知聚合
+
+下载完成、刮削完成都支持延迟聚合推送，避免专辑多曲目时刷屏。
+
+通知内容包含：
+
+- 专辑封面图（Telegram 支持 `sendPhoto`）
+- 专辑名
+- 歌曲名
+- 格式（FLAC / MP3 / M4A 等）
+- 文件大小
+- 总曲目数与总大小
+
+可在设置页调整：
+
+- `notify.download_complete_batch_delay_seconds`
+- `notify.scrape_complete_batch_delay_seconds`
+
+设为 `0` 表示立即聚合推送。
+
+### 2. qB 手动标签监听
+
+适合你已经在 qB 里手动下载好音乐的场景：
+
+1. 在 qBittorrent 中给任务添加标签：`music-sub`
+2. Music Sub 定时扫描完成任务
+3. 自动硬链接 / 刮削 / 入库
+4. 完成后给任务打上：`已整理`
+
+默认跨分类监听，只看标签，不强制要求 qB 分类为 `music`。
+
+### 3. 智能助手稳定性优化
+
+- Telegram 入站走后台队列，避免长任务阻塞 polling。
+- 拦截模型泄露的内部工具格式，如 `[工具结果]`、`</think>`、`minimax:tool_call`。
+- 查询“某艺人的专辑还有哪些没入库”时走确定性本地库 + PT 对比流程。
+- 搜索结果动作后端派生，前端不再回传大 JSON。
+
+### 4. 发现页体验优化
+
+- 卡片可拖动排序，顺序保存在浏览器本地。
+- 自适应瀑布流排版，减少左右列高度不一致造成的大空白。
+- 今日推荐加入随机 seed，“换一批”会真正变化。
+
+## 快速开始
+
+### Docker Compose 推荐部署
 
 ```bash
 git clone https://github.com/cheng2rui/music-sub.git
 cd music-sub
 
-# 复制配置模板并填写
 cp config/config.yaml.example config/config.yaml
 vim config/config.yaml
 
-# 启动
 docker compose up -d
-
-# 打开 Web UI
-open http://localhost:8400
 ```
 
-默认账号：`888` / 密码：`888`（登录后在设置页修改）
+打开：<http://localhost:8400>
 
-### docker-compose.yml
+默认账号 / 密码：`888` / `888`  
+首次登录后建议立刻到设置页修改密码。
+
+### 默认 docker-compose
+
+项目内置 `docker-compose.yml` 默认只启动：
+
+- `music-sub`：Web/API 服务，端口 `8400`
+
+如果你的 Docker / NAS 里已经有 qBittorrent，不需要再安装 `music-sub-qb`。只要在 `config/config.yaml` 里把 `qbittorrent.host` 指向现有 qB 即可，例如：
 
 ```yaml
-version: "3.8"
+qbittorrent:
+  host: "http://你的-qb-容器名或IP:8080"
+```
 
+如果你没有现成 qB，项目也提供可选内置 qB 服务：
+
+```bash
+docker compose --profile bundled-qb up -d
+```
+
+这会额外启动：
+
+- `music-sub-qb`：qBittorrent，WebUI 端口 `8401`
+
+默认数据目录：
+
+| 路径 | 用途 |
+| --- | --- |
+| `./config` | 配置文件 |
+| `./data/music_sub.db` | SQLite 数据库 |
+| `./data/downloads` | qB 下载目录 |
+| `./data/library` | 音乐库目录 |
+| `./logs` | 日志 |
+
+> 硬链接要求下载目录和音乐库目录在同一文件系统。跨设备时会自动 fallback 为复制。
+
+### docker-compose.yml 模板
+
+如果你不想使用仓库内置 compose，可以直接复制下面这份精简版：
+
+```yaml
 services:
   music-sub:
-    image: ghcr.io/cheng2rui/music-sub:latest
-    # 或本地构建：
-    # build: .
+    image: ghcr.io/cheng2rui/music-sub:0.8.0
     container_name: music-sub
     ports:
       - "8400:8400"
@@ -62,196 +134,224 @@ services:
       - ./config:/app/config
       - ./data:/app/data
       - ./logs:/app/logs
-      - /downloads/music:/downloads/music
-      - /music:/music
+      - ./data/downloads:/downloads/music
+      - ./data/library:/music
     environment:
       - MUSIC_SUB_CONFIG=/app/config/config.yaml
       - MUSIC_SUB_DB=/app/data/music_sub.db
     restart: unless-stopped
+
+  # 如果没有现成 qBittorrent，可取消下面整段注释，然后执行：
+  # docker compose --profile bundled-qb up -d
+  # qbittorrent:
+  #   profiles: ["bundled-qb"]
+  #   image: lscr.io/linuxserver/qbittorrent:latest
+  #   container_name: music-sub-qb
+  #   ports:
+  #     - "8401:8080"
+  #     - "57881:57881"
+  #     - "57881:57881/udp"
+  #   volumes:
+  #     - ./data/qb-config:/config
+  #     - ./data/downloads:/downloads/music
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=Asia/Shanghai
+  #     - WEBUI_PORT=8080
+  #     - TORRENTING_PORT=57881
+  #   restart: unless-stopped
 ```
 
-### 本地构建
+如果使用内置 qB，Music Sub 配置里 qB 地址建议写：
 
-```bash
-# 构建镜像（多阶段：Node build前端 + Python运行时）
-docker compose build
-docker compose up -d
+```yaml
+qbittorrent:
+  host: "http://qbittorrent:8080"
+  username: "admin"
+  password: ""
+  category: "music"
+  save_path: "/downloads/music"
+  tag: "music-sub"
+  monitor_tagged_torrents: true
 ```
 
-数据持久化：
+如果使用已有 qB，把 `host` 改成你的实际地址，例如 `http://192.168.1.10:8080` 或同一 Docker 网络下的容器名。
 
-| 路径              | 用途                       |
-| ----------------- | -------------------------- |
-| `./config/`       | 配置文件                   |
-| `./data/`         | SQLite DB                  |
-| `/downloads/music`| qBittorrent 下载目录       |
-| `/music`          | 音乐库目标目录（硬链接源）|
+## 关键工作流
 
-> ⚠️ 硬链接要求 `/downloads/music` 和 `/music` 在同一文件系统。跨设备时会自动 fallback 为 copy。
-
-## 🎯 关键工作流
-
-```
-PT 订阅
-  ↓ 定时搜索（默认 30 分钟）
-  ↓ 命中 → 下载 .torrent 文件
-  ↓ 添加到 qBittorrent
-  ↓ APScheduler 监控完成（默认 5 分钟轮询）
-  ↓ 硬链接到 /music/{artist}/{album}/
-  ↓ 调用刮削器拿元数据
-  ↓ 写标签 + cover.jpg + .lrc + album.nfo
-  ↓ 入库 music_files
+```text
+订阅 / 搜索 / 手动 qB 标签
+  ↓
+qBittorrent 下载
+  ↓
+完成监听（默认每 5 分钟）
+  ↓
+硬链接或复制到音乐库
+  ↓
+刮削元数据、歌词、封面、NFO
+  ↓
+写入 SQLite music_files
+  ↓
+下载完成 / 刮削完成聚合通知
 ```
 
-## ⚙️ 配置说明
+## 主要配置
 
-完整字段见 `config/config.yaml.example`。重点：
-
-### 站点认证
-
-| 站点      | 认证方式                          |
-| --------- | --------------------------------- |
-| M-Team    | API Key（站点 → 设置 → 安全）     |
-| Open.CD   | 浏览器 Cookie（F12 复制）         |
-| PTClub    | 浏览器 Cookie                     |
-| Dis.Music | 浏览器 Cookie                     |
+完整示例见：`config/config.yaml.example`
 
 ### qBittorrent
 
 ```yaml
 qbittorrent:
-  host: "http://localhost:8080"
+  host: "http://qbittorrent:8080"
   username: "admin"
-  password: "your-pass"
-  category: "music"      # 自动归类到此分类
-  tag: "music-sub"       # 自动打 tag，方便筛选
+  password: ""
+  category: "music"
   save_path: "/downloads/music"
+  tag: "music-sub"
+  monitor_tagged_torrents: true
 ```
 
-### 刮削行为
+说明：
+
+- `tag`：Music Sub 自动任务和手动导入任务都使用这个标签。
+- `monitor_tagged_torrents`：开启后，任何 qB 任务只要带 `music-sub` 标签，完成后都会被自动接管。
+- 处理完成后会打 `已整理`，旧版 `music-sub-done` 也会被识别为已处理。
+
+### 刮削
 
 ```yaml
 scraper:
-  sources: [qqmusic, netease, musicbrainz]   # 按顺序尝试
-  embed_cover: true       # 写到音频标签
-  save_cover_file: true   # 同时写 cover.jpg
-  cover_max_size: 0       # 0 = 原图; >0 = 压缩到该宽度
+  sources: [qqmusic, netease, musicbrainz]
+  embed_cover: true
+  save_cover_file: true
   save_lyrics_to_tag: true
   save_lyrics_file: true
-  save_nfo: false         # Kodi/Jellyfin 用户开
-  rename_file: false      # 按 rename_template 重命名
+  save_nfo: true
+  rename_file: false
   rename_template: "${track} - ${title}"
-  overwrite_tag: false    # true 强制覆盖已有标签
+  tag_write_mode: "fill_missing"   # skip_existing / fill_missing / overwrite
+  break_hardlink_before_tag: true
 ```
 
 ### 通知
 
 ```yaml
 notify:
+  download_complete_batch_delay_seconds: 20
+  scrape_complete_batch_delay_seconds: 20
   telegram:
     enabled: false
-    bot_token: "123456:ABC..."
-    chat_id: "-100..."     # 群组用 -100 开头；私聊用 user id
+    bot_token: ""
+    chat_id: ""
+    enable_polling: true
+    assistant_chat: true
     on_download_added: false
     on_download_complete: true
     on_scrape_complete: true
     on_error: true
+    on_cleanup_candidates: true
 ```
 
-> 可在 Web UI 设置页点 "📨 发送测试" 验证渠道。启用后，开始下载、下载完成、刮削完成和错误告警会按开关推送。
+支持通道：
 
-## 🔌 API 端点
+- Telegram Bot
+- 企业微信应用
+- QQBot
+- 微信 Claw / iLink
 
-| 路径                                | 说明                       |
-| ----------------------------------- | -------------------------- |
-| `GET  /api/health`                  | 健康检查                   |
-| `GET  /api/discover/recommend`      | 新歌推荐                   |
-| `GET  /api/discover/playlists`      | 推荐歌单                   |
-| `GET  /api/discover/toplist`        | 排行榜                     |
-| `GET  /api/subscriptions/`          | 订阅列表                   |
-| `POST /api/subscriptions/`          | 创建订阅                   |
-| `POST /api/search/`                 | 跨站搜索                   |
-| `POST /api/search/download`         | 下载指定种子               |
-| `POST /api/online/search`           | 在线音乐源搜索             |
-| `POST /api/online/download`         | 在线音乐直接下载并整理入库 |
-| `GET  /api/tasks/`                  | 下载任务列表               |
-| `POST /api/tasks/check`             | 手动触发完成检查           |
-| `GET  /api/library/stats`           | 库统计                     |
-| `GET  /api/library/`                | 最近添加文件               |
-| `GET  /api/library/albums`          | 专辑分组（含封面/进度）    |
-| `GET  /api/library/album-tracks`    | 某专辑曲目                 |
-| `GET  /api/library/album-cover`     | 专辑封面图                 |
-| `GET  /api/settings/`               | 当前配置（敏感字段已掩码） |
-| `PUT  /api/settings/`               | 保存配置                   |
-| `POST /api/settings/test_qb`        | 测试 qBittorrent 连接      |
-| `POST /api/settings/test_telegram`  | 发送 Telegram 测试消息     |
+Telegram 推荐使用 **polling**，NAS / 内网部署无需公网 HTTPS。
 
-## 🛠 技术栈
+### Assistant
 
-- **后端**：Python 3.12 + FastAPI + SQLAlchemy + APScheduler
-- **存储**：SQLite + 硬链接文件系统
-- **下载器**：qbittorrent-api
-- **音频标签**：music_tag
-- **前端**：Vite + Vue 3 SFC + Pinia
-- **部署**：Docker / docker-compose
-
-## 📁 项目结构
-
-```
-app/
-├── api/              # FastAPI 路由
-│   ├── discover.py
-│   ├── library.py
-│   ├── online.py
-│   ├── search.py
-│   ├── settings.py
-│   ├── subscriptions.py
-│   └── tasks.py
-├── sites/            # PT 站适配器
-├── scrapers/         # 元数据刮削（QQ/网易/MusicBrainz）
-├── downloader/       # qBittorrent 客户端 + 完成监控
-├── organizer/        # 硬链接 + 命名规则
-├── services/         # pipeline + searcher + subscription
-├── config.py
-├── db.py
-├── models.py
-├── scheduler.py
-└── main.py
-config/               # config.yaml（gitignore）+ 模板
-frontend/             # Vite + Vue3 前端源码
-web/dist/             # 前端构建产物
-web/index.html        # 旧版 fallback
-data/                 # SQLite（gitignore）
+```yaml
+assistant:
+  enabled: false
+  global_chat: true
+  max_history_messages: 20
+  max_iterations: 4
+  tool_timeout_seconds: 120
+  incoming_queue_idle_timeout_seconds: 300
+  allow_online_search_candidates: true
+  allow_online_download: false
+  allow_library_write: true
+  provider:
+    provider: openai_compatible
+    runtime: openai_compatible
+    base_url: ""
+    api_key: ""
+    model: ""
 ```
 
-## 📋 开发命令
+## API 概览
+
+| 路径 | 说明 |
+| --- | --- |
+| `GET /api/health` | 健康检查 |
+| `GET /api/discover/personalized` | 本地今日推荐 |
+| `GET /api/library/stats` | 曲库统计 |
+| `GET /api/library/albums` | 专辑列表 |
+| `GET /api/library/album-tracks` | 专辑曲目 |
+| `GET /api/library/health` | 曲库健康检查 |
+| `POST /api/search/` | PT 搜索 |
+| `GET /api/search/candidates` | PT + 在线统一候选 |
+| `POST /api/online/search` | 在线音乐搜索 |
+| `POST /api/online/download` | 在线音乐下载入库 |
+| `GET /api/tasks/page` | 任务分页/筛选 |
+| `POST /api/tasks/check` | 手动触发完成检查 |
+| `GET /api/settings/` | 当前设置 |
+| `PUT /api/settings/` | 保存设置 |
+| `POST /api/assistant/chat` | 智能助手对话 |
+| `GET /api/notify/status` | 通知状态 |
+| `GET /api/notify/events` | 通知事件流 |
+
+## 开发命令
 
 ```bash
-# 本地构建并部署
-docker build -t music-sub:0.5.4 -t music-sub:latest .
-docker compose up -d
+# 后端基础语法检查
+python3 -m py_compile app/**/*.py
 
-# 增量更新代码（不重 build）
-docker cp app/api/library.py music-sub:/app/app/api/library.py
+# 前端构建
+cd frontend && npm run build
+
+# Docker 构建
+docker build -t music-sub:0.8.0 -t music-sub:latest .
+
+# 启动 / 重启
+docker compose up -d
 docker restart music-sub
 
 # 查看日志
 docker logs -f music-sub
 ```
 
-## 🗺️ Roadmap
+## 技术栈
 
-- [x] 版本号统一 / NFO 输出 / 文件重命名
-- [x] 音乐库专辑卡片视图
-- [x] Telegram 通知渠道配置
-- [x] Telegram 事件触发推送（开始下载/下载完成/刮削完成/错误）
-- [x] 订阅基础质量规则（FLAC / MP3）
-- [x] 音乐库批量重新刮削
-- [x] 日志页面 / 运行仪表盘
-- [ ] 订阅高级规则（大小过滤 / 更严格匹配）
-- [ ] PT 站 cookie 过期检测
-- [ ] 单元测试
+- Backend：Python 3.12 + FastAPI + SQLAlchemy + APScheduler
+- Frontend：Vue 3 + Vite + Pinia
+- DB：SQLite
+- Downloader：qBittorrent Web API
+- Metadata：QQ 音乐 / 网易云 / MusicBrainz + `music_tag`
+- Deploy：Docker / Docker Compose
 
-## 📝 License
+## 项目结构
+
+```text
+app/
+  api/                  FastAPI 路由
+  downloader/           qBittorrent 客户端与完成监听
+  organizer/            硬链接 / 复制 / 命名规则
+  scrapers/             元数据、歌词、封面、标签写入
+  services/             pipeline、通知、Assistant、搜索候选
+  sites/                PT 站点适配器
+config/                 配置模板
+frontend/               Vue 前端源码
+web/dist/               前端构建产物
+data/                   SQLite、下载和音乐库数据（默认 compose）
+logs/                   应用日志
+```
+
+## License
 
 MIT

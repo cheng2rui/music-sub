@@ -2,7 +2,7 @@
 
 Messaging providers should acknowledge inbound updates quickly.  The actual
 Assistant run can be slow because it may call tools/LLMs, so process one queue
-per conversation key in daemon workers.  This mirrors MoviePilot's per-session
+per conversation key in daemon workers.  This keeps each chat session
 worker model without pulling in a full async graph runtime.
 """
 from __future__ import annotations
@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import app.config as cfg_module
 from app.db import SessionLocal
 from app.services.notify import IncomingMessage, handle_incoming_message, log_notify_event
 
@@ -30,7 +31,14 @@ _lock = threading.RLock()
 _queues: dict[str, queue.Queue[_QueuedIncoming]] = {}
 _workers: dict[str, threading.Thread] = {}
 _status: dict[str, dict[str, Any]] = {}
-_worker_idle_timeout = 60.0
+
+
+def _worker_idle_timeout() -> float:
+    try:
+        value = float(getattr(cfg_module.config.assistant, "incoming_queue_idle_timeout_seconds", 300) or 300)
+    except Exception:
+        value = 300.0
+    return max(30.0, min(value, 3600.0))
 
 
 def _queue_key(incoming: IncomingMessage) -> str:
@@ -73,7 +81,7 @@ def _worker_loop(key: str) -> None:
             if q is None:
                 break
             try:
-                item = q.get(timeout=_worker_idle_timeout)
+                item = q.get(timeout=_worker_idle_timeout())
             except queue.Empty:
                 break
             wait_ms = int((time.time() - item.queued_at) * 1000)
@@ -128,7 +136,13 @@ def _worker_loop(key: str) -> None:
             if q is not None and q.empty():
                 _queues.pop(key, None)
             _workers.pop(key, None)
-            _status.setdefault(key, {}).update({"running": False, "processing": False, "queued": 0})
+            status = _status.setdefault(key, {})
+            status.update({"running": False, "processing": False, "queued": 0, "last_stopped_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+            # Keep only recent idle statuses so the status API stays useful without
+            # accumulating stale identities forever.
+            idle_keys = [k for k, v in _status.items() if not v.get("running") and not v.get("processing")]
+            for stale_key in idle_keys[:-20]:
+                _status.pop(stale_key, None)
         logger.info("Inbound queue worker stopped: %s", key)
 
 

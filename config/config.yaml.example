@@ -39,6 +39,7 @@ qbittorrent:
   category: "music"
   save_path: "/downloads/music"
   tag: "music-sub"
+  monitor_tagged_torrents: true  # manually add this tag in qB to auto-import when completed
 
 paths:
   library: "/music"
@@ -73,6 +74,8 @@ scheduler:
 notify:
   webhook_token: ""      # auto-generated on first run; protects inbound webhooks
   public_base_url: ""     # optional public HTTPS origin for webhook mode
+  download_complete_batch_delay_seconds: 20  # aggregate album/song download completion notifications
+  scrape_complete_batch_delay_seconds: 20    # aggregate album/song scrape completion notifications
   telegram:
     enabled: false
     bot_token: ""
@@ -97,6 +100,7 @@ assistant:
   max_history_messages: 20
   max_iterations: 4
   tool_timeout_seconds: 120
+  incoming_queue_idle_timeout_seconds: 300
   verbose: false
   wake_interval_hours: 0
   require_confirm_for_download: true

@@ -1,4 +1,4 @@
-"""Assistant LLM provider catalog inspired by MoviePilot's provider registry."""
+"""Assistant LLM provider catalog."""
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict

@@ -16,7 +16,7 @@ const settings = ref({
     ptclub: { enabled: false, url: '', api_key: '', token: '', cookie: '' },
     dismusic: { enabled: false, url: '', api_key: '', token: '', cookie: '' }
   },
-  qbittorrent: { host: '', username: '', password: '', category: 'music', save_path: '/downloads/music', tag: 'music-sub' },
+  qbittorrent: { host: '', username: '', password: '', category: 'music', save_path: '/downloads/music', tag: 'music-sub', monitor_tagged_torrents: true },
   paths: { library: '/music', structure: '{artist}/{album}', downloads: '/downloads/music' },
   scraper: { sources: ['qqmusic', 'netease', 'kugou', 'migu', 'kuwo', 'musicbrainz'], embed_cover: true, save_cover_file: true, save_lyrics: true, save_nfo: false, rename_file: false, overwrite_tag: false, tag_write_mode: 'fill_missing', break_hardlink_before_tag: true },
   scheduler: { search_interval_minutes: 30, check_complete_interval_minutes: 5, cleanup_scan_enabled: true, cleanup_scan_interval_hours: 24 },
@@ -24,6 +24,8 @@ const settings = ref({
     webhook_token: '',
     public_base_url: '',
     templates: {},
+    download_complete_batch_delay_seconds: 20,
+    scrape_complete_batch_delay_seconds: 20,
     telegram: { enabled: false, bot_token: '', chat_id: '', enable_polling: true, polling_timeout: 25, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     wecom: { enabled: false, corp_id: '', agent_id: '', app_secret: '', to_user: '@all', proxy: 'https://qyapi.weixin.qq.com', on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
     qqbot: { enabled: false, app_id: '', app_secret: '', user_openid: '', group_openid: '', enable_gateway: false, on_download_added: false, on_download_complete: true, on_scrape_complete: true, on_error: true, on_cleanup_candidates: true, assistant_chat: true },
@@ -36,6 +38,7 @@ const settings = ref({
     max_history_messages: 20,
     max_iterations: 4,
     tool_timeout_seconds: 120,
+    incoming_queue_idle_timeout_seconds: 300,
     verbose: false,
     wake_interval_hours: 0,
     require_confirm_for_download: true,
@@ -261,7 +264,9 @@ const notifyEvents = [
 const notifyTemplateDefs = [
   { key: 'download_added', label: '开始下载', vars: '{name}, {site}', defaultText: '⬇️ <b>开始下载</b>\n{name}\n来源: {site}' },
   { key: 'download_complete', label: '下载完成', vars: '{name}, {file_count}', defaultText: '✅ <b>下载完成</b>\n{name}\n文件数: {file_count}' },
+  { key: 'download_complete_batch', label: '下载完成聚合', vars: '{album_count}, {track_count}, {album_sections}, {total_size_mb}', defaultText: '✅ <b>下载完成 · {album_count} 张专辑 / {track_count} 首</b>\n\n{album_sections}\n\n总大小：{total_size_mb:.1f} MB' },
   { key: 'scrape_complete', label: '刮削完成', vars: '{name}, {scraped}, {total}', defaultText: '🎵 <b>刮削完成</b>\n{name}\n成功: {scraped}/{total}' },
+  { key: 'scrape_complete_batch', label: '刮削完成聚合', vars: '{album_count}, {scraped}, {total}, {album_sections}, {total_size_mb}', defaultText: '🎵 <b>刮削完成 · {album_count} 张专辑 / {scraped}/{total} 首</b>\n\n{album_sections}\n\n总大小：{total_size_mb:.1f} MB' },
   { key: 'error', label: '错误告警', vars: '{context}, {error}', defaultText: '❌ <b>错误</b>\n{context}\n{error}' },
   { key: 'cleanup_candidates', label: '清理候选', vars: '{candidate_count}, {qb_and_db_count}, {db_only_count}, {total_size_mb}, {total_amount_left_mb}', defaultText: '🧹 <b>Music Sub 清理扫描发现候选</b>\n候选任务: {candidate_count}\nqB+DB: {qb_and_db_count} · 仅DB: {db_only_count}\n影响大小: {total_size_mb:.1f} MB · 剩余未下载: {total_amount_left_mb:.1f} MB\n请到任务列表执行清理扫描确认。' },
 ]
@@ -408,10 +413,12 @@ function toggleAssistantTool(name) {
 }
 
 function selectAllAssistantTools() {
+  if (!confirm('确认启用全部助手工具？这会开放所有已注册能力，高风险动作仍受确认开关限制。')) return
   settings.value.assistant.enabled_tools = assistantTools.value.map(t => t.name)
 }
 
 function resetAssistantToolsDefault() {
+  if (!confirm('恢复默认工具策略？默认代表启用所有注册工具，由风险控制决定是否需要确认。')) return
   settings.value.assistant.enabled_tools = []
 }
 
@@ -563,6 +570,10 @@ onMounted(loadAll)
           </div>
           <AppButton variant="ghost" size="sm" :loading="testingQb" @click="handleTestQb">测试连接</AppButton>
         </div>
+        <div class="gateway-row">
+          <label class="toggle-item"><input type="checkbox" v-model="settings.qbittorrent.monitor_tagged_torrents" /><span>监听 qB 手动标签导入</span></label>
+          <small class="text-dim">开启后，只要 qB 任务带有上面的 Tag（默认 music-sub），无论分类是什么，完成后都会自动整理入库，并打上“已整理”防止重复处理；旧的 music-sub-done 也会兼容跳过。</small>
+        </div>
       </div>
 
       <!-- 路径配置 -->
@@ -640,7 +651,19 @@ onMounted(loadAll)
         <h3 class="animal-section-title"><img v-if="isIsland" :src="islandIconFor('notify')" alt="" /><span v-else>📢</span><span>通知与消息入口</span></h3>
         <details class="notify-template-panel">
           <summary>通知模板</summary>
-          <div class="text-dim template-help">参考 MoviePilot 的模板思路：每类通知可自定义文案，使用变量占位符；未配置时使用默认模板。</div>
+          <div class="text-dim template-help">每类通知可自定义文案，使用变量占位符；未配置时使用默认模板。</div>
+          <div class="fields-row" style="margin:10px 0">
+            <div class="field">
+              <label>下载完成聚合延迟(秒)</label>
+              <input type="number" v-model.number="settings.notify.download_complete_batch_delay_seconds" min="0" max="3600" style="width:120px" />
+              <small class="text-dim">歌曲多时先等待几秒，把同一批下载合成一条通知；0 表示立即推送。</small>
+            </div>
+            <div class="field">
+              <label>刮削完成聚合延迟(秒)</label>
+              <input type="number" v-model.number="settings.notify.scrape_complete_batch_delay_seconds" min="0" max="3600" style="width:120px" />
+              <small class="text-dim">刮削完成也按专辑图 + 歌曲清单聚合推送；0 表示立即推送。</small>
+            </div>
+          </div>
           <div class="template-actions">
             <AppButton variant="ghost" size="sm" @click="resetAllNotifyTemplates">填充默认模板</AppButton>
             <AppButton variant="ghost" size="sm" :loading="previewingNotifyTemplates" @click="handlePreviewNotifyTemplates">预览渲染</AppButton>
@@ -704,7 +727,7 @@ onMounted(loadAll)
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.assistant_chat" /><span>允许在 Telegram 里和助手对话</span></label>
             <label class="toggle-item"><input type="checkbox" v-model="settings.notify.telegram.enable_polling" /><span>内网轮询收消息（推荐，无需公网）</span></label>
             <AppBadge :color="notifyStatus?.channels?.telegram?.polling?.running ? 'green' : (settings.notify.telegram.enable_polling ? 'orange' : 'dim')">{{ notifyStatus?.channels?.telegram?.polling?.running ? '收消息中' : (settings.notify.telegram.enable_polling ? '保存后启动' : '未启用') }}</AppBadge>
-            <small class="text-dim">像 MoviePilot/OpenClaw 一样：填 Bot Token + Chat ID，保存后即可收发；Webhook 只作为有公网 HTTPS 时的高级选项。</small>
+            <small class="text-dim">填 Bot Token + Chat ID，保存后即可收发；Webhook 只作为有公网 HTTPS 时的高级选项。</small>
           </div>
           <details v-if="settings.notify.telegram.enabled" class="telegram-webhook-box">
             <summary>高级：Webhook（有公网 HTTPS 时才需要）</summary>
@@ -807,7 +830,7 @@ onMounted(loadAll)
         <div class="gateway-row" style="margin-bottom:12px">
           <label class="toggle-item"><input type="checkbox" v-model="settings.assistant.global_chat" /><span>全局接管通知消息</span></label>
           <AppBadge :color="settings.assistant.global_chat ? 'green' : 'orange'">{{ settings.assistant.global_chat ? '普通消息进助手' : '仅 /ai 唤醒' }}</AppBadge>
-          <small class="text-dim">MoviePilot 风格：关闭后，Telegram/QQ/微信里只有以 <code>/ai</code> 开头的消息会进入智能助手；通知和按钮不受影响。</small>
+          <small class="text-dim">关闭后，Telegram/QQ/微信里只有以 <code>/ai</code> 开头的消息会进入智能助手；通知和按钮不受影响。</small>
         </div>
         <div class="fields-grid">
           <div class="field">
@@ -862,7 +885,7 @@ onMounted(loadAll)
           <div class="field">
             <label>最大上下文 Token（K）</label>
             <input v-model.number="settings.assistant.provider.max_context_tokens_k" type="number" min="4" max="1024" />
-            <small class="text-dim">用于控制模型上下文预算，类似 MoviePilot 的 LLM_MAX_CONTEXT_TOKENS。</small>
+            <small class="text-dim">用于控制模型上下文预算，避免历史消息挤占工具调用空间。</small>
           </div>
           <div class="field">
             <label>超时秒数</label>
@@ -877,6 +900,11 @@ onMounted(loadAll)
             <label>工具调用超时（秒）</label>
             <input v-model.number="settings.assistant.tool_timeout_seconds" type="number" min="5" max="600" />
             <small class="text-dim">单个工具超过该时间会中断并返回错误。</small>
+          </div>
+          <div class="field">
+            <label>入站队列空闲保活（秒）</label>
+            <input v-model.number="settings.assistant.incoming_queue_idle_timeout_seconds" type="number" min="30" max="3600" />
+            <small class="text-dim">同一聊天的后台 worker 空闲多久后退出；调大可减少频繁唤醒冷启动。</small>
           </div>
           <div class="field">
             <label>定时唤醒间隔（小时）</label>

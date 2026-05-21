@@ -15,7 +15,8 @@ import requests
 
 import app.config as cfg_module
 from app.db import SessionLocal
-from app.services.notify import handle_incoming_assistant, _qq_token
+from app.services.notify import handle_incoming_assistant
+from app.services.notify_channels.qqbot import get_token
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def _run_gateway() -> None:
 
     while not stop_requested():
         try:
-            token = _qq_token()
+            token = get_token()
             gateway_url = _get_gateway_url(token)
             logger.info("QQBot Gateway connecting...")
 

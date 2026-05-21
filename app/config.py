@@ -25,6 +25,7 @@ class QBConfig(BaseModel):
     category: str = "music"
     save_path: str = "/downloads/music"
     tag: str = "music-sub"
+    monitor_tagged_torrents: bool = True  # listen for manually tagged qB tasks across all categories
 
 
 class PathsConfig(BaseModel):
@@ -104,6 +105,10 @@ class NotifyConfig(BaseModel):
     webhook_token: str = ""
     public_base_url: str = ""
     templates: dict[str, str] = {}
+    # Delay download-complete notifications so multi-song/album downloads can be
+    # sent as one rich summary instead of many noisy messages.
+    download_complete_batch_delay_seconds: int = 20
+    scrape_complete_batch_delay_seconds: int = 20
     telegram: TelegramNotifyConfig = TelegramNotifyConfig()
     wecom: WeComNotifyConfig = WeComNotifyConfig()
     qqbot: QQBotNotifyConfig = QQBotNotifyConfig()
@@ -130,13 +135,14 @@ class AssistantProviderConfig(BaseModel):
 
 class AssistantConfig(BaseModel):
     enabled: bool = False
-    # MoviePilot-style trigger: true = all channel text enters Assistant;
+    # Assistant trigger: true = all channel text enters Assistant;
     # false = only explicit /ai messages enter Assistant.
     global_chat: bool = True
     provider: AssistantProviderConfig = AssistantProviderConfig()
     max_history_messages: int = 20
     max_iterations: int = 4
     tool_timeout_seconds: int = 120
+    incoming_queue_idle_timeout_seconds: int = 300
     verbose: bool = False
     wake_interval_hours: int = 0
     require_confirm_for_download: bool = True

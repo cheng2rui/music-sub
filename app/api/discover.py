@@ -59,17 +59,51 @@ def _local_song_item(row: MusicFile, reason: str) -> dict:
 
 
 @router.get("/personalized")
-def get_personalized(limit: int = Query(16, ge=4, le=40), db: Session = Depends(get_db)):
+def get_personalized(
+    limit: int = Query(16, ge=4, le=40),
+    seed: str | None = Query(None, description="Optional shuffle seed used by the Discover refresh button"),
+    db: Session = Depends(get_db),
+):
     """Pure local discovery recommendations from the user's own library only.
 
     This endpoint intentionally does not call external music recommendation APIs.
-    It mixes recently imported tracks, high-frequency local artists, and a small
-    random local sample so the Discover page stays local-first.
+    It builds several local pools first, then shuffles the merged candidates with
+    the supplied seed so the Discover refresh button actually returns a new batch
+    instead of being dominated by the same recent/high-frequency tracks.
     """
     limit = max(4, min(int(limit or 16), 40))
+    rng = random.Random(str(seed) if seed else None)
     rows = db.query(MusicFile).order_by(MusicFile.created_at.desc()).all()
     if not rows:
         return {"source": "local", "items": [], "message": "本地音乐库为空，暂无本地推荐"}
+
+    artist_counts = Counter((r.album_artist or r.artist or "").strip() for r in rows)
+    candidates: list[tuple[MusicFile, str, float]] = []
+    recent_window = max(24, limit * 4)
+
+    # 1) 最近入库池：仍然保留“今天听点新入库”的首页语义，但不固定排在最前。
+    for idx, row in enumerate(rows[:recent_window]):
+        freshness = max(0.0, 1.0 - idx / max(1, recent_window))
+        candidates.append((row, "最近入库", 2.4 + freshness))
+
+    # 2) 高频艺人池：同一高频艺人随机抽几首，而不是永远第一首。
+    for artist, count in artist_counts.most_common(12):
+        if not artist or artist.lower() in {"unknown artist", "未知艺人"}:
+            continue
+        artist_rows = [r for r in rows if (r.album_artist or r.artist or "").strip() == artist]
+        rng.shuffle(artist_rows)
+        for row in artist_rows[:2]:
+            candidates.append((row, f"本地库高频艺人：{artist}（{count} 首）", 1.8 + min(count, 50) / 50))
+
+    # 3) 随机发现池：全库参与，保证每次“换一批”明显变化。
+    random_rows = rows[:]
+    rng.shuffle(random_rows)
+    for row in random_rows[: max(limit * 5, 40)]:
+        candidates.append((row, "本地随机发现", 1.0))
+
+    # 加权随机排序。权重影响入选概率，但最终顺序不再固定。
+    rng.shuffle(candidates)
+    candidates.sort(key=lambda item: rng.random() * max(item[2], 0.1), reverse=True)
 
     results: list[dict] = []
     seen: set[str] = set()
@@ -84,31 +118,19 @@ def get_personalized(limit: int = Query(16, ge=4, le=40), db: Session = Depends(
         seen.add(fp)
         results.append(_local_song_item(row, reason))
 
-    # 1) 最近入库：最符合“今日推荐”的本地语义。
-    for row in rows[: max(6, limit // 3)]:
-        add_row(row, "最近入库")
+    for row, reason, _weight in candidates:
+        add_row(row, reason)
+        if len(results) >= limit:
+            break
 
-    # 2) 高频艺人：从你的库里最常出现的艺人中抽代表曲目。
-    artist_counts = Counter((r.album_artist or r.artist or "").strip() for r in rows)
-    for artist, count in artist_counts.most_common(8):
-        if not artist or artist.lower() in {"unknown artist", "未知艺人"}:
-            continue
-        for row in rows:
-            if (row.album_artist or row.artist or "").strip() == artist:
-                add_row(row, f"本地库高频艺人：{artist}（{count} 首）")
+    # 极小曲库兜底：去重后不够时放宽指纹，至少返回可播项。
+    if len(results) < min(limit, len(rows)):
+        for row in random_rows:
+            add_row(row, "本地随机发现")
+            if len(results) >= limit:
                 break
-        if len(results) >= limit:
-            break
 
-    # 3) 本地随机补足，避免每天列表太死。
-    remaining = rows[:]
-    random.shuffle(remaining)
-    for row in remaining:
-        add_row(row, "本地随机发现")
-        if len(results) >= limit:
-            break
-
-    return {"source": "local", "items": results[:limit]}
+    return {"source": "local", "seed": seed, "items": results[:limit]}
 
 
 def _resolve_qq_short_url(url: str) -> str:

@@ -15,6 +15,7 @@ from app.config import config
 from app.db import get_db
 from app.models import LibraryAuditEvent, MusicFile
 from app.services.album_identity import primary_artist
+from app.services.library_health_rules import has_lyrics, is_missing_lyrics_candidate, cue_split_candidate
 from app.scrapers.matcher import text_score
 
 router = APIRouter()
@@ -370,12 +371,7 @@ def get_album_cover(artist: str, album: str, db: Session = Depends(get_db)):
 
 
 def _has_lrc(file_path: str | None) -> bool:
-    if not file_path:
-        return False
-    try:
-        return Path(file_path).with_suffix(".lrc").exists()
-    except Exception:
-        return False
+    return has_lyrics(file_path)
 
 
 def _is_unknown_artist(artist: str | None) -> bool:
@@ -561,15 +557,7 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
     totals = {k: 0 for k in _HEALTH_KINDS}
 
     def _has_cue(f: MusicFile) -> bool:
-        if not f.file_path:
-            return False
-        p = Path(f.file_path)
-        if p.with_suffix(".cue").exists():
-            return True
-        try:
-            return len(list(p.parent.glob("*.cue"))) == 1
-        except Exception:
-            return False
+        return cue_split_candidate(f.file_path, duration=f.duration)
 
     def _add(bucket_key: str, f: MusicFile):
         artist = _display_album_artist(f)
@@ -591,7 +579,15 @@ def library_health(kind: str = "", limit: int = 100, db: Session = Depends(get_d
     for f in files:
         if not _has_cover(f.file_path):
             _add("missing_cover", f)
-        if not _has_lrc(f.file_path):
+        if is_missing_lyrics_candidate(
+            f.file_path,
+            title=f.title or "",
+            artist=f.artist or f.album_artist or "",
+            album=f.album or "",
+            genre=f.genre or "",
+            duration=f.duration,
+            scraped=f.scraped,
+        ):
             _add("missing_lyrics", f)
         if not f.duration or f.duration <= 0:
             _add("missing_duration", f)

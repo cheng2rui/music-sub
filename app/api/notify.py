@@ -364,9 +364,8 @@ async def provider_webhook(channel: str, request: Request, token: str = Query(de
     """Provider webhook endpoint.
 
     Raw provider payloads are parsed into `IncomingMessage` first, then the
-    assistant pipeline handles one stable shape. This mirrors MoviePilot's
-    message-parser pattern and keeps future image/audio/button support isolated
-    in provider parsers.
+    assistant pipeline handles one stable shape. The parser layer keeps future
+    image/audio/button support isolated in provider-specific adapters.
     """
     _check_webhook_token(token)
     try:

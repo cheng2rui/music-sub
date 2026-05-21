@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -81,20 +82,35 @@ def search_library(db: Session, keyword: str = "", limit: int = 10, **kwargs) ->
     ]}
 
 
-def list_tasks(db: Session, limit: int = 10, **kwargs) -> dict:
-    rows = db.query(DownloadTask).order_by(DownloadTask.created_at.desc()).limit(max(1, min(int(limit or 10), 30))).all()
+def list_tasks(db: Session, limit: int = 10, status: str = "", keyword: str = "", source: str = "all", site: str = "", sort: str = "created_desc", **kwargs) -> dict:
+    """List tasks using the same enriched/paged source as the Tasks UI."""
+    from app.api.tasks import list_tasks_page
+    data = list_tasks_page(
+        status=status or "",
+        keyword=keyword or "",
+        source=source or "all",
+        site=site or "",
+        sort=sort or "created_desc",
+        limit=max(1, min(int(limit or 10), 50)),
+        offset=0,
+        db=db,
+    )
     return {"items": [
         {
-            "id": r.id,
-            "name": r.torrent_name,
-            "site": r.site,
-            "status": r.status,
-            "size_gb": _size_gb(r.size),
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "hash": r.torrent_hash,
+            "id": r.get("id"),
+            "name": r.get("torrent_name"),
+            "site": r.get("site"),
+            "status": r.get("status"),
+            "size_gb": _size_gb(r.get("size")),
+            "progress": r.get("progress"),
+            "qb_state": r.get("qb_state"),
+            "download_speed": r.get("download_speed"),
+            "created_at": r.get("created_at").isoformat() if hasattr(r.get("created_at"), "isoformat") else r.get("created_at"),
+            "hash": r.get("torrent_hash"),
+            "external_qb": r.get("external_qb", False),
         }
-        for r in rows
-    ]}
+        for r in (data.get("items") or [])
+    ], "total": data.get("total", 0), "status_counts": data.get("status_counts") or {}}
 
 
 def list_subscriptions(db: Session, limit: int = 20, **kwargs) -> dict:
@@ -325,11 +341,20 @@ def complete_album(db: Session, artist: str, album: str, dry_run: bool = True, l
 def query_library_health(db: Session, kind: str = "", limit: int = 20, **kwargs) -> dict:
     """Query library hygiene issues for assistant diagnosis."""
     from app.api.library import library_health
-    allowed = {"", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts"}
+    allowed = {"", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts", "split_album_folders"}
     kind = (kind or "").strip()
     if kind not in allowed:
         raise ToolError("未知治理类别")
     return library_health(kind=kind, limit=max(1, min(int(limit or 20), 100)), db=db)
+
+
+def _redact_log_line(line: str) -> str:
+    """Redact common secrets before logs are shown to the assistant or UI."""
+    text = line or ""
+    text = re.sub(r"/bot\d+:[A-Za-z0-9_-]{20,}", "/bot***:***", text)
+    text = re.sub(r"(?i)(token|api[_-]?key|secret|password)=([^&\s]+)", r"\1=***", text)
+    text = re.sub(r"(?i)(Bearer|QQBot)\s+[A-Za-z0-9._~+/=-]{16,}", r"\1 ***", text)
+    return text
 
 
 def read_recent_logs(db: Session, lines: int = 120, level: str = "", **kwargs) -> dict:
@@ -345,7 +370,7 @@ def read_recent_logs(db: Session, lines: int = 120, level: str = "", **kwargs) -
         raise ToolError(f"读取日志失败：{e}")
     if level:
         all_lines = [line for line in all_lines if f"[{level}]" in line or level in line]
-    recent = all_lines[-lines:]
+    recent = [_redact_log_line(line) for line in all_lines[-lines:]]
     return {"lines": recent, "total": len(all_lines), "level": level}
 
 
@@ -353,7 +378,7 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
     "get_system_status": {"risk": "low", "function": get_system_status, "description": "获取 Music Sub 系统状态。", "parameters": {"type": "object", "properties": {}}},
     "get_library_stats": {"risk": "low", "function": get_library_stats, "description": "获取音乐库统计。", "parameters": {"type": "object", "properties": {}}},
     "search_library": {"risk": "low", "function": search_library, "description": "搜索本地音乐库。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "limit": {"type": "integer"}}}},
-    "list_tasks": {"risk": "low", "function": list_tasks, "description": "列出最近下载任务。", "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
+    "list_tasks": {"risk": "low", "function": list_tasks, "description": "列出下载任务，支持按状态、关键词、来源、站点筛选。", "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}, "status": {"type": "string"}, "keyword": {"type": "string"}, "source": {"type": "string", "enum": ["all", "internal", "qb", "external_qb", "online"]}, "site": {"type": "string"}, "sort": {"type": "string"}}}},
     "list_subscriptions": {"risk": "low", "function": list_subscriptions, "description": "列出订阅。", "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
     "search_pt": {"risk": "low", "function": search_pt, "description": "搜索 PT 音乐资源。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "sites": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer"}}, "required": ["keyword"]}},
     "search_online": {"risk": "low", "function": search_online_tool, "description": "搜索在线音乐源。", "parameters": {"type": "object", "properties": {"keyword": {"type": "string"}, "sources": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer"}}, "required": ["keyword"]}},
@@ -366,7 +391,7 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
     "organize_task": {"risk": "medium", "function": organize_task, "description": "对已下载完成的任务执行整理和刮削入库。", "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
     "rescrape_album": {"risk": "medium", "function": rescrape_album, "description": "重新刮削指定专辑的元数据。", "parameters": {"type": "object", "properties": {"artist": {"type": "string"}, "album": {"type": "string"}}, "required": ["artist", "album"]}},
     "complete_album": {"risk": "high", "function": complete_album, "description": "补齐本地专辑缺失曲目。dry_run=true 只预览候选；dry_run=false 会下载在线音源并整理入库，优先无损候选。", "parameters": {"type": "object", "properties": {"artist": {"type": "string"}, "album": {"type": "string"}, "dry_run": {"type": "boolean"}, "limit": {"type": "integer"}, "sources": {"type": "array", "items": {"type": "string"}}}, "required": ["artist", "album"]}},
-    "query_library_health": {"risk": "low", "function": query_library_health, "description": "查询音乐库治理问题，例如缺封面、缺歌词、未刮削、CUE 候选、专辑艺人冲突。", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts"]}, "limit": {"type": "integer"}}}},
+    "query_library_health": {"risk": "low", "function": query_library_health, "description": "查询音乐库治理问题，例如缺封面、缺歌词、未刮削、CUE 候选、专辑艺人冲突、专辑分裂。", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["", "missing_cover", "missing_lyrics", "missing_duration", "unknown_artist", "unscraped", "cue_candidates", "album_artist_conflicts", "split_album_folders"]}, "limit": {"type": "integer"}}}},
     "read_recent_logs": {"risk": "low", "function": read_recent_logs, "description": "读取最近应用日志，用于诊断下载、刮削、助手、站点连接等错误。", "parameters": {"type": "object", "properties": {"lines": {"type": "integer"}, "level": {"type": "string", "enum": ["", "INFO", "WARNING", "ERROR", "DEBUG"]}}}},
 }
 

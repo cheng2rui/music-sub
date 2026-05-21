@@ -654,7 +654,7 @@ def _process_completed_torrent(torrent: dict):
             mark_processed(torrent_hash)
         return
 
-    notify_download_complete(torrent_name, len(linked_files))
+    notify_download_complete(torrent_name, len(linked_files), files=linked_files)
 
     # Step 3: Scrape and tag each linked file
     db = SessionLocal()
@@ -764,7 +764,7 @@ def _process_completed_torrent(torrent: dict):
         # Notify scrape complete
         scraped_count = sum(1 for t in nfo_tracks)
         total_count = sum(1 for f in linked_files if is_audio_file(f))
-        notify_scrape_complete(torrent_name, scraped_count, total_count)
+        notify_scrape_complete(torrent_name, scraped_count, total_count, files=[f for f in linked_files if is_audio_file(f)])
     finally:
         db.close()
 

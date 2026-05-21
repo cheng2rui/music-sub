@@ -1,11 +1,21 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { getTasks, checkTasks, pauseTask, resumeTask, retryTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask, listLibraryJobs } from '@/api/index.js'
+import { getTasksPage, checkTasks, pauseTask, resumeTask, retryTask, deleteTask, previewTaskCleanup, applyTaskCleanup, pauseQbTask, resumeQbTask, deleteQbTask, importQbTask, organizeQbTask, listLibraryJobs } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
 
 const tasks = ref([])
+const taskTotal = ref(0)
+const taskOffset = ref(0)
+const taskLimit = ref(20)
+const taskStatus = ref('')
+const taskSource = ref('all')
+const taskSite = ref('')
+const taskKeyword = ref('')
+const taskSort = ref('created_desc')
+const statusCounts = ref({})
+const siteCounts = ref({})
 const loading = ref(false)
 const actingId = ref(null)
 const errorText = ref('')
@@ -21,6 +31,12 @@ const jobsError = ref('')
 let timer = null
 
 const hasActiveTasks = computed(() => tasks.value.some(t => ['downloading', 'organized', 'downloaded'].includes(t.status)))
+const currentPage = computed(() => Math.floor(taskOffset.value / taskLimit.value) + 1)
+const totalPages = computed(() => Math.max(1, Math.ceil(taskTotal.value / taskLimit.value)))
+const pageStart = computed(() => taskTotal.value ? taskOffset.value + 1 : 0)
+const pageEnd = computed(() => Math.min(taskOffset.value + taskLimit.value, taskTotal.value))
+const hasTaskFilters = computed(() => Boolean(taskStatus.value || taskSite.value || taskKeyword.value.trim() || taskSource.value !== 'all'))
+const siteOptions = computed(() => Object.keys(siteCounts.value || {}).filter(Boolean).sort())
 
 function scheduleNextLoad() {
   if (timer) clearTimeout(timer)
@@ -34,7 +50,23 @@ function scheduleNextLoad() {
 async function loadTasks() {
   try {
     errorText.value = ''
-    tasks.value = await getTasks()
+    const data = await getTasksPage({
+      limit: taskLimit.value,
+      offset: taskOffset.value,
+      status: taskStatus.value,
+      source: taskSource.value,
+      site: taskSite.value,
+      keyword: taskKeyword.value.trim(),
+      sort: taskSort.value,
+    })
+    tasks.value = data.items || []
+    taskTotal.value = Number(data.total || 0)
+    statusCounts.value = data.status_counts || {}
+    siteCounts.value = data.site_counts || {}
+    if (taskOffset.value >= taskTotal.value && taskOffset.value > 0) {
+      taskOffset.value = Math.max(0, (Math.ceil(taskTotal.value / taskLimit.value) - 1) * taskLimit.value)
+      return loadTasks()
+    }
     lastUpdatedAt.value = new Date()
   } catch (e) {
     console.error(e)
@@ -259,6 +291,33 @@ function handleVisibilityChange() {
   scheduleNextLoad()
 }
 
+function applyTaskFilters() {
+  taskOffset.value = 0
+  return loadTasks()
+}
+
+function resetTaskFilters() {
+  taskStatus.value = ''
+  taskSource.value = 'all'
+  taskSite.value = ''
+  taskKeyword.value = ''
+  taskSort.value = 'created_desc'
+  taskLimit.value = 20
+  taskOffset.value = 0
+  return loadTasks()
+}
+
+function goTaskPage(page) {
+  const next = Math.max(1, Math.min(totalPages.value, page))
+  taskOffset.value = (next - 1) * taskLimit.value
+  return loadTasks()
+}
+
+function changeTaskLimit() {
+  taskOffset.value = 0
+  return loadTasks()
+}
+
 onMounted(async () => {
   await refreshAll()
   scheduleNextLoad()
@@ -336,6 +395,76 @@ onUnmounted(() => {
 
     <div v-if="errorText" class="error-text">{{ errorText }}</div>
 
+    <section class="task-filter-panel">
+      <div class="filter-row">
+        <label class="filter-field wide">
+          <span>搜索</span>
+          <input v-model="taskKeyword" type="search" placeholder="任务名 / hash / tracker / 路径" @keyup.enter="applyTaskFilters" />
+        </label>
+        <label class="filter-field">
+          <span>状态</span>
+          <select v-model="taskStatus" @change="applyTaskFilters">
+            <option value="">全部状态</option>
+            <option value="downloading">下载中 {{ statusCounts.downloading ? `(${statusCounts.downloading})` : '' }}</option>
+            <option value="downloaded">已下载 {{ statusCounts.downloaded ? `(${statusCounts.downloaded})` : '' }}</option>
+            <option value="paused">已暂停 {{ statusCounts.paused ? `(${statusCounts.paused})` : '' }}</option>
+            <option value="failed">失败 {{ statusCounts.failed ? `(${statusCounts.failed})` : '' }}</option>
+            <option value="missing">qB缺失 {{ statusCounts.missing ? `(${statusCounts.missing})` : '' }}</option>
+            <option value="completed">已完成 {{ statusCounts.completed ? `(${statusCounts.completed})` : '' }}</option>
+            <option value="scraped">已刮削 {{ statusCounts.scraped ? `(${statusCounts.scraped})` : '' }}</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>来源</span>
+          <select v-model="taskSource" @change="applyTaskFilters">
+            <option value="all">全部来源</option>
+            <option value="internal">系统任务</option>
+            <option value="qb">qB 任务</option>
+            <option value="external_qb">qB 未关联</option>
+            <option value="online">在线音乐</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>站点</span>
+          <select v-model="taskSite" @change="applyTaskFilters">
+            <option value="">全部站点</option>
+            <option v-for="site in siteOptions" :key="site" :value="site">{{ site }} {{ siteCounts[site] ? `(${siteCounts[site]})` : '' }}</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>排序</span>
+          <select v-model="taskSort" @change="applyTaskFilters">
+            <option value="created_desc">创建时间 ↓</option>
+            <option value="created_asc">创建时间 ↑</option>
+            <option value="completed_desc">完成时间 ↓</option>
+            <option value="size_desc">大小 ↓</option>
+            <option value="progress_desc">进度 ↓</option>
+            <option value="name_asc">名称 A-Z</option>
+            <option value="status_asc">状态 A-Z</option>
+          </select>
+        </label>
+        <div class="filter-actions">
+          <AppButton variant="primary" @click="applyTaskFilters">筛选</AppButton>
+          <AppButton variant="ghost" :disabled="!hasTaskFilters" @click="resetTaskFilters">重置</AppButton>
+        </div>
+      </div>
+      <div class="pager-row top">
+        <div class="pager-summary">
+          共 {{ taskTotal }} 条<span v-if="hasTaskFilters">（已筛选）</span> · 当前 {{ pageStart }}-{{ pageEnd }} · 第 {{ currentPage }}/{{ totalPages }} 页
+        </div>
+        <div class="pager-actions">
+          <select v-model.number="taskLimit" @change="changeTaskLimit">
+            <option :value="10">10/页</option>
+            <option :value="20">20/页</option>
+            <option :value="50">50/页</option>
+            <option :value="100">100/页</option>
+          </select>
+          <AppButton variant="ghost" :disabled="currentPage <= 1" @click="goTaskPage(currentPage - 1)">上一页</AppButton>
+          <AppButton variant="ghost" :disabled="currentPage >= totalPages" @click="goTaskPage(currentPage + 1)">下一页</AppButton>
+        </div>
+      </div>
+    </section>
+
     <section class="library-jobs-panel">
       <button class="jobs-toggle" type="button" @click="jobsOpen = !jobsOpen">
         <span>最近曲库 Job</span>
@@ -369,7 +498,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <div v-if="tasks.length === 0" class="empty-text">暂无任务</div>
+    <div v-if="tasks.length === 0" class="empty-text">{{ hasTaskFilters ? '没有符合筛选条件的任务' : '暂无任务' }}</div>
     <div v-else class="tasks-section">
       <div class="tasks-table-wrap">
         <table class="tasks-table">
@@ -549,6 +678,17 @@ onUnmounted(() => {
           </div>
         </article>
       </div>
+
+      <div class="pager-row bottom">
+        <div class="pager-summary">共 {{ taskTotal }} 条 · 当前 {{ pageStart }}-{{ pageEnd }}</div>
+        <div class="pager-actions">
+          <AppButton variant="ghost" :disabled="currentPage <= 1" @click="goTaskPage(1)">首页</AppButton>
+          <AppButton variant="ghost" :disabled="currentPage <= 1" @click="goTaskPage(currentPage - 1)">上一页</AppButton>
+          <span class="page-chip">{{ currentPage }} / {{ totalPages }}</span>
+          <AppButton variant="ghost" :disabled="currentPage >= totalPages" @click="goTaskPage(currentPage + 1)">下一页</AppButton>
+          <AppButton variant="ghost" :disabled="currentPage >= totalPages" @click="goTaskPage(totalPages)">末页</AppButton>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -575,6 +715,18 @@ onUnmounted(() => {
 .delete-files-toggle.danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .tasks-section { display: block; }
+.task-filter-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.filter-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(120px, .75fr)) auto; gap: 10px; align-items: end; }
+.filter-field { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.filter-field span { color: var(--text-dim); font-size: 12px; font-weight: 700; }
+.filter-field input, .filter-field select, .pager-actions select { width: 100%; min-height: 34px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); padding: 0 10px; outline: none; }
+.filter-field input:focus, .filter-field select:focus, .pager-actions select:focus { border-color: var(--accent); }
+.filter-actions { display: flex; gap: 8px; align-items: center; }
+.pager-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-dim); font-size: 12px; }
+.pager-row.bottom { margin-top: 12px; padding: 10px 2px 0; }
+.pager-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pager-actions select { width: auto; min-width: 86px; }
+.page-chip { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-weight: 700; }
 .library-jobs-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); overflow: hidden; }
 .jobs-toggle { width: 100%; min-height: 46px; border: 0; background: transparent; color: var(--text); display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; text-align: left; }
 .jobs-toggle span { font-weight: 800; }
@@ -620,6 +772,14 @@ onUnmounted(() => {
   .tasks-header { flex-direction: column; align-items: stretch; }
   .tasks-header h2 { font-size: 18px; }
   .header-actions { justify-content: space-between; flex-wrap: wrap; }
+  .task-filter-panel { padding: 10px; }
+  .filter-row { grid-template-columns: 1fr 1fr; }
+  .filter-field.wide { grid-column: 1 / -1; }
+  .filter-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .filter-actions > * { flex: 1; }
+  .pager-row { align-items: stretch; flex-direction: column; }
+  .pager-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .pager-actions select { width: 100%; }
   .tasks-table-wrap { display: none; }
   .job-list { grid-template-columns: 1fr; }
   .task-cards { display: flex; flex-direction: column; gap: 12px; }
@@ -629,6 +789,9 @@ onUnmounted(() => {
 @media (max-width: 420px) {
   .tasks-view { padding: 16px; }
   .header-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .filter-row { grid-template-columns: 1fr; }
+  .filter-actions, .filter-field.wide { grid-column: auto; }
+  .pager-actions { grid-template-columns: 1fr 1fr; }
   .task-meta-grid { grid-template-columns: 1fr; }
 }
 

@@ -17,6 +17,7 @@ from app.models import MusicFile
 from app.organizer.hardlinker import AUDIO_EXTENSIONS
 from app.scrapers.tagger import read_audio_metadata, read_existing_tags, read_sidecar_lyrics, find_local_cover_data, read_embedded_cover
 from app.services.album_identity import canonical_album_artist
+from app.services.library_health_rules import has_lyrics, is_missing_lyrics_candidate, cue_split_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +114,7 @@ def _is_unknown_artist(artist: str | None) -> bool:
 
 
 def _has_lrc(path: str | Path) -> bool:
-    try:
-        return Path(path).with_suffix(".lrc").exists()
-    except Exception:
-        return False
+    return has_lyrics(str(path) if path else None)
 
 
 def _has_cover(path: str | Path) -> bool:
@@ -127,16 +125,9 @@ def _has_cover(path: str | Path) -> bool:
 def _cue_split_candidates(root: Path) -> int:
     count = 0
     for path in iter_audio_files(root):
-        same = path.with_suffix(".cue")
-        if same.exists():
+        meta = read_audio_metadata(str(path))
+        if cue_split_candidate(str(path), duration=meta.get("duration")):
             count += 1
-            continue
-        try:
-            cues = list(path.parent.glob("*.cue"))
-            if len(cues) == 1:
-                count += 1
-        except Exception:
-            continue
     return count
 
 
@@ -158,7 +149,15 @@ def _health_summary(db: Session, root_path: Path) -> dict:
             continue
         if not _has_cover(row.file_path):
             summary["missing_cover"] += 1
-        if not _has_lrc(row.file_path):
+        if is_missing_lyrics_candidate(
+            row.file_path,
+            title=row.title or "",
+            artist=row.artist or row.album_artist or "",
+            album=row.album or "",
+            genre=row.genre or "",
+            duration=row.duration,
+            scraped=row.scraped,
+        ):
             summary["missing_lyrics"] += 1
         if not row.duration or row.duration <= 0:
             summary["missing_duration"] += 1

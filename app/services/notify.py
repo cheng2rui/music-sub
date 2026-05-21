@@ -1,24 +1,28 @@
 """Multi-channel notification service.
 
-Inspired by MoviePilot's message modules, this module keeps Music Sub's first
-implementation intentionally small: one unified outbound API and one normalized
+This module keeps Music Sub's notification layer intentionally small: one unified
+outbound API and one normalized
 inbound path that can forward user messages to the built-in assistant.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
-import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
-import requests
 from sqlalchemy.orm import Session
 
 import app.config as cfg_module
 from app.db import SessionLocal
 from app.models import AssistantAction, AssistantConversation, NotifyEvent
+from app.services.notify_channels import qqbot as qqbot_channel
+from app.services.notify_channels import telegram as telegram_channel
+from app.services.notify_channels import wechatbot as wechatbot_channel
+from app.services.notify_channels import wecom as wecom_channel
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +75,7 @@ def telegram_inline_keyboard(actions: list[NotifyAction] | None) -> dict[str, An
 class IncomingMessage:
     """Normalized inbound chat message.
 
-    This is intentionally close to MoviePilot's CommingMessage idea: provider
+    Provider
     webhooks are parsed once into a stable shape, then the assistant pipeline no
     longer needs to know each platform's raw payload format.
     """
@@ -217,7 +221,9 @@ def normalize_incoming_message(channel: str, body: dict[str, Any] | Any) -> Inco
 DEFAULT_NOTIFY_TEMPLATES: dict[str, str] = {
     "download_added": "⬇️ <b>开始下载</b>\n{name}\n来源: {site}",
     "download_complete": "✅ <b>下载完成</b>\n{name}\n文件数: {file_count}",
+    "download_complete_batch": "✅ <b>下载完成 · {album_count} 张专辑 / {track_count} 首</b>\n\n{album_sections}\n\n总大小：{total_size_mb:.1f} MB",
     "scrape_complete": "🎵 <b>刮削完成</b>\n{name}\n成功: {scraped}/{total}",
+    "scrape_complete_batch": "🎵 <b>刮削完成 · {album_count} 张专辑 / {scraped}/{total} 首</b>\n\n{album_sections}\n\n总大小：{total_size_mb:.1f} MB",
     "error": "❌ <b>错误</b>\n{context}\n{error}",
     "cleanup_candidates": "🧹 <b>Music Sub 清理扫描发现候选</b>\n候选任务: {candidate_count}\nqB+DB: {qb_and_db_count} · 仅DB: {db_only_count}\n影响大小: {total_size_mb:.1f} MB · 剩余未下载: {total_amount_left_mb:.1f} MB\n请到任务列表执行清理扫描确认。",
 }
@@ -242,10 +248,6 @@ def render_notify_template(event: str, **context: Any) -> str:
         logger.warning("render notify template failed for %s: %s", event, exc)
         fallback = DEFAULT_NOTIFY_TEMPLATES.get(event) or "{message}"
         return render_template_text(fallback, context)
-
-
-_wecom_token_cache: dict[str, Any] = {"key": "", "token": "", "expires_at": 0.0}
-_qq_token_cache: dict[str, Any] = {"app_id": "", "token": "", "expires_at": 0.0}
 
 
 def _preview(text: str, limit: int = 500) -> str:
@@ -308,206 +310,40 @@ def _event_enabled(channel_cfg: Any, event: str) -> bool:
 
 
 def _send_telegram_chat_action(target: str | None = None, action: str = "typing") -> None:
-    tg = cfg_module.config.notify.telegram
-    chat_id = target or tg.chat_id
-    if not tg.enabled or not tg.bot_token or not chat_id:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{tg.bot_token}/sendChatAction",
-            json={"chat_id": chat_id, "action": action},
-            timeout=5,
-        )
-    except Exception:
-        pass
+    telegram_channel.send_chat_action(target=target, action=action)
 
 
 def _start_telegram_typing(target: str | None = None, *, interval: float = 4.5, max_seconds: int = 300) -> Callable[[], None]:
-    """Continuously renew Telegram typing status until stopped."""
-    stop_event = threading.Event()
-    chat_id = target or cfg_module.config.notify.telegram.chat_id
-    if not chat_id:
-        return stop_event.set
-
-    def worker() -> None:
-        deadline = time.time() + max_seconds
-        while not stop_event.is_set() and time.time() < deadline:
-            _send_telegram_chat_action(target=chat_id)
-            stop_event.wait(interval)
-
-    thread = threading.Thread(target=worker, name=f"telegram-typing-{chat_id}", daemon=True)
-    thread.start()
-    return stop_event.set
+    return telegram_channel.start_typing(target=target, interval=interval, max_seconds=max_seconds)
 
 
-def _send_telegram(text: str, target: str | None = None, reply_markup: dict[str, Any] | None = None) -> SendResult:
-    tg = cfg_module.config.notify.telegram
-    chat_id = target or tg.chat_id
-    if not tg.enabled or not tg.bot_token or not chat_id:
-        return SendResult("telegram", False, "telegram not configured")
-    try:
-        url = f"https://api.telegram.org/bot{tg.bot_token}/sendMessage"
-        payload: dict[str, Any] = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        resp = requests.post(url, json=payload, timeout=15)
-        data = resp.json() if resp.content else {}
-        ok = resp.status_code == 200 and data.get("ok")
-        # Assistant replies often contain Markdown, raw JSON, or angle brackets.
-        # Telegram HTML parsing rejects those. Retry as plain text so a bad parse
-        # never looks like a slow/no reply to the user.
-        if not ok and "parse entities" in (data.get("description") or "").lower():
-            plain_payload = dict(payload)
-            plain_payload.pop("parse_mode", None)
-            resp = requests.post(url, json=plain_payload, timeout=15)
-            data = resp.json() if resp.content else {}
-            ok = resp.status_code == 200 and data.get("ok")
-        return SendResult("telegram", bool(ok), data.get("description") or resp.text[:200], data)
-    except Exception as e:
-        logger.error("Telegram send error: %s", e)
-        return SendResult("telegram", False, str(e))
-
-
-def _wecom_token() -> str:
-    wc = cfg_module.config.notify.wecom
-    key = f"{wc.corp_id}:{wc.app_secret}"
-    now = time.time()
-    if _wecom_token_cache.get("key") == key and _wecom_token_cache.get("token") and now < float(_wecom_token_cache.get("expires_at") or 0):
-        return str(_wecom_token_cache["token"])
-    base = (wc.proxy or "https://qyapi.weixin.qq.com").rstrip("/")
-    resp = requests.get(f"{base}/cgi-bin/gettoken", params={"corpid": wc.corp_id, "corpsecret": wc.app_secret}, timeout=10)
-    data = resp.json()
-    if data.get("errcode") != 0 or not data.get("access_token"):
-        raise RuntimeError(data.get("errmsg") or resp.text[:200])
-    _wecom_token_cache.update({"key": key, "token": data["access_token"], "expires_at": now + int(data.get("expires_in") or 7200) - 300})
-    return str(data["access_token"])
+def _send_telegram(text: str, target: str | None = None, reply_markup: dict[str, Any] | None = None, image_path: str | None = None) -> SendResult:
+    if image_path and os.path.exists(image_path):
+        result = telegram_channel.send_photo(image_path, caption=text, target=target, reply_markup=reply_markup)
+    else:
+        result = telegram_channel.send_message(text, target=target, reply_markup=reply_markup)
+    return SendResult(result.channel, result.ok, result.message, result.response)
 
 
 def _send_wecom(text: str, userid: str | None = None) -> SendResult:
-    wc = cfg_module.config.notify.wecom
-    if not wc.enabled or not wc.corp_id or not wc.app_secret or not wc.agent_id:
-        return SendResult("wecom", False, "wecom not configured")
-    try:
-        token = _wecom_token()
-        base = (wc.proxy or "https://qyapi.weixin.qq.com").rstrip("/")
-        content = _plain_text(text)
-        # WeCom text messages are byte-limited; split conservatively.
-        chunks = []
-        buf = ""
-        for line in content.splitlines() or [content]:
-            candidate = f"{buf}\n{line}" if buf else line
-            if len(candidate.encode("utf-8")) > 1800 and buf:
-                chunks.append(buf)
-                buf = line
-            else:
-                buf = candidate
-        if buf:
-            chunks.append(buf)
-        last = None
-        for chunk in chunks:
-            resp = requests.post(
-                f"{base}/cgi-bin/message/send",
-                params={"access_token": token},
-                json={"touser": userid or wc.to_user or "@all", "msgtype": "text", "agentid": int(wc.agent_id), "text": {"content": chunk}, "safe": 0},
-                timeout=10,
-            )
-            last = resp.json() if resp.content else {}
-            if last.get("errcode") != 0:
-                return SendResult("wecom", False, last.get("errmsg") or resp.text[:200], last)
-        return SendResult("wecom", True, "ok", last)
-    except Exception as e:
-        logger.error("WeCom send error: %s", e)
-        return SendResult("wecom", False, str(e))
-
-
-def _qq_token() -> str:
-    qq = cfg_module.config.notify.qqbot
-    now_ms = int(time.time() * 1000)
-    if _qq_token_cache.get("app_id") == qq.app_id and _qq_token_cache.get("token") and now_ms < int(_qq_token_cache.get("expires_at") or 0):
-        return str(_qq_token_cache["token"])
-    resp = requests.post("https://bots.qq.com/app/getAppAccessToken", json={"appId": qq.app_id, "clientSecret": qq.app_secret}, timeout=15)
-    data = resp.json()
-    token = data.get("access_token")
-    if not token:
-        raise RuntimeError(data.get("message") or resp.text[:200])
-    expires_in = int(data.get("expires_in") or 7200)
-    _qq_token_cache.update({"app_id": qq.app_id, "token": token, "expires_at": now_ms + expires_in * 1000 - 300000})
-    return str(token)
+    result = wecom_channel.send_text(text, userid=userid)
+    return SendResult(result.channel, result.ok, result.message, result.response)
 
 
 def _send_qqbot(text: str, target: str | None = None, group: bool | None = None, msg_id: str | None = None) -> SendResult:
-    qq = cfg_module.config.notify.qqbot
-    if not qq.enabled or not qq.app_id or not qq.app_secret:
-        return SendResult("qqbot", False, "qqbot not configured")
-    try:
-        token = _qq_token()
-        is_group = bool(group) if group is not None else bool(qq.group_openid and not target)
-        target_id = target or (qq.group_openid if is_group else qq.user_openid)
-        if not target_id:
-            return SendResult("qqbot", False, "qqbot target missing")
-        path = f"/v2/groups/{target_id}/messages" if is_group else f"/v2/users/{target_id}/messages"
-        body: dict[str, Any] = {"content": _plain_text(text), "msg_type": 0, "msg_seq": int(time.time()) % 100000}
-        if msg_id:
-            body["msg_id"] = msg_id
-        resp = requests.post(
-            f"https://api.sgroup.qq.com{path}",
-            headers={"Authorization": f"QQBot {token}", "Content-Type": "application/json"},
-            json=body,
-            timeout=15,
-        )
-        data = resp.json() if resp.content else {}
-        if resp.status_code >= 400 or data.get("code"):
-            return SendResult("qqbot", False, data.get("message") or resp.text[:200], data)
-        return SendResult("qqbot", True, "ok", data)
-    except Exception as e:
-        logger.error("QQBot send error: %s", e)
-        return SendResult("qqbot", False, str(e))
+    result = qqbot_channel.send_text(text, target=target, group=group, msg_id=msg_id)
+    return SendResult(result.channel, result.ok, result.message, result.response)
 
 
 def _send_wechatbot(text: str, target: str | None = None) -> SendResult:
-    wb = cfg_module.config.notify.wechatbot
-    if not wb.enabled:
-        return SendResult("wechatbot", False, "wechatbot not enabled")
-    if wb.enable_claw:
-        try:
-            from app.services.wechatclaw import send_text, load_state
-            target_id = target or wb.claw_default_target or ""
-            if not target_id:
-                targets = load_state().get("known_targets") or {}
-                if targets:
-                    target_id = sorted(targets.values(), key=lambda x: x.get("last_active") or 0, reverse=True)[0].get("userid") or ""
-            if not target_id:
-                return SendResult("wechatbot", False, "wechat claw target missing")
-            ok = send_text(target_id, _plain_text(text))
-            return SendResult("wechatbot", ok, "ok" if ok else "wechat claw send failed")
-        except Exception as e:
-            logger.error("WeChat Claw send error: %s", e)
-            return SendResult("wechatbot", False, str(e))
-    if not wb.webhook_url:
-        return SendResult("wechatbot", False, "wechatbot webhook_url not configured")
-    try:
-        payload: dict[str, Any] = {"text": _plain_text(text)}
-        if target:
-            payload["target"] = target
-        if wb.token:
-            payload["token"] = wb.token
-        resp = requests.post(wb.webhook_url, json=payload, timeout=15)
-        ok = 200 <= resp.status_code < 300
-        data = None
-        try:
-            data = resp.json()
-        except Exception:
-            data = resp.text[:300]
-        return SendResult("wechatbot", ok, "ok" if ok else str(data)[:200], data)
-    except Exception as e:
-        logger.error("WeChatBot send error: %s", e)
-        return SendResult("wechatbot", False, str(e))
+    result = wechatbot_channel.send_text(text, target=target)
+    return SendResult(result.channel, result.ok, result.message, result.response)
 
 
-def send_channel(channel: str, text: str, *, target: str | None = None, group: bool | None = None, msg_id: str | None = None, reply_markup: dict[str, Any] | None = None) -> SendResult:
+def send_channel(channel: str, text: str, *, target: str | None = None, group: bool | None = None, msg_id: str | None = None, reply_markup: dict[str, Any] | None = None, image_path: str | None = None) -> SendResult:
     channel = (channel or "").lower()
     if channel == "telegram":
-        result = _send_telegram(text, target=target, reply_markup=reply_markup)
+        result = _send_telegram(text, target=target, reply_markup=reply_markup, image_path=image_path)
     elif channel in {"wecom", "wechat", "wework"}:
         result = _send_wecom(text, userid=target)
     elif channel == "qqbot":
@@ -520,14 +356,14 @@ def send_channel(channel: str, text: str, *, target: str | None = None, group: b
     return result
 
 
-def send_all(event: str, text: str, *, actions: list[NotifyAction] | None = None) -> list[SendResult]:
+def send_all(event: str, text: str, *, actions: list[NotifyAction] | None = None, image_path: str | None = None) -> list[SendResult]:
     cfg = cfg_module.config.notify
     results: list[SendResult] = []
     tg_markup = telegram_inline_keyboard(actions)
     for name in ("telegram", "wecom", "qqbot", "wechatbot"):
         ch_cfg = getattr(cfg, name)
         if _event_enabled(ch_cfg, event):
-            results.append(send_channel(name, text, reply_markup=tg_markup if name == "telegram" else None))
+            results.append(send_channel(name, text, reply_markup=tg_markup if name == "telegram" else None, image_path=image_path if name == "telegram" else None))
     return results
 
 
@@ -625,7 +461,7 @@ def handle_incoming_message(db: Session, incoming: IncomingMessage) -> dict[str,
         and not getattr(assistant_cfg, "global_chat", True)
         and not _is_shortcut_text(text)
     ):
-        # MoviePilot-style non-global mode: ordinary chat is ignored unless the
+        # Non-global mode: ordinary chat is ignored unless the
         # user explicitly invokes /ai.  Do not send noisy fallback messages.
         return {"ok": True, "conversation_id": conv.id, "message": "ignored: /ai required", "ignored": True}
 
@@ -670,12 +506,77 @@ def notify_download_added(torrent_name: str, site: str):
     send_all("on_download_added", text)
 
 
-def notify_download_complete(torrent_name: str, file_count: int):
-    text = render_notify_template("download_complete", name=torrent_name, file_count=file_count)
-    log_notify_event(channel="system", direction="internal", event="download_complete", text=text, status="ok", message=f"{file_count} files")
+_download_batch_lock = threading.Lock()
+_download_batch_timer: threading.Timer | None = None
+_download_batch_items: list[dict[str, Any]] = []
+
+
+def _format_size_mb(size_bytes: int | float | None) -> float:
+    return round(float(size_bytes or 0) / 1024 / 1024, 1)
+
+
+def _guess_cover_path(album_dir: str | None) -> str:
+    if not album_dir:
+        return ""
+    base = Path(album_dir)
+    for name in ("cover.jpg", "cover.png", "folder.jpg", "front.jpg", "Cover.jpg"):
+        p = base / name
+        if p.exists():
+            return str(p)
+    return ""
+
+
+def _download_track_payload(file_path: str) -> dict[str, Any]:
+    p = Path(file_path)
+    return {
+        "title": p.stem,
+        "format": p.suffix.lstrip(".").upper() or "AUDIO",
+        "size_bytes": p.stat().st_size if p.exists() else 0,
+        "album_dir": str(p.parent),
+    }
+
+
+def _flush_download_complete_batch() -> None:
+    global _download_batch_timer, _download_batch_items
+    with _download_batch_lock:
+        items = _download_batch_items
+        _download_batch_items = []
+        _download_batch_timer = None
+    if not items:
+        return
+
+    albums: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        album_key = item.get("name") or Path(item.get("album_dir") or "").name or "下载完成"
+        albums.setdefault(album_key, []).append(item)
+
+    sections: list[str] = []
+    total_size = 0
+    first_cover = ""
+    for album, tracks in albums.items():
+        if not first_cover:
+            first_cover = _guess_cover_path(tracks[0].get("album_dir"))
+        album_size = sum(int(t.get("size_bytes") or 0) for t in tracks)
+        total_size += album_size
+        sections.append(f"<b>💿 {album}</b> · {len(tracks)} 首 · {_format_size_mb(album_size):.1f} MB")
+        for idx, track in enumerate(tracks[:12], 1):
+            sections.append(f"{idx}. {track.get('title') or '-'} · {track.get('format') or '-'} · {_format_size_mb(track.get('size_bytes')):.1f} MB")
+        if len(tracks) > 12:
+            sections.append(f"… 还有 {len(tracks) - 12} 首")
+        sections.append("")
+
+    text = render_notify_template(
+        "download_complete_batch",
+        album_count=len(albums),
+        track_count=len(items),
+        album_sections="\n".join(sections).strip(),
+        total_size_mb=_format_size_mb(total_size),
+    )
+    log_notify_event(channel="system", direction="internal", event="download_complete", text=text, status="ok", message=f"{len(items)} tracks batched", raw={"items": items[:50], "image_path": first_cover})
     send_all(
         "on_download_complete",
         text,
+        image_path=first_cover,
         actions=[
             NotifyAction("📚 打开音乐库", "打开音乐库", "/library"),
             NotifyAction("⬇️ 查看任务", "查看任务", "/tasks"),
@@ -683,17 +584,111 @@ def notify_download_complete(torrent_name: str, file_count: int):
     )
 
 
-def notify_scrape_complete(torrent_name: str, scraped: int, total: int):
-    text = render_notify_template("scrape_complete", name=torrent_name, scraped=scraped, total=total)
-    log_notify_event(channel="system", direction="internal", event="scrape_complete", text=text, status="ok", message=f"{scraped}/{total}")
+def notify_download_complete(torrent_name: str, file_count: int, files: list[str] | None = None):
+    delay = max(0, min(int(getattr(cfg_module.config.notify, "download_complete_batch_delay_seconds", 20) or 0), 3600))
+    tracks = [_download_track_payload(path) for path in (files or [])]
+    if not tracks:
+        tracks = [{"title": torrent_name, "format": "-", "size_bytes": 0, "album_dir": ""} for _ in range(max(1, int(file_count or 1)))]
+    for track in tracks:
+        track["name"] = torrent_name
+    if delay <= 0:
+        with _download_batch_lock:
+            _download_batch_items.extend(tracks)
+        _flush_download_complete_batch()
+        return
+    global _download_batch_timer
+    with _download_batch_lock:
+        _download_batch_items.extend(tracks)
+        if _download_batch_timer:
+            _download_batch_timer.cancel()
+        _download_batch_timer = threading.Timer(delay, _flush_download_complete_batch)
+        _download_batch_timer.daemon = True
+        _download_batch_timer.start()
+    text = f"下载完成已加入聚合通知：{torrent_name}（{len(tracks)} 首，约 {delay}s 后推送）"
+    log_notify_event(channel="system", direction="internal", event="download_complete_pending", text=text, status="ok", message=f"delay {delay}s")
+
+
+_scrape_batch_lock = threading.Lock()
+_scrape_batch_timer: threading.Timer | None = None
+_scrape_batch_items: list[dict[str, Any]] = []
+
+
+def _flush_scrape_complete_batch() -> None:
+    global _scrape_batch_timer, _scrape_batch_items
+    with _scrape_batch_lock:
+        items = _scrape_batch_items
+        _scrape_batch_items = []
+        _scrape_batch_timer = None
+    if not items:
+        return
+
+    albums: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        album_key = item.get("name") or Path(item.get("album_dir") or "").name or "刮削完成"
+        albums.setdefault(album_key, []).append(item)
+    total_expected = sum(max([int(t.get("total_hint") or 1) for t in tracks] or [len(tracks)]) for tracks in albums.values())
+
+    sections: list[str] = []
+    total_size = 0
+    first_cover = ""
+    for album, tracks in albums.items():
+        if not first_cover:
+            first_cover = _guess_cover_path(tracks[0].get("album_dir"))
+        album_size = sum(int(t.get("size_bytes") or 0) for t in tracks)
+        total_size += album_size
+        sections.append(f"<b>💿 {album}</b> · {len(tracks)} 首 · {_format_size_mb(album_size):.1f} MB")
+        for idx, track in enumerate(tracks[:12], 1):
+            sections.append(f"{idx}. {track.get('title') or '-'} · {track.get('format') or '-'} · {_format_size_mb(track.get('size_bytes')):.1f} MB")
+        if len(tracks) > 12:
+            sections.append(f"… 还有 {len(tracks) - 12} 首")
+        sections.append("")
+
+    scraped = len(items)
+    total = max(scraped, total_expected)
+    text = render_notify_template(
+        "scrape_complete_batch",
+        album_count=len(albums),
+        scraped=scraped,
+        total=total,
+        track_count=scraped,
+        album_sections="\n".join(sections).strip(),
+        total_size_mb=_format_size_mb(total_size),
+    )
+    log_notify_event(channel="system", direction="internal", event="scrape_complete", text=text, status="ok", message=f"{scraped}/{total} tracks batched", raw={"items": items[:50], "image_path": first_cover})
     send_all(
         "on_scrape_complete",
         text,
+        image_path=first_cover,
         actions=[
             NotifyAction("📚 打开音乐库", "打开音乐库", "/library"),
             NotifyAction("🛠️ 治理", "打开治理", "/library?health=1"),
         ],
     )
+
+
+def notify_scrape_complete(torrent_name: str, scraped: int, total: int, files: list[str] | None = None):
+    delay = max(0, min(int(getattr(cfg_module.config.notify, "scrape_complete_batch_delay_seconds", 20) or 0), 3600))
+    tracks = [_download_track_payload(path) for path in (files or [])]
+    if not tracks:
+        tracks = [{"title": torrent_name, "format": "-", "size_bytes": 0, "album_dir": ""} for _ in range(max(1, int(scraped or total or 1)))]
+    for track in tracks:
+        track["name"] = torrent_name
+        track["total_hint"] = total
+    if delay <= 0:
+        with _scrape_batch_lock:
+            _scrape_batch_items.extend(tracks)
+        _flush_scrape_complete_batch()
+        return
+    global _scrape_batch_timer
+    with _scrape_batch_lock:
+        _scrape_batch_items.extend(tracks)
+        if _scrape_batch_timer:
+            _scrape_batch_timer.cancel()
+        _scrape_batch_timer = threading.Timer(delay, _flush_scrape_complete_batch)
+        _scrape_batch_timer.daemon = True
+        _scrape_batch_timer.start()
+    text = f"刮削完成已加入聚合通知：{torrent_name}（{scraped}/{total}，约 {delay}s 后推送）"
+    log_notify_event(channel="system", direction="internal", event="scrape_complete_pending", text=text, status="ok", message=f"delay {delay}s")
 
 
 def notify_error(context: str, error: str):

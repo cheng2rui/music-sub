@@ -73,7 +73,13 @@ export const changePasswordApi = (oldPassword, newUsername, newPassword) =>
   }).then(r => r.json())
 
 // ============ Discover ============
-export const getPersonalized = () => authFetch('/api/discover/personalized').then(r => r.json())
+export const getPersonalized = (params = {}) => {
+  const qs = new URLSearchParams()
+  if (params.limit) qs.set('limit', params.limit)
+  if (params.seed) qs.set('seed', params.seed)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return authFetch(`/api/discover/personalized${suffix}`).then(r => r.json())
+}
 export const parsePlaylistUrl = (url) => authFetch('/api/discover/parse-playlist-url?url=' + encodeURIComponent(url), { method: 'POST' }).then(r => r.json())
 
 // ============ Subscriptions ============
@@ -140,6 +146,10 @@ export const downloadOnlineSong = (song, organize = true) => json(authFetch('/ap
 
 // ============ Tasks ============
 export const getTasks = () => authFetch('/api/tasks/').then(r => r.json())
+export const getTasksPage = (params = {}) => {
+  const qs = new URLSearchParams({ limit: 20, offset: 0, ...params }).toString()
+  return authFetch(`/api/tasks/page?${qs}`).then(r => r.json())
+}
 export const checkTasks = () => authFetch('/api/tasks/check', { method: 'POST' }).then(r => r.json())
 export const previewTaskCleanup = () => authFetch('/api/tasks/cleanup/preview', { method: 'POST' }).then(r => r.json())
 export const applyTaskCleanup = (deleteFiles = false) => authFetch(`/api/tasks/cleanup/apply?delete_files=${deleteFiles ? 'true' : 'false'}`, { method: 'POST' }).then(r => r.json())
@@ -174,6 +184,16 @@ export const deleteAssistantConversation = (id) => json(authFetch(`/api/assistan
 export const sendAssistantMessage = (message, conversationId = null) => json(authFetch('/api/assistant/chat', {
   method: 'POST',
   body: JSON.stringify({ message, conversation_id: conversationId }),
+  timeoutMs: ASSISTANT_TIMEOUT_MS
+}))
+export const prepareAssistantAction = (toolName, args = {}, conversationId = null) => json(authFetch('/api/assistant/actions/prepare', {
+  method: 'POST',
+  body: JSON.stringify({ tool_name: toolName, args, conversation_id: conversationId }),
+  timeoutMs: ASSISTANT_TIMEOUT_MS
+}))
+export const prepareAssistantResultAction = (messageId, itemIndex, actionKey = 'download') => json(authFetch('/api/assistant/actions/prepare-from-result', {
+  method: 'POST',
+  body: JSON.stringify({ message_id: messageId, item_index: itemIndex, action_key: actionKey }),
   timeoutMs: ASSISTANT_TIMEOUT_MS
 }))
 export const confirmAssistantAction = (actionId) => json(authFetch(`/api/assistant/actions/${actionId}/confirm`, { method: 'POST', timeoutMs: ASSISTANT_TIMEOUT_MS }))

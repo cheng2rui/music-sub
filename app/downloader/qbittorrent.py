@@ -127,14 +127,21 @@ class QBClient:
             return None
 
     def get_completed(self, category: Optional[str] = None, tag: Optional[str] = None) -> list[dict]:
-        """Get completed torrents filtered by category/tag."""
+        """Get completed torrents filtered by category/tag.
+
+        Tagged import: when monitor_tagged_torrents is enabled, the
+        configured tag is the source of truth and category is intentionally not
+        used. This lets users manually add the `music-sub` tag to any qB task and
+        have it picked up after completion, even if the task category is empty or
+        something else.
+        """
         cfg = config.qbittorrent
         try:
-            torrents = self.client.torrents_info(
-                status_filter="completed",
-                category=category or cfg.category,
-                tag=tag or cfg.tag,
-            )
+            query: dict[str, object] = {"status_filter": "completed", "tag": tag or cfg.tag}
+            category_filter = category if category is not None else ("" if getattr(cfg, "monitor_tagged_torrents", True) else cfg.category)
+            if category_filter:
+                query["category"] = category_filter
+            torrents = self.client.torrents_info(**query)
             return [
                 {
                     "hash": t.hash,
@@ -187,8 +194,9 @@ class QBClient:
     def delete_torrent(self, torrent_hash: str, delete_files: bool = False) -> bool:
         """Delete a torrent from qBittorrent. Does not delete files by default."""
         try:
-            # Clear internal processed marker first so a future re-import can be processed again.
+            # Clear processed markers first so a future re-import can be processed again.
             self.remove_tag(torrent_hash, "music-sub-done")
+            self.remove_tag(torrent_hash, "已整理")
             self.client.torrents_delete(delete_files=delete_files, torrent_hashes=torrent_hash)
             return True
         except Exception as e:

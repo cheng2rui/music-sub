@@ -13,27 +13,15 @@ from sqlalchemy.orm import Session
 from app.models import MusicFile
 from app.services.library_tools.base import PreviewItem, ToolPreview
 from app.services.library_tools import split_audio
+from app.services.library_health_rules import cue_split_candidate
 
 
-def _has_cue(file_path: str | None) -> bool:
-    if not file_path:
-        return False
-    path = Path(file_path)
-    if path.with_suffix(".cue").exists():
-        return True
-    try:
-        if len(list(path.parent.glob("*.cue"))) == 1:
-            return True
-    except Exception:
-        pass
-    try:
-        return split_audio._matched_cue(path) is not None
-    except Exception:
-        return False
+def _has_cue(file: MusicFile) -> bool:
+    return cue_split_candidate(file.file_path, duration=file.duration)
 
 
 def _candidates(files: list[MusicFile]) -> list[MusicFile]:
-    return [f for f in files if _has_cue(f.file_path)]
+    return [f for f in files if _has_cue(f)]
 
 
 def preview(db: Session, files: list[MusicFile], options: dict[str, Any]) -> ToolPreview:
