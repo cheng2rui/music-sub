@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPersonalized, getLibraryStats, getTasks } from '@/api/index.js'
+import { getPersonalized, getLibraryStats, getTasks, getLibraryHealth, getNotifyStatus, getScheduler, getLibraryAlbums, listLibraryJobs } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -14,16 +14,24 @@ const player = usePlayerStore()
 const recommend = ref([])
 const libraryStats = ref({ total_files: 0, scraped: 0, unscraped: 0, artists: 0, albums: 0 })
 const tasks = ref([])
+const health = ref({ totals: {}, samples: {} })
+const notifyStatus = ref(null)
+const scheduler = ref([])
+const recentAlbums = ref([])
+const libraryJobs = ref([])
 const loading = ref(false)
 const showHomeSettings = ref(false)
 
 const HOME_MODULE_STORAGE_KEY = 'music_sub_discover_local_modules'
 const defaultHomeModules = [
   { key: 'hero', label: '顶部主打', desc: '本地今日主打和快捷入口', enabled: true },
+  { key: 'status', label: '系统状态', desc: 'qB、通知、调度器和最近任务健康概览', enabled: true },
+  { key: 'health', label: '曲库健康', desc: '缺封面、缺歌词、未刮削等治理入口', enabled: true },
   { key: 'stats', label: '数据概览', desc: '本地曲目、刮削完成率、下载任务', enabled: true },
   { key: 'quick', label: '快捷入口', desc: '搜索、订阅、曲库、任务入口', enabled: true },
   { key: 'recommend', label: '今日推荐', desc: '只基于本地音乐库生成', enabled: true },
-  { key: 'tasks', label: '最近任务', desc: '下载与入库进度速览', enabled: true }
+  { key: 'tasks', label: '最近任务', desc: '下载与入库进度速览', enabled: true },
+  { key: 'albums', label: '最近入库', desc: '最近更新的专辑入口', enabled: true }
 ]
 const homeModules = ref(loadHomeModules())
 
@@ -31,13 +39,50 @@ const featuredSong = computed(() => recommend.value[0] || null)
 const recommendedSongs = computed(() => recommend.value.slice(0, 12))
 const recentTasks = computed(() => tasks.value.slice(0, 4))
 const activeTaskCount = computed(() => tasks.value.filter(t => ['downloading', 'organized', 'downloaded'].includes(t.status)).length)
-const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && ['recommend', 'tasks'].includes(m.key)))
+const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && ['recommend', 'tasks', 'albums'].includes(m.key)))
 const libraryTotal = computed(() => libraryStats.value.total_files || libraryStats.value.tracks || 0)
 const scrapedRate = computed(() => {
   const total = libraryTotal.value
   if (!total) return '0%'
   return Math.round(((libraryStats.value.scraped || 0) / total) * 100) + '%'
 })
+
+const taskBreakdown = computed(() => {
+  const map = { downloading: 0, downloaded: 0, organized: 0, scraped: 0, failed: 0, paused: 0 }
+  for (const task of tasks.value || []) map[task.status] = (map[task.status] || 0) + 1
+  return map
+})
+const healthItems = computed(() => {
+  const labels = {
+    missing_cover: '缺封面',
+    missing_lyrics: '缺歌词',
+    missing_duration: '缺时长',
+    unknown_artist: '未知艺人',
+    unscraped: '未刮削',
+    cue_candidates: 'CUE 候选',
+    album_artist_conflicts: '专辑艺人冲突',
+    split_album_folders: '同专辑分裂'
+  }
+  return Object.entries(labels).map(([key, label]) => ({ key, label, count: Number(health.value?.totals?.[key] || 0) }))
+})
+const healthIssueCount = computed(() => healthItems.value.reduce((sum, item) => sum + item.count, 0))
+const schedulerSummary = computed(() => {
+  const jobs = Array.isArray(scheduler.value) ? scheduler.value : []
+  return { total: jobs.length, enabled: jobs.filter(j => j.enabled !== false).length }
+})
+const notifyChannels = computed(() => {
+  const raw = notifyStatus.value || {}
+  const entries = raw.channels || raw.status || raw.items || raw
+  if (!entries || typeof entries !== 'object') return []
+  return Object.entries(entries).filter(([, v]) => v && typeof v === 'object').map(([key, val]) => ({ key, enabled: !!val.enabled, ok: val.ok !== false, label: key }))
+})
+const systemCards = computed(() => [
+  { key: 'qb', label: '下载器 / qB', value: taskBreakdown.value.downloading ? `${taskBreakdown.value.downloading} 下载中` : '空闲', tone: taskBreakdown.value.failed ? 'warn' : 'ok', meta: `失败 ${taskBreakdown.value.failed || 0} · 待整理 ${taskBreakdown.value.downloaded || 0}` },
+  { key: 'health', label: '曲库健康', value: healthIssueCount.value ? `${healthIssueCount.value} 个问题` : '干净', tone: healthIssueCount.value ? 'warn' : 'ok', meta: `未刮削 ${health.value?.totals?.unscraped || 0} · 缺封面 ${health.value?.totals?.missing_cover || 0}` },
+  { key: 'notify', label: '通知通道', value: notifyChannels.value.filter(c => c.enabled).length ? `${notifyChannels.value.filter(c => c.enabled).length} 个启用` : '未启用', tone: notifyChannels.value.some(c => c.enabled && !c.ok) ? 'warn' : 'ok', meta: notifyChannels.value.filter(c => c.enabled).map(c => c.label).join(' / ') || 'Telegram / WeCom / QQBot / WeChatBot' },
+  { key: 'scheduler', label: '调度器', value: `${schedulerSummary.value.enabled}/${schedulerSummary.value.total}`, tone: schedulerSummary.value.enabled ? 'ok' : 'muted', meta: '启用 / 总任务' },
+])
+
 
 const quickLinks = [
   { icon: '🔎', title: '搜索资源', desc: '按歌名 / 艺人找 PT 或在线音乐', path: '/search' },
@@ -49,14 +94,24 @@ const quickLinks = [
 async function loadAll() {
   loading.value = true
   try {
-    const [rec, stats, taskList] = await Promise.allSettled([
+    const [rec, stats, taskList, healthRes, notifyRes, schedulerRes, albumsRes, jobsRes] = await Promise.allSettled([
       getPersonalized(),
       getLibraryStats(),
-      getTasks()
+      getTasks(),
+      getLibraryHealth({ limit: 1 }),
+      getNotifyStatus(),
+      getScheduler(),
+      getLibraryAlbums({ limit: 6, sort: 'updated' }),
+      listLibraryJobs(5)
     ])
     recommend.value = rec.status === 'fulfilled' ? (rec.value.items || []) : []
     libraryStats.value = stats.status === 'fulfilled' ? (stats.value || {}) : libraryStats.value
     tasks.value = taskList.status === 'fulfilled' ? (Array.isArray(taskList.value) ? taskList.value : []) : []
+    health.value = healthRes.status === 'fulfilled' ? (healthRes.value || health.value) : health.value
+    notifyStatus.value = notifyRes.status === 'fulfilled' ? (notifyRes.value || null) : notifyStatus.value
+    scheduler.value = schedulerRes.status === 'fulfilled' ? (schedulerRes.value?.jobs || schedulerRes.value || []) : scheduler.value
+    recentAlbums.value = albumsRes.status === 'fulfilled' ? (albumsRes.value?.items || albumsRes.value || []) : recentAlbums.value
+    libraryJobs.value = jobsRes.status === 'fulfilled' ? (jobsRes.value?.items || jobsRes.value || []) : libraryJobs.value
   } catch (e) {
     console.error(e)
   } finally {
@@ -118,6 +173,17 @@ function go(path) {
   router.push(path)
 }
 
+function openHealth(key = '') {
+  router.push(key ? `/library?health=1&kind=${encodeURIComponent(key)}` : '/library?health=1')
+}
+
+function openAlbum(item) {
+  const artist = item.album_artist || item.artist || ''
+  const album = item.album || ''
+  if (artist && album) router.push(`/album?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`)
+  else router.push('/library')
+}
+
 function normalizePlayable(item) {
   return {
     id: item.file_id || item.id || item.song_id,
@@ -162,6 +228,31 @@ onMounted(loadAll)
           <small>{{ featuredSong.artist || featuredSong.album || '未知艺人' }}</small>
           <small v-if="featuredSong.reason" class="song-reason">{{ featuredSong.reason }}</small>
         </div>
+      </div>
+    </section>
+
+
+    <section v-if="isHomeModuleEnabled('status')" class="system-grid">
+      <article v-for="card in systemCards" :key="card.key" :class="['system-card', card.tone]">
+        <span>{{ card.label }}</span>
+        <strong>{{ card.value }}</strong>
+        <small>{{ card.meta }}</small>
+      </article>
+    </section>
+
+    <section v-if="isHomeModuleEnabled('health')" class="panel health-panel">
+      <div class="section-header compact">
+        <div>
+          <h2>曲库健康</h2>
+          <p>把最常见的治理问题放到首页，一眼知道哪里需要处理。</p>
+        </div>
+        <AppButton variant="ghost" size="sm" @click="openHealth()">打开治理</AppButton>
+      </div>
+      <div class="health-chip-grid">
+        <button v-for="item in healthItems" :key="item.key" :class="['health-chip', { warn: item.count > 0 }]" @click="openHealth(item.key)">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.count }}</strong>
+        </button>
       </div>
     </section>
 
@@ -240,6 +331,27 @@ onMounted(loadAll)
           </article>
         </div>
       </section>
+
+      <section v-if="isHomeModuleEnabled('albums')" class="panel">
+        <div class="section-header compact">
+          <div>
+            <h2>最近入库</h2>
+            <p>最近更新的专辑。</p>
+          </div>
+          <AppButton variant="ghost" size="sm" @click="go('/library')">曲库</AppButton>
+        </div>
+        <div v-if="recentAlbums.length === 0" class="empty-state">暂无最近入库</div>
+        <div v-else class="album-mini-list">
+          <article v-for="album in recentAlbums" :key="`${album.album_artist || album.artist}-${album.album}`" class="mini-album" @click="openAlbum(album)">
+            <MusicCover :src="album.cover" class="mini-album-cover" />
+            <div>
+              <strong>{{ album.album || '未知专辑' }}</strong>
+              <small>{{ album.album_artist || album.artist || '未知艺人' }} · {{ album.track_count || album.count || 0 }} 首</small>
+            </div>
+          </article>
+        </div>
+      </section>
+
     </div>
 
     <AppModal v-if="showHomeSettings" title="编辑首页" @close="showHomeSettings = false">
@@ -278,6 +390,27 @@ onMounted(loadAll)
 .hero-track span { color: var(--accent); font-size: 12px; font-weight: 700; }
 .hero-track strong { font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hero-track small { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.system-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.system-card { display: flex; flex-direction: column; gap: 5px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); box-shadow: var(--shadow-card); min-width: 0; }
+.system-card span { color: var(--text-dim); font-size: 12px; font-weight: 700; }
+.system-card strong { font-size: 20px; line-height: 1.15; }
+.system-card small { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.system-card.ok { border-color: color-mix(in srgb, var(--success) 28%, var(--border)); }
+.system-card.warn { border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); }
+.system-card.muted { opacity: .82; }
+.health-panel { padding: 16px; }
+.health-chip-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.health-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-soft); color: var(--text-dim); cursor: pointer; }
+.health-chip.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, var(--surface-soft)); }
+.health-chip strong { color: var(--text); }
+.album-mini-list { display: flex; flex-direction: column; gap: 8px; }
+.mini-album { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px; border-radius: var(--radius-md); background: var(--surface-soft); cursor: pointer; }
+.mini-album:hover { background: var(--surface-hover); }
+.mini-album-cover { width: 46px; height: 46px; border-radius: var(--radius-sm); }
+.mini-album strong { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-album small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .stat-card, .quick-card, .panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); box-shadow: var(--shadow-card); }
 .stat-card { display: flex; flex-direction: column; gap: 5px; padding: 16px; min-width: 0; }
@@ -329,6 +462,8 @@ onMounted(loadAll)
   .hero-card { grid-template-columns: 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .system-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .health-chip-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
   .discover { padding: 14px; padding-bottom: calc(92px + env(safe-area-inset-bottom)); gap: 14px; overflow-x: hidden; }
@@ -338,6 +473,8 @@ onMounted(loadAll)
   .hero-cover { width: 78px; height: 78px; }
   .hero-track strong { font-size: 16px; }
   .overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .system-grid { grid-template-columns: 1fr; gap: 8px; }
+  .health-chip-grid { grid-template-columns: 1fr; }
   .stat-card { padding: 12px 10px; }
   .stat-card strong { font-size: 22px; }
   .stat-card small { font-size: 11px; }

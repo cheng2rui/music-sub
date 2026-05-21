@@ -1,6 +1,6 @@
 services:
   music-sub:
-    image: music-sub:0.7.109
+    image: music-sub:0.7.110
     build: .
     container_name: music-sub
     ports:
