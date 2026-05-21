@@ -15,6 +15,7 @@ from app.sites.ptclub import PTClubSite
 from app.sites.dismusic import DisMusicSite
 from app.services.pt_search import MusicSearchChain, SearchRequest, SearchResponse
 from app.services.subscription import get_all_subscriptions, update_last_search
+from app.services.subscription_runs import finish_subscription_run, start_subscription_run
 from app.services.online_music import download_online_song, search_online
 from app.services.pipeline import _process_completed_torrent
 from app.services.notify import notify_download_added
@@ -250,23 +251,23 @@ def download_from_site(site_name: str, torrent_id: str) -> Optional[str]:
     return download_torrent_content(torrent_content)
 
 
-def _best_online_candidate(keyword: str, limit: int = 8) -> dict | None:
-    """Return the best downloadable online candidate for a subscription keyword."""
+def _best_online_candidate(keyword: str, limit: int = 8) -> tuple[dict | None, int]:
+    """Return the best downloadable online candidate and total online candidates."""
     rows = search_online(keyword, sources=ONLINE_SOURCES, limit=limit)
     for row in rows:
         if row.get("disabled"):
             continue
         if row.get("url") or row.get("song_id"):
-            return row
-    return None
+            return row, len(rows)
+    return None, len(rows)
 
 
-def _download_online_for_subscription(sub, db) -> bool:
+def _download_online_for_subscription(sub, db) -> tuple[bool, dict]:
     """Download and organize one online match for an online-priority subscription."""
-    candidate = _best_online_candidate(sub.keyword)
+    candidate, result_count = _best_online_candidate(sub.keyword)
     if not candidate:
         logger.info(f"No downloadable online candidate for subscription: {sub.keyword}")
-        return False
+        return False, {"online_result_count": result_count, "message": "未找到可下载的在线候选"}
 
     title = candidate.get("title") or candidate.get("filename") or sub.keyword
     artist = candidate.get("artist") or ""
@@ -279,7 +280,12 @@ def _download_online_for_subscription(sub, db) -> bool:
     ).filter(DownloadTask.torrent_name.ilike(f"%{title}%")).first()
     if existing_task and _normalize_match_text(existing_task.torrent_name or "") == normalized_task_name:
         logger.info(f"Online subscription result already tracked: {task_name}")
-        return True
+        return True, {
+            "online_result_count": result_count,
+            "selected": task_name,
+            "source": source,
+            "message": "在线候选已存在，跳过重复下载",
+        }
 
     file_path = download_online_song(candidate)
     synthetic_hash = f"online:{uuid.uuid4().hex}"
@@ -310,7 +316,19 @@ def _download_online_for_subscription(sub, db) -> bool:
     })
     logger.info(f"Auto-downloaded online subscription: {task_name} ({source})")
     notify_download_added(task_name, source)
-    return True
+    return True, {
+        "online_result_count": result_count,
+        "selected": task_name,
+        "source": source,
+        "candidate": {
+            "title": candidate.get("title") or title,
+            "artist": artist,
+            "album": candidate.get("album") or "",
+            "source": source,
+            "size": candidate.get("size") or 0,
+        },
+        "message": "在线下载成功",
+    }
 
 
 def search_all_subscriptions():
@@ -324,79 +342,156 @@ def search_all_subscriptions():
         for sub in subscriptions:
             logger.info(f"Searching subscription [{sub.type}]: {sub.keyword}")
             preference = _source_preference(sub)
-            if _song_downloaded_for_subscription(sub, db):
-                logger.info(f"Song subscription already downloaded online, skip: {sub.keyword}")
-                update_last_search(sub.id)
-                continue
-            if preference in {"online_first", "online_only"}:
-                try:
-                    if _download_online_for_subscription(sub, db):
-                        update_last_search(sub.id)
-                        continue
-                except Exception as e:
-                    logger.warning(f"Online subscription download failed for {sub.keyword}: {e}")
-                    if preference == "online_only":
-                        update_last_search(sub.id)
-                        continue
-
-            sites = sub.sites.split(",") if sub.sites != "all" else None
-            results = search_sites(sub.keyword, sites)
-
-            before_count = len(results)
-            results = _filter_subscription_results(results, sub)
-            logger.info(
-                f"Subscription filter kept {len(results)}/{before_count} results for "
-                f"[{sub.type}/{sub.quality}] {sub.keyword}"
-            )
-
-            # Check for results already downloaded/attempted globally. Subscription titles can
-            # overlap, and PT sites may rate-limit repeated .torrent downloads even if qB already
-            # has the task. Keep this global instead of per-subscription to avoid hammering sites.
-            existing_names = {
-                t.torrent_name
-                for t in db.query(DownloadTask).all()
-            }
-            existing_active_hashes = {
-                t.hash.lower()
-                for t in qb_client.client.torrents_info(category=cfg_module.config.qbittorrent.category)
-                if getattr(t, "hash", None)
-            }
-
-            for torrent in results[:3]:  # Limit auto-downloads
-                if torrent.title in existing_names:
-                    continue
-
-                # Auto-download
-                torrent_hash = download_from_site(torrent.site, torrent.torrent_id)
-                if torrent_hash:
-                    normalized_hash = torrent_hash.lower()
-                    existing_task = db.query(DownloadTask).filter(
-                        DownloadTask.torrent_hash == normalized_hash
-                    ).first()
-                    if existing_task:
-                        existing_names.add(torrent.title)
-                        logger.info(f"Already tracked by hash, skip task insert: {torrent.title} ({normalized_hash})")
-                        continue
-
-                    if normalized_hash in existing_active_hashes:
-                        logger.info(f"Already present in qBittorrent, skip duplicate task: {torrent.title} ({normalized_hash})")
-                        continue
-
-                    task = DownloadTask(
-                        subscription_id=sub.id,
-                        torrent_name=torrent.title,
-                        torrent_hash=normalized_hash,
-                        site=torrent.site,
-                        size=torrent.size,
-                        status="downloading",
+            run = start_subscription_run(db, sub)
+            fallback_used = False
+            downloaded_count = 0
+            try:
+                if _song_downloaded_for_subscription(sub, db):
+                    logger.info(f"Song subscription already downloaded online, skip: {sub.keyword}")
+                    finish_subscription_run(
+                        db,
+                        run,
+                        status="skipped",
+                        source="online",
+                        message="歌曲已存在在线下载任务，跳过重复下载",
                     )
-                    db.add(task)
-                    db.commit()
-                    existing_names.add(torrent.title)
-                    existing_active_hashes.add(normalized_hash)
-                    logger.info(f"Auto-downloaded: {torrent.title}")
-                    notify_download_added(torrent.title, torrent.site)
+                    update_last_search(sub.id)
+                    continue
+                if preference in {"online_first", "online_only"}:
+                    try:
+                        online_ok, online_info = _download_online_for_subscription(sub, db)
+                        if online_ok:
+                            finish_subscription_run(
+                                db,
+                                run,
+                                status="success",
+                                source="online",
+                                message=online_info.get("message") or "在线下载成功",
+                                online_result_count=online_info.get("online_result_count", 0),
+                                selected_count=1,
+                                downloaded_count=1 if online_info.get("message") != "在线候选已存在，跳过重复下载" else 0,
+                                details=online_info,
+                            )
+                            update_last_search(sub.id)
+                            continue
+                        if preference == "online_only":
+                            finish_subscription_run(
+                                db,
+                                run,
+                                status="skipped",
+                                source="online",
+                                message=online_info.get("message") or "未找到可下载的在线候选",
+                                online_result_count=online_info.get("online_result_count", 0),
+                                details=online_info,
+                            )
+                            update_last_search(sub.id)
+                            continue
+                        fallback_used = True
+                    except Exception as e:
+                        logger.warning(f"Online subscription download failed for {sub.keyword}: {e}")
+                        if preference == "online_only":
+                            finish_subscription_run(
+                                db,
+                                run,
+                                status="failed",
+                                source="online",
+                                message="在线下载失败",
+                                error=str(e),
+                            )
+                            update_last_search(sub.id)
+                            continue
+                        fallback_used = True
 
-            update_last_search(sub.id)
+                sites = sub.sites.split(",") if sub.sites != "all" else None
+                results = search_sites(sub.keyword, sites)
+
+                before_count = len(results)
+                results = _filter_subscription_results(results, sub)
+                logger.info(
+                    f"Subscription filter kept {len(results)}/{before_count} results for "
+                    f"[{sub.type}/{sub.quality}] {sub.keyword}"
+                )
+
+                # Check for results already downloaded/attempted globally. Subscription titles can
+                # overlap, and PT sites may rate-limit repeated .torrent downloads even if qB already
+                # has the task. Keep this global instead of per-subscription to avoid hammering sites.
+                existing_names = {
+                    t.torrent_name
+                    for t in db.query(DownloadTask).all()
+                }
+                existing_active_hashes = {
+                    t.hash.lower()
+                    for t in qb_client.client.torrents_info(category=cfg_module.config.qbittorrent.category)
+                    if getattr(t, "hash", None)
+                }
+
+                selected_count = 0
+                selected_titles = []
+                for torrent in results[:3]:  # Limit auto-downloads
+                    if torrent.title in existing_names:
+                        continue
+                    selected_count += 1
+                    selected_titles.append(torrent.title)
+
+                    # Auto-download
+                    torrent_hash = download_from_site(torrent.site, torrent.torrent_id)
+                    if torrent_hash:
+                        normalized_hash = torrent_hash.lower()
+                        existing_task = db.query(DownloadTask).filter(
+                            DownloadTask.torrent_hash == normalized_hash
+                        ).first()
+                        if existing_task:
+                            existing_names.add(torrent.title)
+                            logger.info(f"Already tracked by hash, skip task insert: {torrent.title} ({normalized_hash})")
+                            continue
+
+                        if normalized_hash in existing_active_hashes:
+                            logger.info(f"Already present in qBittorrent, skip duplicate task: {torrent.title} ({normalized_hash})")
+                            continue
+
+                        task = DownloadTask(
+                            subscription_id=sub.id,
+                            torrent_name=torrent.title,
+                            torrent_hash=normalized_hash,
+                            site=torrent.site,
+                            size=torrent.size,
+                            status="downloading",
+                        )
+                        db.add(task)
+                        db.commit()
+                        downloaded_count += 1
+                        existing_names.add(torrent.title)
+                        existing_active_hashes.add(normalized_hash)
+                        logger.info(f"Auto-downloaded: {torrent.title}")
+                        notify_download_added(torrent.title, torrent.site)
+
+                finish_subscription_run(
+                    db,
+                    run,
+                    status="success" if downloaded_count else "skipped",
+                    source="pt" if not fallback_used else "fallback",
+                    message="PT 下载任务已添加" if downloaded_count else "PT 未添加新任务",
+                    pt_result_count=len(results),
+                    selected_count=selected_count,
+                    downloaded_count=downloaded_count,
+                    fallback_used=fallback_used,
+                    details={
+                        "raw_pt_result_count": before_count,
+                        "filtered_pt_result_count": len(results),
+                        "selected_titles": selected_titles,
+                    },
+                )
+                update_last_search(sub.id)
+            except Exception as e:
+                logger.error(f"Subscription run failed for {sub.keyword}: {e}")
+                finish_subscription_run(
+                    db,
+                    run,
+                    status="failed",
+                    source="none",
+                    message="订阅执行失败",
+                    error=str(e),
+                )
+                update_last_search(sub.id)
     finally:
         db.close()

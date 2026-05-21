@@ -1,9 +1,10 @@
 """Subscription API routes."""
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db import get_db
-from app.models import Subscription
+from app.models import Subscription, SubscriptionRun
 from app.schemas import SubscriptionCreate, SubscriptionUpdate, SubscriptionResponse
 
 router = APIRouter()
@@ -20,6 +21,44 @@ class SubscriptionBatchDelete(BaseModel):
     type: str = ""
     enabled: bool | None = None
     delete_all: bool = False
+
+
+def _run_to_dict(run: SubscriptionRun) -> dict:
+    details = None
+    if run.details_json:
+        try:
+            details = json.loads(run.details_json)
+        except Exception:
+            details = None
+    return {
+        "id": run.id,
+        "subscription_id": run.subscription_id,
+        "keyword": run.keyword,
+        "type": run.type,
+        "source_preference": run.source_preference,
+        "status": run.status,
+        "source": run.source,
+        "online_result_count": run.online_result_count,
+        "pt_result_count": run.pt_result_count,
+        "selected_count": run.selected_count,
+        "downloaded_count": run.downloaded_count,
+        "fallback_used": run.fallback_used,
+        "message": run.message,
+        "error": run.error,
+        "details": details,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+    }
+
+
+@router.get("/runs")
+def list_subscription_runs(limit: int = 100, sub_id: int | None = None, db: Session = Depends(get_db)):
+    """List recent subscription execution history."""
+    q = db.query(SubscriptionRun)
+    if sub_id:
+        q = q.filter(SubscriptionRun.subscription_id == sub_id)
+    rows = q.order_by(SubscriptionRun.started_at.desc()).limit(max(1, min(int(limit or 100), 500))).all()
+    return [_run_to_dict(row) for row in rows]
 
 
 @router.get("/", response_model=list[SubscriptionResponse])

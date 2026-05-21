@@ -18,6 +18,28 @@ class Subscription(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
+class SubscriptionRun(Base):
+    __tablename__ = "subscription_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subscription_id = Column(Integer, nullable=False, index=True)
+    keyword = Column(String(255), nullable=False)
+    type = Column(String(50), default="artist")
+    source_preference = Column(String(50), default="pt")
+    status = Column(String(50), default="running", index=True)  # running/success/skipped/failed
+    source = Column(String(50), default="")  # online/pt/fallback/none
+    online_result_count = Column(Integer, default=0)
+    pt_result_count = Column(Integer, default=0)
+    selected_count = Column(Integer, default=0)
+    downloaded_count = Column(Integer, default=0)
+    fallback_used = Column(Boolean, default=False)
+    message = Column(String(500), default="")
+    error = Column(Text, nullable=True)
+    details_json = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class DownloadTask(Base):
     __tablename__ = "download_tasks"
 

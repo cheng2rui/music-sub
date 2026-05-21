@@ -57,6 +57,17 @@ def _trim_notify_events(max_rows: int = 1000):
         """), {"max_rows": max_rows})
 
 
+def _trim_subscription_runs(max_rows: int = 2000):
+    """Keep subscription execution history bounded on SQLite installs."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            DELETE FROM subscription_runs
+            WHERE id NOT IN (
+                SELECT id FROM subscription_runs ORDER BY id DESC LIMIT :max_rows
+            )
+        """), {"max_rows": max_rows})
+
+
 def _run_lightweight_migrations():
     """Apply additive SQLite migrations for deployments without Alembic."""
     if engine.dialect.name != "sqlite":
@@ -75,6 +86,7 @@ def _run_lightweight_migrations():
     _dedupe_music_files()
     _backfill_album_artist()
     _trim_notify_events()
+    _trim_subscription_runs()
 
 
 def init_db():

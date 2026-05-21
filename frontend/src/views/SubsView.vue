@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, watch } from 'vue'
-import { getSubs, addSub, addSubsBatch, updateSub, deleteSub, deleteSubsBatch, toggleSub, parsePlaylistUrl } from '@/api/index.js'
+import { getSubs, addSub, addSubsBatch, updateSub, deleteSub, deleteSubsBatch, toggleSub, parsePlaylistUrl, getSubRuns } from '@/api/index.js'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
 import AppModal from '@/components/AppModal.vue'
@@ -18,6 +18,16 @@ const filterType = ref('all')
 const page = ref(1)
 const pageSize = ref(100)
 const deletingBatch = ref(false)
+const recentRuns = ref([])
+const runsLoading = ref(false)
+
+const latestRunBySubId = computed(() => {
+  const map = new Map()
+  for (const run of recentRuns.value || []) {
+    if (!map.has(run.subscription_id)) map.set(run.subscription_id, run)
+  }
+  return map
+})
 
 const filteredSubs = computed(() => subs.value.filter(sub => {
   const kw = filterText.value.trim().toLowerCase()
@@ -59,10 +69,22 @@ const sourcePreferenceOptions = [
   { label: '仅在线', value: 'online_only' },
 ]
 
+async function loadSubRuns() {
+  runsLoading.value = true
+  try {
+    recentRuns.value = await getSubRuns(200)
+  } catch (e) {
+    console.error(e)
+  } finally {
+    runsLoading.value = false
+  }
+}
+
 async function loadSubs() {
   loading.value = true
   try {
     subs.value = await getSubs()
+    await loadSubRuns()
   } catch (e) {
     console.error(e)
   } finally {
@@ -212,6 +234,20 @@ function changePage(next) {
 function typeBadgeColor(type) {
   const map = { artist: 'green', song: 'blue', album: 'orange', keyword: 'dim' }
   return map[type] || 'dim'
+}
+
+function runBadgeColor(status) {
+  const map = { success: 'green', skipped: 'orange', failed: 'red', running: 'blue' }
+  return map[status] || 'dim'
+}
+
+function runSourceLabel(source) {
+  const map = { online: '在线', pt: 'PT', fallback: '在线→PT', none: '-' }
+  return map[source] || source || '-'
+}
+
+function formatRunTime(value) {
+  return value ? new Date(value).toLocaleString() : '-'
 }
 
 // Playlist URL parsing
@@ -380,6 +416,7 @@ onMounted(loadSubs)
               <th>品质</th>
               <th>规则</th>
               <th>状态</th>
+              <th>最近执行</th>
               <th>最近搜索</th>
               <th>操作</th>
             </tr>
@@ -395,6 +432,14 @@ onMounted(loadSubs)
                 <AppBadge :color="sub.enabled ? 'green' : 'dim'">
                   {{ sub.enabled ? '启用' : '停用' }}
                 </AppBadge>
+              </td>
+              <td class="run-cell">
+                <template v-if="latestRunBySubId.get(sub.id)">
+                  <AppBadge :color="runBadgeColor(latestRunBySubId.get(sub.id).status)">{{ latestRunBySubId.get(sub.id).status }}</AppBadge>
+                  <div class="run-message">{{ runSourceLabel(latestRunBySubId.get(sub.id).source) }} · {{ latestRunBySubId.get(sub.id).message || '-' }}</div>
+                  <div class="run-meta">在线 {{ latestRunBySubId.get(sub.id).online_result_count || 0 }} / PT {{ latestRunBySubId.get(sub.id).pt_result_count || 0 }} / 下载 {{ latestRunBySubId.get(sub.id).downloaded_count || 0 }}</div>
+                </template>
+                <span v-else class="text-dim">{{ runsLoading ? '加载中...' : '-' }}</span>
               </td>
               <td class="text-dim">{{ sub.last_search_at ? new Date(sub.last_search_at).toLocaleString() : '-' }}</td>
               <td>
@@ -424,6 +469,15 @@ onMounted(loadSubs)
               <AppBadge :color="typeBadgeColor(sub.type)">{{ sub.type }}</AppBadge>
               <span class="sub-chip">{{ sub.quality }}</span>
               <span class="sub-chip">{{ sourcePreferenceOptions.find(o => o.value === (sub.source_preference || 'pt'))?.label || 'PT 优先' }}</span>
+            </div>
+            <div class="sub-last-search">
+              <span>最近执行</span>
+              <template v-if="latestRunBySubId.get(sub.id)">
+                <AppBadge :color="runBadgeColor(latestRunBySubId.get(sub.id).status)">{{ latestRunBySubId.get(sub.id).status }}</AppBadge>
+                {{ runSourceLabel(latestRunBySubId.get(sub.id).source) }} · {{ latestRunBySubId.get(sub.id).message || '-' }}
+                <div class="run-meta">{{ formatRunTime(latestRunBySubId.get(sub.id).started_at) }} · 在线 {{ latestRunBySubId.get(sub.id).online_result_count || 0 }} / PT {{ latestRunBySubId.get(sub.id).pt_result_count || 0 }} / 下载 {{ latestRunBySubId.get(sub.id).downloaded_count || 0 }}</div>
+              </template>
+              <template v-else>{{ runsLoading ? '加载中...' : '-' }}</template>
             </div>
             <div class="sub-last-search">
               <span>最近搜索</span>
@@ -498,6 +552,9 @@ onMounted(loadSubs)
 .sub-card-head h3 { min-width: 0; margin: 0; font-size: 15px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; }
 .sub-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
 .sub-chip { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--text-dim); background: var(--surface); font-size: 12px; }
+.run-cell { min-width: 180px; font-size: 12px; color: var(--text-dim); }
+.run-message { margin-top: 4px; color: var(--text); max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run-meta { margin-top: 3px; color: var(--text-muted); font-size: 11px; }
 .sub-last-search { margin-top: 12px; color: var(--text-dim); font-size: 13px; }
 .sub-last-search span { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 2px; }
 .action-btns.mobile { margin-top: 12px; flex-wrap: wrap; }

@@ -96,6 +96,11 @@ export const deleteSubsBatch = (payload) => authFetch('/api/subscriptions/batch'
   body: JSON.stringify(payload)
 }).then(r => r.json())
 export const toggleSub = (id) => authFetch(`/api/subscriptions/${id}/toggle`, { method: 'PUT' }).then(r => r.json())
+export const getSubRuns = (limit = 100, subId = null) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (subId) params.set('sub_id', String(subId))
+  return authFetch(`/api/subscriptions/runs?${params.toString()}`).then(r => r.json())
+}
 
 // ============ Search ============
 export const searchMusic = (keyword, sites = []) => authFetch('/api/search/', {
