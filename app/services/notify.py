@@ -665,13 +665,17 @@ def handle_incoming_assistant(db: Session, *, channel: str, text: str, user_id: 
 
 # Event helpers ----------------------------------------------------------------
 def notify_download_added(torrent_name: str, site: str):
-    send_all("on_download_added", render_notify_template("download_added", name=torrent_name, site=site))
+    text = render_notify_template("download_added", name=torrent_name, site=site)
+    log_notify_event(channel="system", direction="internal", event="download_added", text=text, status="ok", message=f"{site} download added")
+    send_all("on_download_added", text)
 
 
 def notify_download_complete(torrent_name: str, file_count: int):
+    text = render_notify_template("download_complete", name=torrent_name, file_count=file_count)
+    log_notify_event(channel="system", direction="internal", event="download_complete", text=text, status="ok", message=f"{file_count} files")
     send_all(
         "on_download_complete",
-        render_notify_template("download_complete", name=torrent_name, file_count=file_count),
+        text,
         actions=[
             NotifyAction("📚 打开音乐库", "打开音乐库", "/library"),
             NotifyAction("⬇️ 查看任务", "查看任务", "/tasks"),
@@ -680,9 +684,11 @@ def notify_download_complete(torrent_name: str, file_count: int):
 
 
 def notify_scrape_complete(torrent_name: str, scraped: int, total: int):
+    text = render_notify_template("scrape_complete", name=torrent_name, scraped=scraped, total=total)
+    log_notify_event(channel="system", direction="internal", event="scrape_complete", text=text, status="ok", message=f"{scraped}/{total}")
     send_all(
         "on_scrape_complete",
-        render_notify_template("scrape_complete", name=torrent_name, scraped=scraped, total=total),
+        text,
         actions=[
             NotifyAction("📚 打开音乐库", "打开音乐库", "/library"),
             NotifyAction("🛠️ 治理", "打开治理", "/library?health=1"),
@@ -691,16 +697,16 @@ def notify_scrape_complete(torrent_name: str, scraped: int, total: int):
 
 
 def notify_error(context: str, error: str):
-    send_all("on_error", render_notify_template("error", context=context, error=(error or "")[:200]))
+    text = render_notify_template("error", context=context, error=(error or "")[:200])
+    log_notify_event(channel="system", direction="internal", event="error", text=text, status="error", message=context)
+    send_all("on_error", text)
 
 
 def notify_cleanup_candidates(candidate_count: int, qb_and_db_count: int, db_only_count: int, total_size: float, total_amount_left: float):
     size_mb = total_size / 1024 / 1024 if total_size else 0
     left_mb = total_amount_left / 1024 / 1024 if total_amount_left else 0
-    send_all(
-        "on_cleanup_candidates",
-        render_notify_template(
-            "cleanup_candidates",
+    text = render_notify_template(
+        "cleanup_candidates",
             candidate_count=candidate_count,
             qb_and_db_count=qb_and_db_count,
             db_only_count=db_only_count,
@@ -708,7 +714,11 @@ def notify_cleanup_candidates(candidate_count: int, qb_and_db_count: int, db_onl
             total_amount_left=total_amount_left,
             total_size_mb=size_mb,
             total_amount_left_mb=left_mb,
-        ),
+        )
+    log_notify_event(channel="system", direction="internal", event="cleanup_candidates", text=text, status="ok", message=f"{candidate_count} candidates")
+    send_all(
+        "on_cleanup_candidates",
+        text,
         actions=[
             NotifyAction("⬇️ 查看任务", "查看任务", "/tasks"),
             NotifyAction("🧹 清理扫描", "清理扫描", "/tasks?cleanup=1"),

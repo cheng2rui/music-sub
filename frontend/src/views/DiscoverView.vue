@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPersonalized, getLibraryStats, getTasks, getLibraryHealth, getNotifyStatus, getScheduler, getLibraryAlbums, listLibraryJobs } from '@/api/index.js'
+import { getPersonalized, getLibraryStats, getTasks, getLibraryHealth, getNotifyStatus, getNotifyEvents, getScheduler, getLibraryAlbums, listLibraryJobs } from '@/api/index.js'
 import { usePlayerStore } from '@/stores/player.js'
 import MusicCover from '@/components/MusicCover.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -19,6 +19,7 @@ const notifyStatus = ref(null)
 const scheduler = ref([])
 const recentAlbums = ref([])
 const libraryJobs = ref([])
+const notifyEvents = ref([])
 const loading = ref(false)
 const showHomeSettings = ref(false)
 
@@ -31,7 +32,8 @@ const defaultHomeModules = [
   { key: 'quick', label: '快捷入口', desc: '搜索、订阅、曲库、任务入口', enabled: true },
   { key: 'recommend', label: '今日推荐', desc: '只基于本地音乐库生成', enabled: true },
   { key: 'tasks', label: '最近任务', desc: '下载与入库进度速览', enabled: true },
-  { key: 'albums', label: '最近入库', desc: '最近更新的专辑入口', enabled: true }
+  { key: 'albums', label: '最近入库', desc: '最近更新的专辑入口', enabled: true },
+  { key: 'events', label: '事件流', desc: '下载、刮削、通知和错误的最近记录', enabled: true }
 ]
 const homeModules = ref(loadHomeModules())
 
@@ -39,7 +41,7 @@ const featuredSong = computed(() => recommend.value[0] || null)
 const recommendedSongs = computed(() => recommend.value.slice(0, 12))
 const recentTasks = computed(() => tasks.value.slice(0, 4))
 const activeTaskCount = computed(() => tasks.value.filter(t => ['downloading', 'organized', 'downloaded'].includes(t.status)).length)
-const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && ['recommend', 'tasks', 'albums'].includes(m.key)))
+const visibleMasonryModules = computed(() => homeModules.value.filter(m => m.enabled && ['recommend', 'tasks', 'albums', 'events'].includes(m.key)))
 const libraryTotal = computed(() => libraryStats.value.total_files || libraryStats.value.tracks || 0)
 const scrapedRate = computed(() => {
   const total = libraryTotal.value
@@ -94,12 +96,13 @@ const quickLinks = [
 async function loadAll() {
   loading.value = true
   try {
-    const [rec, stats, taskList, healthRes, notifyRes, schedulerRes, albumsRes, jobsRes] = await Promise.allSettled([
+    const [rec, stats, taskList, healthRes, notifyRes, eventsRes, schedulerRes, albumsRes, jobsRes] = await Promise.allSettled([
       getPersonalized(),
       getLibraryStats(),
       getTasks(),
       getLibraryHealth({ limit: 1 }),
       getNotifyStatus(),
+      getNotifyEvents(12),
       getScheduler(),
       getLibraryAlbums({ limit: 6, sort: 'updated' }),
       listLibraryJobs(5)
@@ -109,6 +112,7 @@ async function loadAll() {
     tasks.value = taskList.status === 'fulfilled' ? (Array.isArray(taskList.value) ? taskList.value : []) : []
     health.value = healthRes.status === 'fulfilled' ? (healthRes.value || health.value) : health.value
     notifyStatus.value = notifyRes.status === 'fulfilled' ? (notifyRes.value || null) : notifyStatus.value
+    notifyEvents.value = eventsRes.status === 'fulfilled' ? (eventsRes.value?.items || []) : notifyEvents.value
     scheduler.value = schedulerRes.status === 'fulfilled' ? (schedulerRes.value?.jobs || schedulerRes.value || []) : scheduler.value
     recentAlbums.value = albumsRes.status === 'fulfilled' ? (albumsRes.value?.items || albumsRes.value || []) : recentAlbums.value
     libraryJobs.value = jobsRes.status === 'fulfilled' ? (jobsRes.value?.items || jobsRes.value || []) : libraryJobs.value
@@ -154,6 +158,29 @@ function formatDuration(seconds) {
   const n = Number(seconds || 0)
   if (!n) return '-'
   return `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, '0')}`
+}
+
+
+function eventLabel(event) {
+  const map = {
+    download_added: '开始下载',
+    download_complete: '下载完成',
+    scrape_complete: '刮削完成',
+    cleanup_candidates: '清理候选',
+    error: '错误',
+  }
+  return map[event?.event] || event?.event || (event?.direction === 'inbound' ? '入站消息' : '通知')
+}
+
+function eventTone(event) {
+  if (event?.status === 'error' || event?.event === 'error') return 'error'
+  if (event?.direction === 'inbound') return 'inbound'
+  if (event?.direction === 'internal') return 'internal'
+  return 'ok'
+}
+
+function eventPreview(event) {
+  return (event?.text_preview || event?.message || '').replace(/\n+/g, ' · ')
 }
 
 function statusLabel(status) {
@@ -352,6 +379,30 @@ onMounted(loadAll)
         </div>
       </section>
 
+      <section v-if="isHomeModuleEnabled('events')" class="panel">
+        <div class="section-header compact">
+          <div>
+            <h2>最近事件</h2>
+            <p>下载、刮削、通知和错误记录。</p>
+          </div>
+          <AppButton variant="ghost" size="sm" @click="go('/settings')">通知</AppButton>
+        </div>
+        <div v-if="notifyEvents.length === 0" class="empty-state">暂无事件记录</div>
+        <div v-else class="event-list">
+          <article v-for="ev in notifyEvents.slice(0, 8)" :key="ev.id" :class="['event-row', eventTone(ev)]">
+            <div class="event-dot"></div>
+            <div class="event-main">
+              <div class="event-head">
+                <strong>{{ eventLabel(ev) }}</strong>
+                <small>{{ formatDate(ev.created_at) }}</small>
+              </div>
+              <p>{{ eventPreview(ev) }}</p>
+              <small class="event-meta">{{ ev.channel }} · {{ ev.direction }} · {{ ev.status }}</small>
+            </div>
+          </article>
+        </div>
+      </section>
+
     </div>
 
     <AppModal v-if="showHomeSettings" title="编辑首页" @close="showHomeSettings = false">
@@ -404,6 +455,19 @@ onMounted(loadAll)
 .health-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-soft); color: var(--text-dim); cursor: pointer; }
 .health-chip.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, var(--surface-soft)); }
 .health-chip strong { color: var(--text); }
+
+.event-list { display: flex; flex-direction: column; gap: 8px; }
+.event-row { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.event-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--success); margin-top: 5px; }
+.event-row.error .event-dot { background: var(--danger); }
+.event-row.inbound .event-dot { background: var(--accent); }
+.event-row.internal .event-dot { background: var(--warning); }
+.event-main { min-width: 0; }
+.event-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.event-head strong { font-size: 13px; }
+.event-head small, .event-meta { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.event-row p { margin: 4px 0; color: var(--text-dim); font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
 .album-mini-list { display: flex; flex-direction: column; gap: 8px; }
 .mini-album { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px; border-radius: var(--radius-md); background: var(--surface-soft); cursor: pointer; }
 .mini-album:hover { background: var(--surface-hover); }
