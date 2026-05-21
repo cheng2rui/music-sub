@@ -113,6 +113,11 @@ export const searchMusicV2 = (params) => authFetch('/api/search/v2', {
   body: JSON.stringify(params)
 }).then(r => r.json())
 
+export const searchCandidates = (params) => authFetch('/api/search/candidates', {
+  method: 'POST',
+  body: JSON.stringify(params)
+}).then(r => r.json())
+
 export const downloadTorrent = (site, torrentId, title) =>
   authFetch(`/api/search/download?site=${encodeURIComponent(site)}&torrent_id=${encodeURIComponent(torrentId)}&title=${encodeURIComponent(title)}`, {
     method: 'POST'

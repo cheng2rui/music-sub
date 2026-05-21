@@ -85,6 +85,12 @@ class SearchRequest(BaseModel):
     limit: int = 60
 
 
+class CandidateSearchRequest(SearchRequest):
+    include_pt: bool = True
+    include_online: bool = True
+    sources: list[str] = ["qq", "migu", "kugou", "netease", "kuwo"]
+
+
 class SearchSiteStatus(BaseModel):
     site: str
     ok: bool

@@ -1,7 +1,9 @@
 """Search API routes."""
 from fastapi import APIRouter, HTTPException
-from app.schemas import SearchRequest, TorrentResult, SearchResponseV2, ScoredTorrentResult, SearchSiteStatus
+from app.schemas import CandidateSearchRequest, SearchRequest, TorrentResult, SearchResponseV2, ScoredTorrentResult, SearchSiteStatus
 from app.services.searcher import search_sites, fetch_torrent_info_hash, download_torrent_content, search_with_chain
+from app.services.online_music import search_online
+from app.services.candidates import build_online_candidate, build_pt_candidate
 from app.services.notify import notify_download_added
 from app.downloader.qbittorrent import qb_client
 from app.db import SessionLocal
@@ -79,6 +81,58 @@ def search_torrents_v2(req: SearchRequest):
         queries=[plan.keyword for plan in response.queries],
         total=response.total,
     )
+
+
+@router.post("/candidates")
+def search_candidates(req: CandidateSearchRequest):
+    """Search PT and/or online music sources and return unified download candidates."""
+    keyword = (req.keyword or "").strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="Keyword is required")
+
+    candidates = []
+    pt_error = ""
+    online_error = ""
+    pt_meta = {"queries": [], "sites": [], "total": 0}
+    limit = max(1, min(int(req.limit or 20), 60))
+
+    if req.include_pt:
+        try:
+            response = search_with_chain(
+                keyword,
+                sites=req.sites or None,
+                type=req.type or "keyword",
+                artist=req.artist,
+                album=req.album,
+                title=req.title,
+                quality=req.quality or "any",
+                limit=limit,
+            )
+            pt_candidates = [build_pt_candidate(item, rank=index + 1) for index, item in enumerate(response.results[:limit])]
+            candidates.extend(pt_candidates)
+            pt_meta = {
+                "queries": [plan.keyword for plan in response.queries],
+                "sites": [s.__dict__ for s in response.sites],
+                "total": response.total,
+            }
+        except Exception as e:
+            pt_error = str(e)[:300]
+
+    if req.include_online:
+        try:
+            online_rows = search_online(keyword, sources=req.sources or None, limit=max(1, min(limit, 30)))
+            base_rank = len(candidates)
+            candidates.extend(build_online_candidate(item, rank=base_rank + index + 1) for index, item in enumerate(online_rows))
+        except Exception as e:
+            online_error = str(e)[:300]
+
+    return {
+        "keyword": keyword,
+        "candidates": candidates,
+        "pt": {**pt_meta, "error": pt_error, "count": len([c for c in candidates if c.get("source_type") == "pt"])},
+        "online": {"error": online_error, "count": len([c for c in candidates if c.get("source_type") == "online"])},
+        "total": len(candidates),
+    }
 
 
 @router.post("/download")
