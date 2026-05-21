@@ -61,9 +61,12 @@ const defaultPtState = () => ({
   quality: 'any',
   formatFilter: 'all',
   sortBy: 'score',
+  sourceFilter: 'all',
   siteFilter: '',
+  onlineSourceFilter: '',
   loading: false,
   downloading: null,
+  downloadMessage: null,
   lastResp: null,
   history: [],
   lastSearchAt: 0,
@@ -81,6 +84,7 @@ export const useSearchCacheStore = defineStore('searchCache', () => {
     ...loadState(PT_KEY, defaultPtState),
     loading: false,
     downloading: null,
+    downloadMessage: null,
   })
 
   watch(online, (val) => saveState(ONLINE_KEY, val), { deep: true })

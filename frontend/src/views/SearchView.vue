@@ -12,9 +12,12 @@ const {
   quality,
   formatFilter,
   sortBy,
+  sourceFilter,
   siteFilter,
+  onlineSourceFilter,
   loading,
   downloading,
+  downloadMessage,
   lastResp,
   history,
 } = toRefs(cache.pt)
@@ -22,11 +25,34 @@ const {
 const sites = computed(() => lastResp.value?.pt?.sites || [])
 const queries = computed(() => lastResp.value?.pt?.queries || [])
 const total = computed(() => lastResp.value?.total || 0)
+const ptCount = computed(() => lastResp.value?.pt?.count || 0)
+const onlineCount = computed(() => lastResp.value?.online?.count || 0)
+const sourceSummary = computed(() => {
+  const map = new Map()
+  for (const item of lastResp.value?.candidates || []) {
+    if (item.source_type !== 'online') continue
+    const source = item.source || 'online'
+    map.set(source, (map.get(source) || 0) + 1)
+  }
+  return Array.from(map.entries()).map(([source, count]) => ({ source, count }))
+})
+const notices = computed(() => {
+  if (!lastResp.value) return []
+  const items = []
+  const ptError = lastResp.value?.pt?.error
+  const onlineError = lastResp.value?.online?.error
+  if (ptError) items.push({ type: 'warn', text: `PT 搜索部分失败：${ptError}` })
+  if (onlineError) items.push({ type: 'warn', text: `在线音乐搜索部分失败：${onlineError}` })
+  if (!ptError && !onlineError && total.value === 0) items.push({ type: 'muted', text: '没有找到候选，可以换关键词或放宽质量条件。' })
+  return items
+})
 
 const filteredResults = computed(() => {
   const list = (lastResp.value?.candidates || []).slice()
   const filtered = list.filter(item => {
-    if (siteFilter.value && item.source !== siteFilter.value) return false
+    if (sourceFilter.value !== 'all' && item.source_type !== sourceFilter.value) return false
+    if (item.source_type === 'pt' && siteFilter.value && item.source !== siteFilter.value) return false
+    if (item.source_type === 'online' && onlineSourceFilter.value && item.source !== onlineSourceFilter.value) return false
     if (formatFilter.value === 'lossless') {
       return ['FLAC', 'ALAC', 'APE', 'WAV', 'DSD'].includes(String(item.format || '').toUpperCase())
     }
@@ -35,8 +61,14 @@ const filteredResults = computed(() => {
     }
     return true
   })
-  if (sortBy.value === 'seeders') filtered.sort((a, b) => (b.seeders || 0) - (a.seeders || 0))
-  else if (sortBy.value === 'size') filtered.sort((a, b) => (b.size || 0) - (a.size || 0))
+  if (sortBy.value === 'seeders') {
+    filtered.sort((a, b) => {
+      if (a.source_type !== b.source_type) return a.source_type === 'pt' ? -1 : 1
+      return (b.seeders || 0) - (a.seeders || 0)
+    })
+  } else if (sortBy.value === 'size') filtered.sort((a, b) => (b.size || 0) - (a.size || 0))
+  else if (sortBy.value === 'pt_first') filtered.sort((a, b) => (a.source_type === b.source_type ? (b.score || 0) - (a.score || 0) : (a.source_type === 'pt' ? -1 : 1)))
+  else if (sortBy.value === 'online_first') filtered.sort((a, b) => (a.source_type === b.source_type ? (b.score || 0) - (a.score || 0) : (a.source_type === 'online' ? -1 : 1)))
   else filtered.sort((a, b) => (b.score || 0) - (a.score || 0))
   return filtered
 })
@@ -44,6 +76,7 @@ const filteredResults = computed(() => {
 async function handleSearch() {
   if (!keyword.value.trim()) return
   loading.value = true
+  downloadMessage.value = null
   try {
     const params = { keyword: keyword.value.trim(), type: searchType.value, quality: quality.value, limit: 80, include_pt: true, include_online: true }
     if (searchType.value === 'album') params.album = keyword.value.trim()
@@ -52,10 +85,14 @@ async function handleSearch() {
     cache.rememberPtSearch(keyword.value.trim(), {
       type: searchType.value,
       quality: quality.value,
+      sourceFilter: sourceFilter.value,
       total: lastResp.value?.total || 0,
+      ptCount: lastResp.value?.pt?.count || 0,
+      onlineCount: lastResp.value?.online?.count || 0,
       siteCount: lastResp.value?.pt?.sites?.length || 0,
     })
   } catch (e) {
+    downloadMessage.value = { type: 'error', text: e.message || '搜索失败' }
     console.error(e)
   } finally {
     loading.value = false
@@ -64,6 +101,7 @@ async function handleSearch() {
 
 async function handleDownload(item) {
   downloading.value = item.id
+  downloadMessage.value = null
   try {
     let res
     if (item.download_tool === 'download_online_song' || item.source_type === 'online') {
@@ -73,9 +111,11 @@ async function handleDownload(item) {
       const args = item.download_args || {}
       res = await downloadTorrent(args.site || item.source, args.torrent_id, args.title || item.title)
     }
-    alert(res.already_exists ? '任务已存在，跳过重复添加' : '已添加到下载任务')
+    const action = item.source_type === 'online' ? '已开始下载单曲' : (res.already_exists ? '任务已存在' : '已添加下载任务')
+    const suffix = res.task_id ? ` · 任务 #${res.task_id}` : ''
+    downloadMessage.value = { type: 'success', text: `${action}：${item.title}${suffix}` }
   } catch (e) {
-    alert(e.message || '下载失败')
+    downloadMessage.value = { type: 'error', text: e.message || '下载失败' }
   } finally {
     downloading.value = null
   }
@@ -117,14 +157,40 @@ function candidateKey(item) {
   return item.id || `${item.source_type}-${item.source}-${item.title}`
 }
 
+function downloadButtonText(item) {
+  if (!item.downloadable) return '不可用'
+  return item.source_type === 'online' ? '下载单曲' : '添加任务'
+}
+
+function sourceTypeLabel(value) {
+  if (value === 'pt') return 'PT'
+  if (value === 'online') return '在线'
+  return '全部'
+}
+
+function toggleSource(value) {
+  sourceFilter.value = sourceFilter.value === value ? 'all' : value
+  if (value !== 'pt') siteFilter.value = ''
+  if (value !== 'online') onlineSourceFilter.value = ''
+}
+
 function toggleSite(name) {
+  sourceFilter.value = 'pt'
   siteFilter.value = siteFilter.value === name ? '' : name
+}
+
+function toggleOnlineSource(name) {
+  sourceFilter.value = 'online'
+  onlineSourceFilter.value = onlineSourceFilter.value === name ? '' : name
 }
 
 function restoreHistory(item) {
   keyword.value = item.keyword || ''
   searchType.value = item.type || 'keyword'
   quality.value = item.quality || 'any'
+  sourceFilter.value = item.sourceFilter || 'all'
+  siteFilter.value = ''
+  onlineSourceFilter.value = ''
   handleSearch()
 }
 
@@ -170,26 +236,48 @@ onMounted(() => {
     <div v-if="history.length" class="history-row">
       <span class="history-label">最近搜索</span>
       <button v-for="item in history.slice(0, 6)" :key="item.id" class="history-chip" @click="restoreHistory(item)">
-        {{ item.keyword }} <small>{{ item.total ?? 0 }}条 · {{ formatHistoryTime(item.at) }}</small>
+        {{ item.keyword }} <small>{{ item.total ?? 0 }}条 · PT {{ item.ptCount ?? '-' }} · 在线 {{ item.onlineCount ?? '-' }} · {{ sourceTypeLabel(item.sourceFilter || 'all') }} · {{ formatHistoryTime(item.at) }}</small>
       </button>
     </div>
 
+    <div v-if="lastResp" class="source-row">
+      <span class="site-label">来源</span>
+      <button :class="['source-chip', { active: sourceFilter === 'all' }]" @click="toggleSource('all')">全部 <small>{{ total }}</small></button>
+      <button :class="['source-chip', { active: sourceFilter === 'pt' }]" @click="toggleSource('pt')">PT <small>{{ ptCount }}</small></button>
+      <button :class="['source-chip', { active: sourceFilter === 'online' }]" @click="toggleSource('online')">在线 <small>{{ onlineCount }}</small></button>
+    </div>
+
     <div v-if="sites.length" class="site-row">
-      <span class="site-label">站点</span>
+      <span class="site-label">PT 站点</span>
       <button
         v-for="s in sites"
         :key="s.site"
-        :class="['site-chip', { active: siteFilter === s.site, error: !s.ok }]"
+        :class="['site-chip', { active: sourceFilter === 'pt' && siteFilter === s.site, error: !s.ok }]"
         @click="toggleSite(s.site)"
       >
         <strong>{{ s.site }}</strong>
-        <span class="site-meta">{{ s.ok ? `${s.count} 条` : (s.error || '失败') }} · {{ s.seconds.toFixed(1) }}s</span>
+        <span class="site-meta">{{ s.ok ? `${s.count} 条` : (s.error || '失败') }} · {{ Number(s.seconds || 0).toFixed(1) }}s</span>
       </button>
       <span v-if="queries.length" class="queries">queries: {{ queries.join('  ,  ') }}</span>
     </div>
 
+    <div v-if="sourceSummary.length" class="site-row">
+      <span class="site-label">在线源</span>
+      <button
+        v-for="s in sourceSummary"
+        :key="s.source"
+        :class="['source-chip', { active: sourceFilter === 'online' && onlineSourceFilter === s.source }]"
+        @click="toggleOnlineSource(s.source)"
+      >{{ s.source }} <small>{{ s.count }}</small></button>
+    </div>
+
+    <div v-if="notices.length || downloadMessage" class="notice-stack">
+      <div v-for="item in notices" :key="item.text" :class="['notice', item.type]">{{ item.text }}</div>
+      <div v-if="downloadMessage" :class="['notice', downloadMessage.type]">{{ downloadMessage.text }}</div>
+    </div>
+
     <div v-if="lastResp" class="toolbar">
-      <div class="left">共 {{ filteredResults.length }} / {{ total }} 条 <span v-if="lastResp?.pt || lastResp?.online" class="count-breakdown">PT {{ lastResp?.pt?.count || 0 }} · 在线 {{ lastResp?.online?.count || 0 }}</span></div>
+      <div class="left">共 {{ filteredResults.length }} / {{ total }} 条 <span v-if="lastResp?.pt || lastResp?.online" class="count-breakdown">PT {{ ptCount }} · 在线 {{ onlineCount }}</span></div>
       <div class="right">
         <select v-model="formatFilter" class="sel">
           <option value="all">全部格式</option>
@@ -198,8 +286,10 @@ onMounted(() => {
         </select>
         <select v-model="sortBy" class="sel">
           <option value="score">智能评分</option>
-          <option value="seeders">做种数</option>
+          <option value="seeders">PT 热度</option>
           <option value="size">文件大小</option>
+          <option value="pt_first">PT 优先</option>
+          <option value="online_first">在线优先</option>
         </select>
       </div>
     </div>
@@ -215,8 +305,8 @@ onMounted(() => {
               <th>标题</th>
               <th>格式</th>
               <th>质量</th>
-              <th>FREE</th>
-              <th>站点</th>
+              <th>标记</th>
+              <th>来源</th>
               <th>大小</th>
               <th>做种</th>
               <th>上传时间</th>
@@ -233,7 +323,7 @@ onMounted(() => {
               </td>
               <td class="text-dim">{{ candidateFormat(item) }}</td>
               <td class="text-dim">{{ item.quality || '-' }}</td>
-              <td><AppBadge v-if="item.free" color="green">FREE</AppBadge><AppBadge v-else-if="item.source_type === 'online'" color="blue">在线</AppBadge></td>
+              <td><AppBadge v-if="item.free" color="green">FREE</AppBadge><AppBadge v-else-if="item.source_type === 'online'" color="blue">在线</AppBadge><AppBadge v-else-if="!item.downloadable" color="orange">不可用</AppBadge></td>
               <td class="text-dim">{{ sourceLabel(item) }}</td>
               <td class="text-dim">{{ formatSize(item.size) }}</td>
               <td class="text-dim">{{ item.source_type === 'pt' ? (item.seeders ?? '-') : '-' }}</td>
@@ -245,7 +335,7 @@ onMounted(() => {
                   :disabled="!item.downloadable"
                   :loading="downloading === item.id"
                   @click="handleDownload(item)"
-                >下载</AppButton>
+                >{{ downloadButtonText(item) }}</AppButton>
               </td>
             </tr>
           </tbody>
@@ -266,6 +356,7 @@ onMounted(() => {
             <span class="info-chip">{{ formatSize(item.size) }}</span>
             <span v-if="item.source_type === 'pt'" class="info-chip">seed {{ item.seeders ?? '-' }}</span>
             <span v-if="item.free" class="info-chip free">FREE</span>
+            <span v-if="!item.downloadable" class="info-chip warn">不可用</span>
           </div>
           <div v-if="item.reasons?.length" class="card-reasons">{{ item.reasons.join(' · ') }}</div>
           <div class="card-footer">
@@ -276,7 +367,7 @@ onMounted(() => {
               :disabled="!item.downloadable"
               :loading="downloading === item.id"
               @click="handleDownload(item)"
-            >下载</AppButton>
+            >{{ downloadButtonText(item) }}</AppButton>
           </div>
         </article>
       </div>
@@ -289,18 +380,26 @@ onMounted(() => {
 .search-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .search-input { flex: 1; min-width: 220px; }
 .sel { padding: 6px 10px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 13px; }
-.history-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: -6px; }
+.history-row, .source-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: -6px; }
 .history-label { color: var(--text-dim); font-size: 12px; }
 .history-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .history-chip small { color: var(--text-dim); }
 .site-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .site-label { color: var(--text-dim); font-size: 12px; }
-.site-chip { display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; font-size: 12px; }
+.site-chip, .source-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; font-size: 12px; }
+.site-chip { flex-direction: column; align-items: flex-start; gap: 2px; }
+.source-chip small { color: var(--text-muted); }
 .site-chip strong { color: var(--text); font-size: 13px; }
-.site-chip.active { background: var(--surface-hover); color: var(--text); border-color: var(--accent); }
+.site-chip.active, .source-chip.active { background: var(--surface-hover); color: var(--text); border-color: var(--accent); }
 .site-chip.error { color: var(--danger); border-color: var(--danger); }
 .site-meta { font-size: 11px; color: var(--text-muted); }
 .queries { color: var(--text-muted); font-size: 12px; margin-left: 6px; }
+.notice-stack { display: flex; flex-direction: column; gap: 8px; }
+.notice { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 9px 12px; font-size: 13px; color: var(--text-dim); background: var(--surface-soft); }
+.notice.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
+.notice.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.notice.success { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+.notice.muted { color: var(--text-muted); }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toolbar .left { color: var(--text-dim); font-size: 13px; }
 .count-breakdown { margin-left: 8px; color: var(--text-muted); }
@@ -323,6 +422,7 @@ onMounted(() => {
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .info-chip { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--text-dim); background: var(--surface); font-size: 12px; }
 .info-chip.free { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+.info-chip.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
 .card-reasons { margin-top: 10px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 .card-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
 @media (max-width: 768px) {
@@ -340,5 +440,4 @@ onMounted(() => {
   .toolbar .right { flex-direction: column; }
   .card-footer { align-items: stretch; }
 }
-
 </style>
