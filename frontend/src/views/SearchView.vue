@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, toRefs } from 'vue'
-import { searchMusicV2, downloadTorrent } from '@/api/index.js'
+import { searchCandidates, downloadTorrent, downloadOnlineSong } from '@/api/index.js'
 import { useSearchCacheStore } from '@/stores/searchCache.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -19,19 +19,19 @@ const {
   history,
 } = toRefs(cache.pt)
 
-const sites = computed(() => lastResp.value?.sites || [])
-const queries = computed(() => lastResp.value?.queries || [])
+const sites = computed(() => lastResp.value?.pt?.sites || [])
+const queries = computed(() => lastResp.value?.pt?.queries || [])
 const total = computed(() => lastResp.value?.total || 0)
 
 const filteredResults = computed(() => {
-  const list = (lastResp.value?.results || []).slice()
+  const list = (lastResp.value?.candidates || []).slice()
   const filtered = list.filter(item => {
-    if (siteFilter.value && item.site !== siteFilter.value) return false
+    if (siteFilter.value && item.source !== siteFilter.value) return false
     if (formatFilter.value === 'lossless') {
-      return ['FLAC', 'ALAC', 'APE', 'WAV', 'DSD'].includes(item.media_format)
+      return ['FLAC', 'ALAC', 'APE', 'WAV', 'DSD'].includes(String(item.format || '').toUpperCase())
     }
     if (formatFilter.value === 'lossy') {
-      return ['MP3', 'AAC', 'M4A', 'OGG'].includes(item.media_format)
+      return ['MP3', 'AAC', 'M4A', 'OGG'].includes(String(item.format || '').toUpperCase())
     }
     return true
   })
@@ -45,15 +45,15 @@ async function handleSearch() {
   if (!keyword.value.trim()) return
   loading.value = true
   try {
-    const params = { keyword: keyword.value.trim(), type: searchType.value, quality: quality.value, limit: 80 }
+    const params = { keyword: keyword.value.trim(), type: searchType.value, quality: quality.value, limit: 80, include_pt: true, include_online: true }
     if (searchType.value === 'album') params.album = keyword.value.trim()
     if (searchType.value === 'artist') params.artist = keyword.value.trim()
-    lastResp.value = await searchMusicV2(params)
+    lastResp.value = await searchCandidates(params)
     cache.rememberPtSearch(keyword.value.trim(), {
       type: searchType.value,
       quality: quality.value,
       total: lastResp.value?.total || 0,
-      siteCount: lastResp.value?.sites?.length || 0,
+      siteCount: lastResp.value?.pt?.sites?.length || 0,
     })
   } catch (e) {
     console.error(e)
@@ -63,9 +63,16 @@ async function handleSearch() {
 }
 
 async function handleDownload(item) {
-  downloading.value = `${item.site}-${item.torrent_id}`
+  downloading.value = item.id
   try {
-    const res = await downloadTorrent(item.site, item.torrent_id, item.title)
+    let res
+    if (item.download_tool === 'download_online_song' || item.source_type === 'online') {
+      const args = item.download_args || {}
+      res = await downloadOnlineSong(args.song || item.raw || item, args.organize ?? true)
+    } else {
+      const args = item.download_args || {}
+      res = await downloadTorrent(args.site || item.source, args.torrent_id, args.title || item.title)
+    }
     alert(res.already_exists ? '任务已存在，跳过重复添加' : '已添加到下载任务')
   } catch (e) {
     alert(e.message || '下载失败')
@@ -87,6 +94,27 @@ function formatUploadTime(value) {
   const text = String(value).trim()
   const m = text.match(/^(\d{4}-\d{2}-\d{2})/)
   return m ? m[1] : text.slice(0, 16)
+}
+
+function candidateScore(item) {
+  return Math.round(Number(item.score || 0))
+}
+
+function scoreColor(item) {
+  const score = candidateScore(item)
+  return score >= 80 ? 'green' : (score >= 50 ? 'orange' : 'dim')
+}
+
+function sourceLabel(item) {
+  return item.source_type === 'online' ? `在线 · ${item.source}` : `PT · ${item.source}`
+}
+
+function candidateFormat(item) {
+  return item.format || item.media_format || '-'
+}
+
+function candidateKey(item) {
+  return item.id || `${item.source_type}-${item.source}-${item.title}`
 }
 
 function toggleSite(name) {
@@ -161,7 +189,7 @@ onMounted(() => {
     </div>
 
     <div v-if="lastResp" class="toolbar">
-      <div class="left">共 {{ filteredResults.length }} / {{ total }} 条</div>
+      <div class="left">共 {{ filteredResults.length }} / {{ total }} 条 <span v-if="lastResp?.pt || lastResp?.online" class="count-breakdown">PT {{ lastResp?.pt?.count || 0 }} · 在线 {{ lastResp?.online?.count || 0 }}</span></div>
       <div class="right">
         <select v-model="formatFilter" class="sel">
           <option value="all">全部格式</option>
@@ -196,24 +224,26 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in filteredResults" :key="`${item.site}-${item.torrent_id}`">
-              <td><AppBadge :color="item.score >= 80 ? 'green' : (item.score >= 50 ? 'orange' : 'dim')">{{ Math.round(item.score) }}</AppBadge></td>
+            <tr v-for="item in filteredResults" :key="candidateKey(item)">
+              <td><AppBadge :color="scoreColor(item)">{{ candidateScore(item) }}</AppBadge></td>
               <td class="title-cell">
                 <div class="title-text">{{ item.title }}</div>
+                <div v-if="item.artist || item.album" class="title-subtitle">{{ item.artist || '未知艺人' }}<span v-if="item.album"> · {{ item.album }}</span></div>
                 <div v-if="item.reasons?.length" class="title-reasons">{{ item.reasons.join(' · ') }}</div>
               </td>
-              <td class="text-dim">{{ item.media_format || '-' }}</td>
+              <td class="text-dim">{{ candidateFormat(item) }}</td>
               <td class="text-dim">{{ item.quality || '-' }}</td>
-              <td><AppBadge v-if="item.free" color="green">FREE</AppBadge></td>
-              <td class="text-dim">{{ item.site }}</td>
+              <td><AppBadge v-if="item.free" color="green">FREE</AppBadge><AppBadge v-else-if="item.source_type === 'online'" color="blue">在线</AppBadge></td>
+              <td class="text-dim">{{ sourceLabel(item) }}</td>
               <td class="text-dim">{{ formatSize(item.size) }}</td>
-              <td class="text-dim">{{ item.seeders ?? '-' }}</td>
+              <td class="text-dim">{{ item.source_type === 'pt' ? (item.seeders ?? '-') : '-' }}</td>
               <td class="text-dim">{{ formatUploadTime(item.upload_time) }}</td>
               <td>
                 <AppButton
                   variant="primary"
                   size="sm"
-                  :loading="downloading === `${item.site}-${item.torrent_id}`"
+                  :disabled="!item.downloadable"
+                  :loading="downloading === item.id"
                   @click="handleDownload(item)"
                 >下载</AppButton>
               </td>
@@ -223,17 +253,18 @@ onMounted(() => {
       </div>
 
       <div class="result-cards">
-        <article v-for="item in filteredResults" :key="`card-${item.site}-${item.torrent_id}`" class="result-card">
+        <article v-for="item in filteredResults" :key="`card-${candidateKey(item)}`" class="result-card">
           <div class="card-head">
             <h3>{{ item.title }}</h3>
-            <AppBadge :color="item.score >= 80 ? 'green' : (item.score >= 50 ? 'orange' : 'dim')">{{ Math.round(item.score) }}</AppBadge>
+            <AppBadge :color="scoreColor(item)">{{ candidateScore(item) }}</AppBadge>
           </div>
+          <div v-if="item.artist || item.album" class="title-subtitle">{{ item.artist || '未知艺人' }}<span v-if="item.album"> · {{ item.album }}</span></div>
           <div class="chip-row">
-            <span class="info-chip">{{ item.site || '-' }}</span>
-            <span class="info-chip">{{ item.media_format || '-' }}</span>
+            <span class="info-chip">{{ sourceLabel(item) }}</span>
+            <span class="info-chip">{{ candidateFormat(item) }}</span>
             <span class="info-chip">{{ item.quality || '-' }}</span>
             <span class="info-chip">{{ formatSize(item.size) }}</span>
-            <span class="info-chip">seed {{ item.seeders ?? '-' }}</span>
+            <span v-if="item.source_type === 'pt'" class="info-chip">seed {{ item.seeders ?? '-' }}</span>
             <span v-if="item.free" class="info-chip free">FREE</span>
           </div>
           <div v-if="item.reasons?.length" class="card-reasons">{{ item.reasons.join(' · ') }}</div>
@@ -242,7 +273,8 @@ onMounted(() => {
             <AppButton
               variant="primary"
               size="sm"
-              :loading="downloading === `${item.site}-${item.torrent_id}`"
+              :disabled="!item.downloadable"
+              :loading="downloading === item.id"
               @click="handleDownload(item)"
             >下载</AppButton>
           </div>
@@ -271,6 +303,7 @@ onMounted(() => {
 .queries { color: var(--text-muted); font-size: 12px; margin-left: 6px; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toolbar .left { color: var(--text-dim); font-size: 13px; }
+.count-breakdown { margin-left: 8px; color: var(--text-muted); }
 .toolbar .right { display: flex; gap: 8px; }
 .loading-text, .empty-text { color: var(--text-dim); padding: 20px 0; }
 .results-section { display: block; }
@@ -281,6 +314,7 @@ onMounted(() => {
 .results-table tr:hover td { background: var(--surface-hover); }
 .title-cell { max-width: 360px; }
 .title-text { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-subtitle { margin-top: 2px; font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title-reasons { margin-top: 2px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .result-cards { display: none; }
 .result-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); padding: 14px; }
