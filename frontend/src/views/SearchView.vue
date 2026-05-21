@@ -1,11 +1,14 @@
 <script setup>
-import { computed, onMounted, toRefs } from 'vue'
+import { computed, onMounted, ref, toRefs } from 'vue'
 import { searchCandidates, downloadTorrent, downloadOnlineSong } from '@/api/index.js'
 import { useSearchCacheStore } from '@/stores/searchCache.js'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
+import AppModal from '@/components/AppModal.vue'
 
 const cache = useSearchCacheStore()
+const selectedCandidate = ref(null)
+
 const {
   keyword,
   searchType,
@@ -155,6 +158,57 @@ function candidateFormat(item) {
 
 function candidateKey(item) {
   return item.id || `${item.source_type}-${item.source}-${item.title}`
+}
+
+function openCandidateDetail(item) {
+  selectedCandidate.value = item
+}
+
+function closeCandidateDetail() {
+  selectedCandidate.value = null
+}
+
+function copyCandidateJson() {
+  if (!selectedCandidate.value) return
+  const text = JSON.stringify(selectedCandidate.value, null, 2)
+  navigator.clipboard?.writeText(text)
+  downloadMessage.value = { type: 'success', text: '候选详情 JSON 已复制' }
+}
+
+function candidateDetailRows(item) {
+  if (!item) return []
+  const rows = [
+    ['候选 ID', item.id],
+    ['来源类型', sourceTypeLabel(item.source_type)],
+    ['来源', item.source],
+    ['标题', item.title],
+    ['艺人', item.artist],
+    ['专辑', item.album],
+    ['格式', candidateFormat(item)],
+    ['质量', item.quality],
+    ['评分', candidateScore(item)],
+    ['大小', formatSize(item.size)],
+    ['可下载', item.downloadable ? '是' : '否'],
+  ]
+  if (item.source_type === 'pt') {
+    rows.push(['做种', item.seeders ?? '-'], ['吸血', item.leechers ?? '-'], ['FREE', item.free ? '是' : '否'], ['上传时间', formatUploadTime(item.upload_time)])
+  } else {
+    rows.push(['时长', formatDuration(item.duration)], ['码率', item.bitrate ? `${item.bitrate} kbps` : '-'])
+  }
+  return rows.filter(([, value]) => value !== undefined && value !== null && value !== '')
+}
+
+function formatDuration(value) {
+  const seconds = Number(value || 0)
+  if (!seconds) return '-'
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function prettyJson(value) {
+  if (!value) return '{}'
+  return JSON.stringify(value, null, 2)
 }
 
 function downloadButtonText(item) {
@@ -336,6 +390,7 @@ onMounted(() => {
                   :loading="downloading === item.id"
                   @click="handleDownload(item)"
                 >{{ downloadButtonText(item) }}</AppButton>
+                <AppButton variant="ghost" size="sm" @click="openCandidateDetail(item)">详情</AppButton>
               </td>
             </tr>
           </tbody>
@@ -368,10 +423,58 @@ onMounted(() => {
               :loading="downloading === item.id"
               @click="handleDownload(item)"
             >{{ downloadButtonText(item) }}</AppButton>
+            <AppButton variant="ghost" size="sm" @click="openCandidateDetail(item)">详情</AppButton>
           </div>
         </article>
       </div>
     </div>
+
+
+    <AppModal v-if="selectedCandidate" title="候选详情" @close="closeCandidateDetail">
+      <div class="candidate-detail">
+        <div class="detail-head">
+          <div>
+            <div class="detail-title">{{ selectedCandidate.title }}</div>
+            <div class="detail-subtitle">{{ sourceLabel(selectedCandidate) }} · {{ candidateFormat(selectedCandidate) }} · {{ selectedCandidate.quality || '-' }}</div>
+          </div>
+          <AppBadge :color="scoreColor(selectedCandidate)">{{ candidateScore(selectedCandidate) }}</AppBadge>
+        </div>
+
+        <div class="detail-grid">
+          <div v-for="row in candidateDetailRows(selectedCandidate)" :key="row[0]" class="detail-row">
+            <span>{{ row[0] }}</span>
+            <strong>{{ row[1] }}</strong>
+          </div>
+        </div>
+
+        <div v-if="selectedCandidate.reasons?.length" class="detail-section">
+          <h4>评分 / 匹配原因</h4>
+          <div class="reason-list">
+            <span v-for="reason in selectedCandidate.reasons" :key="reason" class="info-chip">{{ reason }}</span>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h4>下载动作</h4>
+          <pre>{{ prettyJson({ tool: selectedCandidate.download_tool, args: selectedCandidate.download_args }) }}</pre>
+        </div>
+
+        <div class="detail-section">
+          <h4>原始字段</h4>
+          <pre>{{ prettyJson(selectedCandidate.raw || selectedCandidate) }}</pre>
+        </div>
+
+        <div class="detail-actions">
+          <AppButton variant="ghost" @click="copyCandidateJson">复制 JSON</AppButton>
+          <AppButton
+            variant="primary"
+            :disabled="!selectedCandidate.downloadable"
+            :loading="downloading === selectedCandidate.id"
+            @click="handleDownload(selectedCandidate)"
+          >{{ downloadButtonText(selectedCandidate) }}</AppButton>
+        </div>
+      </div>
+    </AppModal>
   </div>
 </template>
 
@@ -425,6 +528,21 @@ onMounted(() => {
 .info-chip.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
 .card-reasons { margin-top: 10px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 .card-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
+
+.candidate-detail { display: flex; flex-direction: column; gap: 16px; min-width: min(720px, 82vw); }
+.detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.detail-title { font-size: 16px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.detail-subtitle { margin-top: 4px; color: var(--text-dim); font-size: 13px; }
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.detail-row { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 9px 10px; background: var(--surface-soft); min-width: 0; }
+.detail-row span { display: block; color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }
+.detail-row strong { display: block; color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.detail-section { display: flex; flex-direction: column; gap: 8px; }
+.detail-section h4 { margin: 0; font-size: 13px; color: var(--text-dim); }
+.reason-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.detail-section pre { margin: 0; max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); color: var(--text-dim); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.detail-actions { display: flex; justify-content: flex-end; gap: 10px; position: sticky; bottom: -20px; padding-top: 10px; background: var(--card-bg); }
+
 @media (max-width: 768px) {
   .search-bar { flex-direction: column; align-items: stretch; }
   .search-input { min-width: 0; width: 100%; }
@@ -439,5 +557,8 @@ onMounted(() => {
   .search-view { padding: 16px; }
   .toolbar .right { flex-direction: column; }
   .card-footer { align-items: stretch; }
+  .detail-grid { grid-template-columns: 1fr; }
+  .candidate-detail { min-width: 0; }
+  .detail-actions { flex-direction: column; bottom: -14px; }
 }
 </style>
